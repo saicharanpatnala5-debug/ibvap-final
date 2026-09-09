@@ -1,0 +1,8 @@
+{
+  "name": "IBVAP FINAL",
+  "description": "Software-defined AI video analytics platform turning existing IP/CCTV cameras into intelligent surveillance with real-time detection, tracking, virtual-fence alerts, and ANPR.",
+  "requestFramePermissions": [],
+  "majorCapabilities": [
+    "MAJOR_CAPABILITY_SERVER_SIDE_GEMINI_API"
+  ]
+}
