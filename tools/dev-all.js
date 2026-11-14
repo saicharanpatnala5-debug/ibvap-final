@@ -1,22 +1,37 @@
 /**
  * IBVAP One-Command All-Services Orchestrator
  * Launches Gateway (Express + React), AI-Service (FastAPI), and Core-Service (Spring Boot 3)
- * concurrently with toolchain validation, health monitoring, and unified Ctrl+C teardown.
+ * concurrently with toolchain validation, auto-provisioning, health monitoring, and unified Ctrl+C teardown.
  */
 
 const { spawn, execSync } = require('child_process');
 const path = require('path');
 const fs = require('fs');
-const http = require('http');
 
 const ROOT_DIR = path.resolve(__dirname, '..');
 const AI_DIR = path.join(ROOT_DIR, 'ai-service');
 const CORE_DIR = path.join(ROOT_DIR, 'core-service');
 const GATEWAY_DIR = path.join(ROOT_DIR, 'gateway');
+const FRONTEND_DIR = path.join(ROOT_DIR, 'frontend');
 
 console.log('====================================================');
 console.log('      IBVAP POLYGLOT MULTI-SERVICE LAUNCHER        ');
 console.log('====================================================');
+
+// 0. Environment File Auto-Provisioning
+function ensureEnvFiles() {
+  const dirs = [ROOT_DIR, AI_DIR, CORE_DIR, GATEWAY_DIR, FRONTEND_DIR];
+  for (const d of dirs) {
+    const envFile = path.join(d, '.env');
+    const envExample = path.join(d, '.env.example');
+    if (!fs.existsSync(envFile) && fs.existsSync(envExample)) {
+      fs.copyFileSync(envExample, envFile);
+      const rel = path.relative(ROOT_DIR, d) || 'root';
+      console.log(`[Env Auto-Setup] Copied .env.example -> .env (${rel})`);
+    }
+  }
+}
+ensureEnvFiles();
 
 // 1. Toolchain verification
 function checkToolchain() {
@@ -24,7 +39,7 @@ function checkToolchain() {
   try {
     const nodeV = execSync('node -v').toString().trim();
     console.log(`  ✓ Node.js:  ${nodeV}`);
-  } catch (e) {
+  } catch {
     console.error('  ✗ Node.js is missing!');
   }
 
@@ -41,6 +56,23 @@ function checkToolchain() {
     try {
       const pyV = execSync('python --version').toString().trim();
       console.log(`  ✓ Python:   ${pyV} (global)`);
+      // Try to auto-create venv if missing
+      try {
+        console.log('[Setup] Creating ai-service/.venv from python...');
+        execSync(`python -m venv "${path.join(AI_DIR, '.venv')}"`, { cwd: AI_DIR, stdio: 'inherit' });
+        if (fs.existsSync(venvPython)) {
+          pythonCmd = venvPython;
+          const pipCmd = process.platform === 'win32'
+            ? path.join(AI_DIR, '.venv', 'Scripts', 'pip.exe')
+            : path.join(AI_DIR, '.venv', 'bin', 'pip');
+          if (fs.existsSync(path.join(AI_DIR, 'requirements.txt'))) {
+            console.log('[Setup] Installing requirements.txt into venv...');
+            execSync(`"${pipCmd}" install -r requirements.txt`, { cwd: AI_DIR, stdio: 'inherit' });
+          }
+        }
+      } catch (err) {
+        console.warn('  ! Automatic venv initialization skipped: ' + err.message);
+      }
     } catch {
       console.warn('  ! Python not found on global PATH. Ensure ai-service venv is configured.');
     }
@@ -118,11 +150,11 @@ if (fs.existsSync(uvicornCmd)) {
 const jarPath = path.join(CORE_DIR, 'target', 'core-service-0.1.0.jar');
 const envForCore = {
   JAVA_HOME: jdkHome,
-  PATH: `${path.join(jdkHome, 'bin')}${path.delimiter}${process.env.PATH}`,
+  PATH: `${path.join(jdkHome, 'bin')}${path.delimiter}${path.join(process.env.USERPROFILE || process.env.HOME || '', '.maven', 'apache-maven-3.9.9', 'bin')}${path.delimiter}${process.env.PATH}`,
 };
 
 if (fs.existsSync(jarPath)) {
-  startProcess('core-service', javaCmd, ['-jar', jarPath, '--server.port=8080'], CORE_DIR, envForCore);
+  startProcess('core-service', javaCmd, ['-jar', `"${jarPath}"`, '--server.port=8080'], CORE_DIR, envForCore);
 } else {
   const mvnwCmd = process.platform === 'win32' ? '.\\mvnw.cmd' : './mvnw';
   startProcess('core-service', mvnwCmd, ['spring-boot:run'], CORE_DIR, envForCore);
