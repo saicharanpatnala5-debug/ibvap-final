@@ -31,7 +31,7 @@ from app.services.low_light import compute_frame_luminance, apply_clahe_enhancem
 from app.config import settings
 
 
-def run_video_evaluation(video_path: str, detector: SurveillanceDetector) -> Dict[str, Any]:
+def run_video_evaluation(video_path: str, detector: SurveillanceDetector, max_frames: int = 0) -> Dict[str, Any]:
     cap = cv2.VideoCapture(video_path)
     if not cap.isOpened():
         print(f"Error: Could not open {video_path}")
@@ -51,6 +51,8 @@ def run_video_evaluation(video_path: str, detector: SurveillanceDetector) -> Dic
     start_eval_time = time.time()
 
     while cap.isOpened():
+        if max_frames > 0 and frame_idx >= max_frames:
+            break
         ret, frame = cap.read()
         if not ret or frame is None:
             break
@@ -156,6 +158,7 @@ def main():
     parser.add_argument("--samples", type=str, default="samples", help="Path to samples directory.")
     parser.add_argument("--out", type=str, default="tracking_eval_report.json", help="Output JSON results path.")
     parser.add_argument("--label", type=str, default="baseline", help="Evaluation label (e.g. baseline, tuned).")
+    parser.add_argument("--max-frames", type=int, default=0, help="Maximum frames to evaluate per clip (0 = all).")
     args = parser.parse_args()
 
     # Look in samples/ or ../samples/
@@ -180,9 +183,9 @@ def main():
     results = []
 
     for vpath in video_files:
-        print(f"Evaluating: {os.path.basename(vpath)} ...", end="", flush=True)
-        res = run_video_evaluation(vpath, detector)
-        print(" Done!")
+        print(f"Evaluating: {os.path.basename(vpath)} ...", flush=True)
+        res = run_video_evaluation(vpath, detector, max_frames=args.max_frames)
+        print(f" Done ({res.get('frames', 0)} frames)!")
         if res and "file" in res:
             results.append(res)
 

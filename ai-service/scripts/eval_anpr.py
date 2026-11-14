@@ -1,26 +1,34 @@
 """
-IBVAP ANPR Evaluation Benchmark
-Measures Exact Match %, Character Error Rate (CER %), and Format Validity %
-across Indian and Bharat series vehicle license plates.
+IBVAP ANPR Comprehensive Benchmark Evaluator
+Evaluates RapidOCR + post-processing on the 220+ synthetic license plate dataset
+(Clean, Blur, Noise, Perspective, Low-Light) and outputs detailed metrics:
+- Exact Match %
+- Character Error Rate (CER %)
+- Format Validity %
+- Category-wise Breakdown
+- Inference Latency (ms)
 """
 
 import os
 import sys
+import csv
 import json
 import time
 import cv2
 import numpy as np
 
-# Ensure ai-service root is on sys.path
 SCRIPT_DIR = os.path.dirname(os.path.abspath(__file__))
 AI_SERVICE_DIR = os.path.dirname(SCRIPT_DIR)
+ROOT_DIR = os.path.dirname(AI_SERVICE_DIR)
+SYNTHETIC_DIR = os.path.join(ROOT_DIR, "samples/synthetic_plates")
+OUTPUT_JSON = os.path.join(ROOT_DIR, "samples/anpr_synthetic_benchmark.json")
+
 if AI_SERVICE_DIR not in sys.path:
     sys.path.insert(0, AI_SERVICE_DIR)
 
 from app.services.anpr import (
     preprocess_plate_crop,
     PlateValidator,
-    ANPRResult,
 )
 
 
@@ -44,85 +52,25 @@ def levenshtein_distance(s1: str, s2: str) -> int:
     return previous_row[-1]
 
 
-def generate_benchmark_plate_crops(output_dir: str) -> list[dict]:
-    """Generates synthetic high-contrast Indian license plate crops for evaluation."""
-    os.makedirs(output_dir, exist_ok=True)
-
-    benchmark_samples = [
-        {"plate": "DL01AB1234", "type": "standard", "state": "DL"},
-        {"plate": "MH12CD5678", "type": "standard", "state": "MH"},
-        {"plate": "KA04E9999", "type": "standard", "state": "KA"},
-        {"plate": "UP16BC9999", "type": "standard", "state": "UP"},
-        {"plate": "HR26DK8821", "type": "standard", "state": "HR"},
-        {"plate": "22BH1234AA", "type": "bharat", "state": "BH"},
-        {"plate": "TN09AZ4321", "type": "standard", "state": "TN"},
-        {"plate": "GJ01XY5555", "type": "standard", "state": "GJ"},
-    ]
-
-    generated = []
-    for item in benchmark_samples:
-        text = item["plate"]
-        filename = f"{text}.png"
-        filepath = os.path.join(output_dir, filename)
-
-        # Generate a standard Indian HSRP plate image: white background, black bold text, blue IND strip on left
-        img_w, img_h = 320, 80
-        img = np.ones((img_h, img_w, 3), dtype=np.uint8) * 248  # Off-white
-
-        # Outer border
-        cv2.rectangle(img, (2, 2), (img_w - 3, img_h - 3), (30, 30, 30), 2)
-        # Blue IND band on left
-        cv2.rectangle(img, (4, 4), (32, img_h - 4), (180, 80, 0), -1)  # Blue in BGR
-        cv2.putText(img, "IND", (6, 45), cv2.FONT_HERSHEY_SIMPLEX, 0.35, (255, 255, 255), 1, cv2.LINE_AA)
-
-        # Main license text
-        font = cv2.FONT_HERSHEY_SIMPLEX
-        font_scale = 1.15
-        thickness = 3
-        # Center text horizontally
-        text_size = cv2.getTextSize(text, font, font_scale, thickness)[0]
-        tx = max(42, int((img_w - text_size[0] + 30) / 2))
-        ty = int((img_h + text_size[1]) / 2) - 2
-
-        cv2.putText(img, text, (tx, ty), font, font_scale, (15, 15, 15), thickness, cv2.LINE_AA)
-
-        # Mild realistic sensor noise
-        noise = np.random.normal(0, 4, img.shape).astype(np.uint8)
-        img = cv2.add(img, noise)
-
-        cv2.imwrite(filepath, img)
-        generated.append({
-            "path": filepath,
-            "filename": filename,
-            "ground_truth": text,
-            "type": item["type"],
-        })
-
-    return generated
-
-
-def run_anpr_evaluation(samples_dir: str = os.path.normpath(os.path.join(AI_SERVICE_DIR, "../samples/plates"))):
+def run_synthetic_anpr_benchmark():
     print(f"\n=======================================================")
-    print(f"      IBVAP ANPR ACCURACY BENCHMARK EVALUATOR          ")
+    print(f"   IBVAP 220-SAMPLE SYNTHETIC ANPR BENCHMARK EVALUATOR  ")
     print(f"=======================================================")
 
-    if not os.path.exists(samples_dir) or len(os.listdir(samples_dir)) == 0:
-        print(f"Directory '{samples_dir}' empty or not found. Synthesizing realistic benchmark plates...")
-        samples = generate_benchmark_plate_crops(samples_dir)
-    else:
-        # Load existing images
-        samples = []
-        for fname in os.listdir(samples_dir):
-            if fname.lower().endswith(('.png', '.jpg', '.jpeg')):
-                # Extract ground truth from filename without extension
-                gt = os.path.splitext(fname)[0].upper().replace(" ", "").replace("-", "")
-                samples.append({
-                    "path": os.path.join(samples_dir, fname),
-                    "filename": fname,
-                    "ground_truth": gt,
-                })
+    labels_csv = os.path.join(SYNTHETIC_DIR, "labels.csv")
+    if not os.path.exists(labels_csv):
+        print(f"Synthetic dataset not found at {SYNTHETIC_DIR}. Generating now...")
+        from generate_synthetic_plates import generate_benchmark_dataset
+        generate_benchmark_dataset(target_count=220)
 
-    print(f"Total benchmark test samples: {len(samples)}\n")
+    # Load records from labels.csv
+    records = []
+    with open(labels_csv, "r", newline="") as f:
+        reader = csv.DictReader(f)
+        for row in reader:
+            records.append(row)
+
+    print(f"Loaded {len(records)} SYNTHETIC plate benchmark samples.\n")
 
     # Initialize RapidOCR engine
     ocr = None
@@ -131,110 +79,129 @@ def run_anpr_evaluation(samples_dir: str = os.path.normpath(os.path.join(AI_SERV
         ocr = RapidOCR()
         print("RapidOCR engine: LOADED (rapidocr_onnxruntime)")
     except Exception as e:
-        print(f"Warning: RapidOCR could not be loaded ({e}). Evaluation will test preprocessing pipeline.")
+        print(f"Error loading RapidOCR: {e}")
+        return
 
-    results = []
-    total_gt_chars = 0
-    total_edit_distance = 0
-    exact_matches = 0
-    valid_format_matches = 0
-    latencies = []
+    # Category trackers: category -> { "total": n, "exact": n, "valid": n, "total_ed": n, "total_chars": n, "latencies": [] }
+    cat_stats = {}
+    total_samples = len(records)
+    overall_exact = 0
+    overall_valid = 0
+    overall_ed = 0
+    overall_chars = 0
+    all_latencies = []
 
-    for item in samples:
-        t0 = time.perf_counter()
-        img = cv2.imread(item["path"])
+    print(f"Running OCR evaluation across all 220 samples...")
+
+    for idx, rec in enumerate(records, 1):
+        cat = rec["category"]
+        gt = rec["ground_truth"].upper().replace(" ", "").replace("-", "")
+        img_path = os.path.join(SYNTHETIC_DIR, rec["filename"])
+
+        if cat not in cat_stats:
+            cat_stats[cat] = {
+                "total": 0,
+                "exact": 0,
+                "valid": 0,
+                "total_ed": 0,
+                "total_chars": 0,
+                "latencies": [],
+            }
+
+        img = cv2.imread(img_path)
         if img is None:
             continue
 
+        t0 = time.perf_counter()
         prep = preprocess_plate_crop(img)
 
         raw_pred = ""
-        conf = 0.0
+        try:
+            ocr_out, _ = ocr(prep)
+            if ocr_out:
+                raw_pred = "".join([line[1] for line in ocr_out])
+        except Exception:
+            pass
 
-        if ocr is not None:
-            try:
-                ocr_out, _ = ocr(prep)
-                if ocr_out:
-                    # Collect text across lines
-                    all_text = "".join([line[1] for line in ocr_out])
-                    raw_pred = all_text
-                    conf = max([float(line[2]) * 100 for line in ocr_out])
-            except Exception as ocr_err:
-                print(f"OCR error on {item['filename']}: {ocr_err}")
-
-        # Post-processing: clean and apply position-aware correction
         cleaned = PlateValidator.clean_text(raw_pred)
         corrected = PlateValidator.position_aware_correction(cleaned)
         is_valid, ftype, vstatus = PlateValidator.validate(corrected)
 
         elapsed_ms = (time.perf_counter() - t0) * 1000
-        latencies.append(elapsed_ms)
+        all_latencies.append(elapsed_ms)
 
-        gt = item["ground_truth"]
         ed = levenshtein_distance(gt, corrected)
         is_exact = (gt == corrected)
 
+        cat_stats[cat]["total"] += 1
+        cat_stats[cat]["latencies"].append(elapsed_ms)
+        cat_stats[cat]["total_chars"] += len(gt)
+        cat_stats[cat]["total_ed"] += ed
         if is_exact:
-            exact_matches += 1
+            cat_stats[cat]["exact"] += 1
+            overall_exact += 1
         if is_valid:
-            valid_format_matches += 1
+            cat_stats[cat]["valid"] += 1
+            overall_valid += 1
 
-        total_gt_chars += len(gt)
-        total_edit_distance += ed
+        overall_ed += ed
+        overall_chars += len(gt)
 
-        results.append({
-            "filename": item["filename"],
-            "ground_truth": gt,
-            "raw_ocr": raw_pred,
-            "corrected": corrected,
-            "is_exact_match": is_exact,
-            "edit_distance": ed,
-            "is_valid_format": is_valid,
-            "format_type": ftype,
-            "confidence": round(conf, 1),
-            "latency_ms": round(elapsed_ms, 2),
-        })
+    overall_exact_pct = (overall_exact / total_samples) * 100.0 if total_samples else 0.0
+    overall_cer_pct = (overall_ed / overall_chars) * 100.0 if overall_chars else 0.0
+    overall_valid_pct = (overall_valid / total_samples) * 100.0 if total_samples else 0.0
+    avg_latency = float(np.mean(all_latencies)) if all_latencies else 0.0
 
-    num_samples = len(results)
-    exact_match_pct = (exact_matches / num_samples * 100) if num_samples > 0 else 0.0
-    cer_pct = (total_edit_distance / total_gt_chars * 100) if total_gt_chars > 0 else 0.0
-    valid_format_pct = (valid_format_matches / num_samples * 100) if num_samples > 0 else 0.0
-    avg_latency = float(np.mean(latencies)) if latencies else 0.0
+    print("\n" + "=" * 80)
+    print(f"{'Category':<16} | {'Samples':<8} | {'Exact Match %':<15} | {'CER %':<10} | {'Format Valid %':<16} | {'Latency':<8}")
+    print("-" * 80)
 
-    print("-" * 78)
-    print(f"{'IMAGE':<16} | {'GROUND TRUTH':<12} | {'PREDICTED':<12} | {'MATCH':<5} | {'CER':<4} | {'LATENCY':<8}")
-    print("-" * 78)
-    for r in results:
-        status_str = "PASS" if r["is_exact_match"] else "FAIL"
-        print(f"{r['filename'][:16]:<16} | {r['ground_truth']:<12} | {r['corrected']:<12} | {status_str:<5} | {r['edit_distance']:<4} | {r['latency_ms']:.1f}ms")
-    print("-" * 78)
+    category_results = {}
+    for cat, s in sorted(cat_stats.items()):
+        cat_exact_pct = (s["exact"] / s["total"]) * 100.0 if s["total"] else 0.0
+        cat_cer_pct = (s["total_ed"] / s["total_chars"]) * 100.0 if s["total_chars"] else 0.0
+        cat_valid_pct = (s["valid"] / s["total"]) * 100.0 if s["total"] else 0.0
+        cat_lat = float(np.mean(s["latencies"])) if s["latencies"] else 0.0
 
-    summary = {
-        "total_samples": num_samples,
-        "exact_matches": exact_matches,
-        "exact_match_pct": round(exact_match_pct, 2),
-        "total_gt_characters": total_gt_chars,
-        "total_character_errors": total_edit_distance,
-        "character_error_rate_pct": round(cer_pct, 2),
-        "valid_format_pct": round(valid_format_pct, 2),
+        category_results[cat] = {
+            "samples": s["total"],
+            "exact_matches": s["exact"],
+            "exact_match_pct": round(cat_exact_pct, 2),
+            "cer_pct": round(cat_cer_pct, 2),
+            "format_valid_pct": round(cat_valid_pct, 2),
+            "avg_latency_ms": round(cat_lat, 2),
+        }
+
+        print(
+            f"{cat.upper():<16} | {s['total']:<8} | {cat_exact_pct:>13.2f}% | "
+            f"{cat_cer_pct:>8.2f}% | {cat_valid_pct:>14.2f}% | {cat_lat:>6.1f}ms"
+        )
+
+    print("=" * 80)
+    print(
+        f"{'OVERALL SYNTHETIC':<16} | {total_samples:<8} | {overall_exact_pct:>13.2f}% | "
+        f"{overall_cer_pct:>8.2f}% | {overall_valid_pct:>14.2f}% | {avg_latency:>6.1f}ms"
+    )
+    print("=" * 80 + "\n")
+
+    summary_payload = {
+        "dataset": "synthetic_plates_220",
+        "is_synthetic": True,
+        "timestamp": int(time.time()),
+        "total_samples": total_samples,
+        "overall_exact_match_pct": round(overall_exact_pct, 2),
+        "overall_cer_pct": round(overall_cer_pct, 2),
+        "overall_format_valid_pct": round(overall_valid_pct, 2),
         "avg_latency_ms": round(avg_latency, 2),
-        "results": results,
+        "category_breakdown": category_results,
     }
 
-    print("\nBENCHMARK RESULTS SUMMARY:")
-    print(f"  Exact Match Accuracy:      {exact_match_pct:.2f}% ({exact_matches}/{num_samples})")
-    print(f"  Character Error Rate (CER): {cer_pct:.2f}% ({total_edit_distance}/{total_gt_chars} errors)")
-    print(f"  Valid Format Compliance:   {valid_format_pct:.2f}%")
-    print(f"  Average Processing Time:   {avg_latency:.2f} ms per plate")
-    print(f"=======================================================\n")
+    with open(OUTPUT_JSON, "w") as f:
+        json.dump(summary_payload, f, indent=2)
 
-    output_json_path = os.path.join(AI_SERVICE_DIR, "../samples/anpr_eval_results.json")
-    with open(output_json_path, "w") as f:
-        json.dump(summary, f, indent=2)
-    print(f"Evaluation report saved to: {output_json_path}")
-
-    return summary
+    print(f"Results saved to: {OUTPUT_JSON}\n")
+    return summary_payload
 
 
 if __name__ == "__main__":
-    run_anpr_evaluation()
+    run_synthetic_anpr_benchmark()

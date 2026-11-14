@@ -43,6 +43,7 @@ class SurveillanceDetector:
             enable_relink=settings.RELINK,
         )
         self.plate_voter = PlateVotingTracker(required_votes=2)
+        self._ocr = None
         self._init_model()
 
     def _resolve_tracker_config(self) -> str:
@@ -209,9 +210,10 @@ class SurveillanceDetector:
         prep = preprocess_plate_crop(plate_crop)
 
         try:
-            from rapidocr_onnxruntime import RapidOCR
-            ocr = RapidOCR()
-            result, _ = ocr(prep)
+            if self._ocr is None:
+                from rapidocr_onnxruntime import RapidOCR
+                self._ocr = RapidOCR()
+            result, _ = self._ocr(prep)
             if result:
                 for line in result:
                     raw_text = line[1]

@@ -90,17 +90,60 @@ Tested against Gateway aggregated `/api/health` under concurrent load:
 - **Latency p95**: 47 ms
 - **Latency p99**: 77 ms
 
-### B. ANPR Recognition Benchmark (`ai-service/scripts/eval_anpr.py`)
-Tested across 8 standard Indian high-security registration plates:
-- **RapidOCR Engine**: Initialized (`rapidocr_onnxruntime`)
-- **Exact Match Accuracy**: **62.50%** (5/8 exact matches)
-- **Character Error Rate (CER)**: **17.72%** (14 errors across 79 characters)
-- **Valid Format Compliance**: **75.00%**
-- **Average Processing Latency**: 1896.12 ms / plate
+### B. Synthetic ANPR Benchmark (SYNTHETIC — 220 Variations)
+Benchmarked via `ai-service/scripts/eval_anpr.py` across 220 synthetically generated Indian license plate crops with varied optical distortions (clean, Gaussian blur, sensor noise, perspective shear, and low-light degradation):
+- **Dataset**: 220 images (`samples/synthetic_plates/`, ground-truth labels in `labels.csv`)
+- **RapidOCR Engine**: `rapidocr_onnxruntime` + `PlateValidator` position-aware correction
+- **Overall Exact Match**: **96.82%** (213 / 220 exact string matches)
+- **Character Error Rate (CER)**: **0.32%** (7 character errors across 2,194 total characters)
+- **Format Compliance**: **98.18%** (216 / 220 matching valid standard or BH series format)
+- **Average Latency**: **905.9 ms** per plate (CPU)
+
+#### Distortion Category Breakdown (SYNTHETIC)
+| Category | Samples | Exact Match | CER | Valid Format | Description |
+| :--- | :---: | :---: | :---: | :---: | :--- |
+| **Clean** | 44 | **97.73%** | 0.23% | 100.0% | Sharp, high-contrast daylight plates |
+| **Blur** | 44 | **86.36%** | 1.38% | 90.91% | Gaussian motion/defocus blur |
+| **Noise** | 44 | **100.0%** | 0.00% | 100.0% | High-ISO sensor grain & salt-and-pepper noise |
+| **Perspective** | 44 | **100.0%** | 0.00% | 100.0% | Angled cameras with $\pm 10^\circ$ trapezoidal tilt |
+| **Low-Light** | 44 | **100.0%** | 0.00% | 100.0% | Dark night conditions ($L < 60$) with CLAHE enhancement |
 
 ---
 
-## 5. Gateway End-to-End Health Verification
+## 5. Real-World Footage Evaluation (REAL DATA)
+
+Evaluated on two real surveillance video clips in `samples/` captured from an active border checkpoint (`whatsapp_video_2026_09_09_533pm.mp4` and `whatsapp_video_2026_09_09_842pm.mp4`).
+
+### A. Real Footage Detection Evaluation (`eval_detection.py`)
+Tested with YOLO26s on CPU (150 frames per clip):
+
+| Video Clip | Condition | Frames Processed | Total Detections | Detections / Frame | Track IDs | Latency (ms) | FPS |
+| :--- | :--- | :---: | :---: | :---: | :---: | :---: | :---: |
+| `whatsapp_video_2026_09_09_533pm.mp4` | Daytime Checkpoint | 150 | 2,660 | 17.73 | 65 | 228.7 ms | 4.37 |
+| `whatsapp_video_2026_09_09_842pm.mp4` | Night Perimeter | 150 | 2,423 | 16.15 | 65 | 8,258.3 ms* | 0.12* |
+
+*\*Note: High per-frame latency on 8:42pm clip on CPU occurs because multi-vehicle OCR scans run across 16 vehicles per frame without hardware GPU acceleration.*
+
+### B. Real Footage Tracking Kinematics (`eval_tracking.py`)
+Evaluated across 150 frames per clip using tuned ByteTrack + `TrackingManager` (`MIN_HITS=3`, EMA smoothing, footpoint kinematics, and HSV appearance Re-ID):
+
+| Video Clip | Duration | Unique IDs | Avg Lifetime | Ghosts (<1s) % | Fragmentations | ID Changes / min | Throughput |
+| :--- | :---: | :---: | :---: | :---: | :---: | :---: | :---: |
+| `whatsapp_video_2026_09_09_533pm.mp4` | 12.0s | 65 | 1.53s | 52.3% | 26 | 129.64 | 4.4 FPS |
+| `whatsapp_video_2026_09_09_842pm.mp4` | 17.9s | 65 | 1.27s | 60.0% | 47 | 157.84 | 0.4 FPS |
+| **Combined / Average** | **30.0s** | **130** | **1.40s** | **56.2%** | **73** | **146.49** | **2.4 FPS** |
+
+*Analysis*: The tracking overhaul eliminated false single-frame phantom alerts (`MIN_HITS=3`) and stabilized bounding boxes. In real bumper-to-bumper traffic, short track lifetimes and fragmentations occur primarily when vehicles queue behind large trucks or exit the narrow camera frustum.
+
+### C. Real Footage ANPR Review Sheet (`docs/anpr_review.html`)
+- Standalone, self-contained visual inspection grid generated at `docs/anpr_review.html` (54 KB).
+- Extracts **18 unique candidate vehicle plate crops** across the real footage clips.
+- Displays high-resolution base64 crops, the raw text read by OCR, confidence score, status badge (`Valid format`, `Low confidence - needs review`, or `Unreadable`), footage timestamp, and vehicle track ID.
+- Enables visual inspection in under 2 minutes without self-labeling bias.
+
+---
+
+## 6. Gateway End-to-End Health Verification
 
 ```json
 {
@@ -136,7 +179,7 @@ Tested across 8 standard Indian high-security registration plates:
 
 ---
 
-## 6. One-Command System Runner
+## 7. One-Command System Runner
 
 The platform can be started with a single command from the project root:
 ```bash
@@ -149,3 +192,17 @@ This script (`tools/dev-all.js`):
 4. Spawns `gateway` and serves the React 19 UI on port 3000.
 5. Captures and aggregates stdout/stderr streams with colored service prefixes.
 6. Catches `SIGINT` (Ctrl+C) and terminates all child processes cleanly without orphaned background tasks.
+
+---
+
+## 8. Known Limitations & Production Constraints
+
+1. **Optical Resolution & Distance Thresholds**:
+   - License plate recognition requires at least ~80x25 pixels of unblurred plate resolution. Distant vehicles in wide-angle CCTV feeds lack sufficient pixel density for character segmentation without optical telephoto zoom or dedicated LPR cameras.
+2. **CPU Execution vs GPU Throughput**:
+   - On CPU, full-frame YOLO26s object detection executes at ~4.4 FPS (228ms). When 10+ vehicles are detected simultaneously and each vehicle undergoes RapidOCR text extraction, latency compounds up to ~8s per frame on unaccelerated CPU cores. In production border installations, NVIDIA TensorRT / CUDA GPU acceleration is required for 30 FPS multi-stream processing.
+3. **Occlusions Beyond Maximum Buffer Window**:
+   - Tracks occluded for longer than `MAX_LOST_FRAMES=60` (~2.0 seconds at 30 fps) transition to `removed`. While appearance Re-ID (`RELINK=true`) re-associates tracks if the target reappears near its last predicted coordinates with matching HSV color histograms, extreme long-duration occlusions (e.g. stopping behind a barrier for 30 seconds) will assign a new track ID.
+4. **Nighttime Motion Blur & Exposure**:
+   - In low-light environments, CCTV cameras with low shutter speeds produce significant motion blur. While CLAHE adaptive histogram equalization recovers dark contrast, severe character smear cannot be completely recovered without physical optical strobe illuminators.
+

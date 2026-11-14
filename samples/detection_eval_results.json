@@ -3,26 +3,26 @@
   "device": "cpu",
   "videos_evaluated": [
     {
-      "video_name": "crossing_paths_occlusion.mp4",
+      "video_name": "whatsapp_video_2026_09_09_533pm.mp4",
       "frames_processed": 150,
       "detected_frames": 148,
-      "total_detections": 277,
-      "avg_detections_per_frame": 1.85,
-      "unique_track_ids": 2,
-      "avg_latency_ms": 26017.36,
-      "inference_fps": 0.04,
-      "debug_frames_dir": "C:\\Users\\SAI CHARAN\\.gemini\\antigravity\\scratch\\ibvap-final\\samples\\debug_detections\\crossing_paths_occlusion"
+      "total_detections": 2660,
+      "avg_detections_per_frame": 17.73,
+      "unique_track_ids": 65,
+      "avg_latency_ms": 228.69,
+      "inference_fps": 4.37,
+      "debug_frames_dir": "C:\\Users\\SAI CHARAN\\.gemini\\antigravity\\scratch\\ibvap-final\\samples\\debug_detections\\whatsapp_video_2026_09_09_533pm"
     },
     {
-      "video_name": "night_perimeter_motion.mp4",
+      "video_name": "whatsapp_video_2026_09_09_842pm.mp4",
       "frames_processed": 150,
-      "detected_frames": 99,
-      "total_detections": 104,
-      "avg_detections_per_frame": 0.69,
-      "unique_track_ids": 3,
-      "avg_latency_ms": 229.86,
-      "inference_fps": 4.35,
-      "debug_frames_dir": "C:\\Users\\SAI CHARAN\\.gemini\\antigravity\\scratch\\ibvap-final\\samples\\debug_detections\\night_perimeter_motion"
+      "detected_frames": 147,
+      "total_detections": 2423,
+      "avg_detections_per_frame": 16.15,
+      "unique_track_ids": 65,
+      "avg_latency_ms": 8258.27,
+      "inference_fps": 0.12,
+      "debug_frames_dir": "C:\\Users\\SAI CHARAN\\.gemini\\antigravity\\scratch\\ibvap-final\\samples\\debug_detections\\whatsapp_video_2026_09_09_842pm"
     }
   ]
 }

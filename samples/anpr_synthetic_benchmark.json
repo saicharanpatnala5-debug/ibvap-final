@@ -1,0 +1,52 @@
+{
+  "dataset": "synthetic_plates_220",
+  "is_synthetic": true,
+  "timestamp": 1794681733,
+  "total_samples": 220,
+  "overall_exact_match_pct": 96.82,
+  "overall_cer_pct": 0.32,
+  "overall_format_valid_pct": 98.18,
+  "avg_latency_ms": 905.94,
+  "category_breakdown": {
+    "blur": {
+      "samples": 44,
+      "exact_matches": 38,
+      "exact_match_pct": 86.36,
+      "cer_pct": 1.38,
+      "format_valid_pct": 93.18,
+      "avg_latency_ms": 952.71
+    },
+    "clean": {
+      "samples": 44,
+      "exact_matches": 43,
+      "exact_match_pct": 97.73,
+      "cer_pct": 0.23,
+      "format_valid_pct": 97.73,
+      "avg_latency_ms": 922.02
+    },
+    "low_light": {
+      "samples": 44,
+      "exact_matches": 44,
+      "exact_match_pct": 100.0,
+      "cer_pct": 0.0,
+      "format_valid_pct": 100.0,
+      "avg_latency_ms": 877.39
+    },
+    "noise": {
+      "samples": 44,
+      "exact_matches": 44,
+      "exact_match_pct": 100.0,
+      "cer_pct": 0.0,
+      "format_valid_pct": 100.0,
+      "avg_latency_ms": 914.91
+    },
+    "perspective": {
+      "samples": 44,
+      "exact_matches": 44,
+      "exact_match_pct": 100.0,
+      "cer_pct": 0.0,
+      "format_valid_pct": 100.0,
+      "avg_latency_ms": 862.65
+    }
+  }
+}
