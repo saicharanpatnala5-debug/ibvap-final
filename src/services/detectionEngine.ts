@@ -70,7 +70,8 @@ function getCachedCanvas(type: 'sq' | 'roi' | 'lum', width: number, height: numb
 export function analyzeFrameLuminance(
   ctx: CanvasRenderingContext2D,
   width: number,
-  height: number
+  height: number,
+  lowLightThreshold = 55
 ): { isNight: boolean; averageLuminance: number } {
   try {
     // Sample a sparse grid of pixels for ultra-fast execution (~0.1ms)
@@ -94,9 +95,8 @@ export function analyzeFrameLuminance(
     }
 
     const avg = count > 0 ? totalLuminance / count : 128;
-    // Low light threshold: below 50 out of 255 is night / low-light context
     return {
-      isNight: avg < 50,
+      isNight: avg < lowLightThreshold,
       averageLuminance: Math.round(avg),
     };
   } catch {
@@ -107,17 +107,25 @@ export function analyzeFrameLuminance(
 export function enhanceNightCanvas(
   ctx: CanvasRenderingContext2D,
   width: number,
-  height: number
+  height: number,
+  options?: {
+    gamma?: number;
+    contrast?: number;
+    brightnessOffset?: number;
+  }
 ) {
+  const gamma = options?.gamma ?? 0.75;
+  const contrast = options?.contrast ?? 1.25;
+  const offset = options?.brightnessOffset ?? 10;
+
   try {
     const imgData = ctx.getImageData(0, 0, width, height);
     const d = imgData.data;
-    // Apply contrast stretch and gamma curve for low-light object silhouettes
+    // Apply contrast stretch, brightness offset, and gamma curve for low-light object silhouettes
     for (let i = 0; i < d.length; i += 4) {
-      // Gamma boost
-      d[i] = Math.min(255, Math.pow(d[i] / 255, 0.75) * 255 * 1.25);
-      d[i + 1] = Math.min(255, Math.pow(d[i + 1] / 255, 0.75) * 255 * 1.25);
-      d[i + 2] = Math.min(255, Math.pow(d[i + 2] / 255, 0.75) * 255 * 1.25);
+      d[i] = Math.min(255, Math.max(0, Math.pow(d[i] / 255, gamma) * 255 * contrast + offset));
+      d[i + 1] = Math.min(255, Math.max(0, Math.pow(d[i + 1] / 255, gamma) * 255 * contrast + offset));
+      d[i + 2] = Math.min(255, Math.max(0, Math.pow(d[i + 2] / 255, gamma) * 255 * contrast + offset));
     }
     ctx.putImageData(imgData, 0, 0);
   } catch {
@@ -418,41 +426,55 @@ let cachedInferenceCanvas: HTMLCanvasElement | null = null;
 export async function performSurveillanceInference(
   model: cocoSsd.ObjectDetection,
   video: HTMLVideoElement,
-  isNightMode: boolean
+  isNightMode: boolean,
+  options?: {
+    scoreThreshold?: number;
+    nightGamma?: number;
+    nightContrast?: number;
+    nightBrightness?: number;
+  }
 ): Promise<RawDetection[]> {
   const vW = video.videoWidth;
   const vH = video.videoHeight;
   if (!vW || !vH || video.readyState < 2) return [];
 
-  const rawDetections: RawDetection[] = [];
-
-  // Optimal resolution for MobileNet CCTV surveillance:
-  // 576px wide preserving exact native aspect ratio prevents both horizontal compression and coordinate drift.
-  const targetW = 576;
-  const targetH = Math.max(288, Math.round(targetW * (vH / vW)));
-
-  if (!cachedInferenceCanvas) {
-    cachedInferenceCanvas = document.createElement('canvas');
-  }
-  if (cachedInferenceCanvas.width !== targetW || cachedInferenceCanvas.height !== targetH) {
-    cachedInferenceCanvas.width = targetW;
-    cachedInferenceCanvas.height = targetH;
-  }
-
-  const ctx = cachedInferenceCanvas.getContext('2d', { willReadFrequently: true });
-  if (!ctx) return [];
-
-  // Draw clean full frame preserving 100% of native aspect ratio
-  ctx.drawImage(video, 0, 0, targetW, targetH);
-
-  // Night-aware processing: apply contrast stretch & gamma curve to bring out dark objects
-  if (isNightMode) {
-    enhanceNightCanvas(ctx, targetW, targetH);
-  }
+  // Scoped tensor memory management: prevents WebGL and CPU tensor leaks across long CCTV sessions
+  tf.engine().startScope();
 
   try {
-    // Run detection on clean full frame
-    const preds = await model.detect(cachedInferenceCanvas, 40, 0.16);
+    const rawDetections: RawDetection[] = [];
+
+    // Optimal resolution for MobileNet CCTV surveillance:
+    // 576px wide preserving exact native aspect ratio prevents both horizontal compression and coordinate drift.
+    const targetW = 576;
+    const targetH = Math.max(288, Math.min(1024, Math.round(targetW * (vH / vW))));
+
+    if (!cachedInferenceCanvas) {
+      cachedInferenceCanvas = document.createElement('canvas');
+    }
+    if (cachedInferenceCanvas.width !== targetW || cachedInferenceCanvas.height !== targetH) {
+      cachedInferenceCanvas.width = targetW;
+      cachedInferenceCanvas.height = targetH;
+    }
+
+    const ctx = cachedInferenceCanvas.getContext('2d', { willReadFrequently: true });
+    if (!ctx) return [];
+
+    // Draw clean full frame preserving 100% of native aspect ratio
+    ctx.drawImage(video, 0, 0, targetW, targetH);
+
+    // Night-aware processing: apply contrast stretch & gamma curve to bring out dark objects
+    if (isNightMode) {
+      enhanceNightCanvas(ctx, targetW, targetH, {
+        gamma: options?.nightGamma,
+        contrast: options?.nightContrast,
+        brightnessOffset: options?.nightBrightness,
+      });
+    }
+
+    // Configurable score threshold: adaptively lower for low-light/night footage
+    const scoreThreshold = options?.scoreThreshold ?? (isNightMode ? 0.14 : 0.18);
+    const preds = await model.detect(cachedInferenceCanvas, 40, scoreThreshold);
 
     for (const pred of preds) {
       const objClass = mapCocoClass(pred.class);
@@ -482,20 +504,21 @@ export async function performSurveillanceInference(
     }
 
     if (rawDetections.length === 0) {
-      // Diagnostic visibility: log when 0 detections occur to audit lighting or scene conditions
-      // (ensures detection issues are immediately traceable in the developer console)
       console.debug('[IBVAP Detection] 0 objects detected on frame', {
         time: video.currentTime.toFixed(2),
         isNightMode,
         rawPredictions: preds.length,
       });
     }
+
+    // Deduplicate overlapping boxes
+    return applyNmsDetections(rawDetections, 0.40);
   } catch (err) {
     console.error('[IBVAP Detection Engine] Inference error:', err);
+    return [];
+  } finally {
+    tf.engine().endScope();
   }
-
-  // Deduplicate overlapping boxes
-  return applyNmsDetections(rawDetections, 0.42);
 }
 
 /**
@@ -621,15 +644,31 @@ export function isPointInsidePolygon(point: Point, polygon: Point[]): boolean {
   return inside;
 }
 
+export function matchesCrossingDirection(
+  prev: Point,
+  curr: Point,
+  dir?: string
+): boolean {
+  if (!dir || dir === 'any') return true;
+  const dx = curr.x - prev.x;
+  const dy = curr.y - prev.y;
+  if (dir === 'left_to_right') return dx > 0.003;
+  if (dir === 'right_to_left') return dx < -0.003;
+  if (dir === 'inbound') return dy > 0.003; // Screen Y moves down/towards camera
+  if (dir === 'outbound') return dy < -0.003;
+  return true;
+}
+
 // Check zone crossing for a tracked object
 export function checkZoneViolations(
   obj: TrackedObject,
   zones: VirtualZone[]
 ): { crossedZone: VirtualZone; crossingType: 'boundary_crossing' | 'polygon_intrusion' } | null {
-  if (zones.length === 0 || obj.trajectory.length < 2) return null;
+  if (zones.length === 0 || obj.trajectory.length === 0) return null;
 
   const currentPoint = obj.trajectory[obj.trajectory.length - 1];
-  const previousPoint = obj.trajectory[obj.trajectory.length - 2];
+  const previousPoint =
+    obj.trajectory.length >= 2 ? obj.trajectory[obj.trajectory.length - 2] : currentPoint;
 
   for (const zone of zones) {
     if (!zone.enabled) continue;
@@ -637,7 +676,7 @@ export function checkZoneViolations(
       continue;
     }
 
-    if (zone.type === 'line' && zone.points.length >= 2) {
+    if (zone.type === 'line' && zone.points.length >= 2 && obj.trajectory.length >= 2) {
       // Check if trajectory vector crossed the virtual fence line
       const fenceP1 = zone.points[0];
       const fenceP2 = zone.points[1];
@@ -648,16 +687,27 @@ export function checkZoneViolations(
         fenceP2
       );
 
-      if (intersected && !obj.hasCrossedZoneIds.includes(zone.id)) {
+      const matchesDir = matchesCrossingDirection(previousPoint, currentPoint, zone.direction);
+
+      if (intersected && matchesDir && !obj.hasCrossedZoneIds.includes(zone.id)) {
         return { crossedZone: zone, crossingType: 'boundary_crossing' };
       }
     } else if (zone.type === 'polygon' && zone.points.length >= 3) {
-      // Check if object entered polygon
+      // Check if object entered polygon (or spawned already inside)
       const isInsideNow = isPointInsidePolygon(currentPoint, zone.points);
-      const wasInsideBefore = isPointInsidePolygon(previousPoint, zone.points);
+      const wasInsideBefore =
+        obj.trajectory.length >= 2 ? isPointInsidePolygon(previousPoint, zone.points) : false;
 
-      if (isInsideNow && !wasInsideBefore && !obj.hasCrossedZoneIds.includes(zone.id)) {
+      // Detect intrusion on entry or first acquisition inside restricted polygon
+      const isEntering = isInsideNow && (!wasInsideBefore || obj.trajectory.length <= 2);
+
+      if (isEntering && !obj.hasCrossedZoneIds.includes(zone.id)) {
         return { crossedZone: zone, crossingType: 'polygon_intrusion' };
+      }
+
+      // Exit handling: clear zoneId from tracked object so subsequent re-entry alerts trigger cleanly
+      if (!isInsideNow && wasInsideBefore && obj.hasCrossedZoneIds.includes(zone.id)) {
+        obj.hasCrossedZoneIds = obj.hasCrossedZoneIds.filter((id) => id !== zone.id);
       }
     }
   }

@@ -20,16 +20,27 @@ import { FootageIntelligenceView } from './components/FootageIntelligence/Footag
 import { ANPRRegistryView } from './components/ANPRRegistryView';
 import { PlateRegistryRecord } from './types';
 import { lookupVehicleDossier } from './services/anprEngine';
+import {
+  loadStoredCameras,
+  saveStoredCameras,
+  loadStoredAlerts,
+  saveStoredAlerts,
+  loadStoredPlateRecords,
+  saveStoredPlateRecords,
+  loadStoredEventLog,
+  appendStoredEvent,
+  PlatformEventLogEntry,
+} from './services/storageService';
 
 export default function App() {
   // Navigation
   const [activeTab, setActiveTab] = useState<ActiveTab>('monitoring');
 
-  // Cameras - Starts COMPLETELY EMPTY as required by specification
-  const [cameras, setCameras] = useState<CameraFeedItem[]>([]);
+  // Cameras - Persisted in storage
+  const [cameras, setCameras] = useState<CameraFeedItem[]>(() => loadStoredCameras());
 
-  // Real-time Alerts
-  const [alerts, setAlerts] = useState<AlertIncident[]>([]);
+  // Real-time Alerts - Persisted in storage
+  const [alerts, setAlerts] = useState<AlertIncident[]>(() => loadStoredAlerts());
 
   // Modals state
   const [isAddCameraOpen, setIsAddCameraOpen] = useState(false);
@@ -41,7 +52,23 @@ export default function App() {
   const [pendingCommandQuery, setPendingCommandQuery] = useState<string | null>(null);
 
   // ANPR Plate Registry records collected from camera detections
-  const [plateRecords, setPlateRecords] = useState<PlateRegistryRecord[]>([]);
+  const [plateRecords, setPlateRecords] = useState<PlateRegistryRecord[]>(() => loadStoredPlateRecords());
+
+  // Append-only platform audit event log
+  const [eventLog, setEventLog] = useState<PlatformEventLogEntry[]>(() => loadStoredEventLog());
+
+  // Auto-sync state changes with storage
+  useEffect(() => {
+    saveStoredCameras(cameras);
+  }, [cameras]);
+
+  useEffect(() => {
+    saveStoredAlerts(alerts);
+  }, [alerts]);
+
+  useEffect(() => {
+    saveStoredPlateRecords(plateRecords);
+  }, [plateRecords]);
 
   // Jump to specific camera and footage timestamp
   const [seekTarget, setSeekTarget] = useState<{ cameraId: string; time: number } | null>(null);
@@ -90,6 +117,18 @@ export default function App() {
       return [newAlert, ...prev];
     });
 
+    // Record into append-only platform event log
+    const updatedLog = appendStoredEvent({
+      timestamp: newAlert.timestamp,
+      cameraName: newAlert.cameraName,
+      cameraId: newAlert.cameraId,
+      eventType: newAlert.title,
+      riskScore: newAlert.riskScore,
+      objectId: newAlert.objectId,
+      details: `Severity: ${newAlert.severity}${newAlert.anprPlate ? ` • Plate: ${newAlert.anprPlate}` : ''}`,
+    });
+    setEventLog(updatedLog);
+
     // If an ANPR plate was detected in this alert, record into vehicle registry
     if (newAlert.anprPlate) {
       const plate = newAlert.anprPlate.toUpperCase().replace(/[^A-Z0-9]/g, '');
@@ -132,6 +171,18 @@ export default function App() {
       note: 'Incident acknowledged by monitoring station operator.',
     };
 
+    const targetAlert = alerts.find((a) => a.id === alertId);
+    const updatedLog = appendStoredEvent({
+      timestamp: now,
+      cameraName: targetAlert?.cameraName || 'Surveillance Node',
+      cameraId: targetAlert?.cameraId,
+      eventType: 'Alert Acknowledged',
+      riskScore: targetAlert?.riskScore || 0,
+      objectId: targetAlert?.objectId,
+      details: `Operator acknowledged incident: ${targetAlert?.title || alertId}`,
+    });
+    setEventLog(updatedLog);
+
     setAlerts((prev) =>
       prev.map((a) =>
         a.id === alertId
@@ -155,6 +206,18 @@ export default function App() {
       note: 'Escalated to Active Field Dispatch Team.',
     };
 
+    const targetAlert = alerts.find((a) => a.id === alertId);
+    const updatedLog = appendStoredEvent({
+      timestamp: now,
+      cameraName: targetAlert?.cameraName || 'Surveillance Node',
+      cameraId: targetAlert?.cameraId,
+      eventType: 'Alert Escalated',
+      riskScore: targetAlert?.riskScore || 80,
+      objectId: targetAlert?.objectId,
+      details: `Incident escalated to field tactical team: ${targetAlert?.title || alertId}`,
+    });
+    setEventLog(updatedLog);
+
     setAlerts((prev) =>
       prev.map((a) =>
         a.id === alertId
@@ -177,6 +240,18 @@ export default function App() {
       timestamp: now,
       note: 'Threat neutralized / marked false positive. Case closed.',
     };
+
+    const targetAlert = alerts.find((a) => a.id === alertId);
+    const updatedLog = appendStoredEvent({
+      timestamp: now,
+      cameraName: targetAlert?.cameraName || 'Surveillance Node',
+      cameraId: targetAlert?.cameraId,
+      eventType: 'Alert Closed',
+      riskScore: targetAlert?.riskScore || 0,
+      objectId: targetAlert?.objectId,
+      details: `Incident closed: ${targetAlert?.title || alertId}`,
+    });
+    setEventLog(updatedLog);
 
     setAlerts((prev) =>
       prev.map((a) =>
@@ -296,6 +371,7 @@ export default function App() {
             <SearchLogView
               incidents={alerts}
               cameras={cameras}
+              eventLog={eventLog}
               onInvestigate={(incident) => setInvestigatingIncident(incident)}
               onSelectPlate={(plate) => setDossierPlate({ plate })}
             />

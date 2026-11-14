@@ -364,6 +364,9 @@ export const ANPRRegistryView: React.FC<ANPRRegistryViewProps> = ({
                     <span className="text-xs font-mono font-medium text-amber-400 uppercase tracking-wider">
                       Vehicle Dossier
                     </span>
+                    <span className="rounded bg-amber-950/70 border border-amber-800/60 px-1.5 py-0.5 text-[10px] text-amber-300 font-semibold">
+                      Simulated / Demo data
+                    </span>
                     <span className="rounded bg-neutral-800 px-1.5 py-0.2 text-[10px] text-neutral-400">
                       ID: {activeRecord.plateNumber}
                     </span>
