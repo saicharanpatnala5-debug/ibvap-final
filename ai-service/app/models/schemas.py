@@ -1,0 +1,110 @@
+from typing import Optional, Literal
+from pydantic import BaseModel, Field, ConfigDict
+
+
+class BoundingBox(BaseModel):
+    x: float = Field(..., description="Normalized 0 to 1 left coordinate")
+    y: float = Field(..., description="Normalized 0 to 1 top coordinate")
+    width: float = Field(..., description="Normalized 0 to 1 width")
+    height: float = Field(..., description="Normalized 0 to 1 height")
+
+
+class EntityAppearance(BaseModel):
+    primaryColor: str
+    secondaryColor: Optional[str] = None
+    colorHex: Optional[str] = None
+    clothingDescription: Optional[str] = None
+    vehicleTypeDescription: Optional[str] = None
+    colorHist: Optional[list[float]] = None
+
+
+class ANPRResult(BaseModel):
+    plateText: str
+    confidence: float
+    isReadable: bool
+    isValidFormat: bool = False
+    formatType: Optional[Literal["standard", "bharat", "invalid"]] = "invalid"
+    validationStatus: Optional[str] = "Unreadable / invalid format"
+    stateCode: Optional[str] = None
+    rtoCode: Optional[str] = None
+    series: Optional[str] = None
+    plateNumber: Optional[str] = None
+    cropDataUrl: Optional[str] = None
+    processedAt: int = 0
+
+
+class TrackedEntity(BaseModel):
+    id: int
+    class_name: str = Field(..., alias="class")
+    confidence: int  # 0 to 100
+    confidenceTier: Literal["high", "medium", "low"] = "medium"
+    bbox: BoundingBox
+    velocity: float = 0.0  # approximate px/s or normalized delta
+    direction: str = "Stationary"
+    appearance: Optional[EntityAppearance] = None
+    anpr: Optional[ANPRResult] = None
+    headBbox: Optional[BoundingBox] = None
+    isLoitering: bool = False
+    hasCrossedZoneIds: list[str] = Field(default_factory=list)
+
+    model_config = ConfigDict(populate_by_name=True)
+
+
+class Point(BaseModel):
+    x: float
+    y: float
+
+
+class VirtualZone(BaseModel):
+    id: str
+    cameraId: str
+    name: str
+    type: Literal["line", "polygon"]
+    points: list[Point]
+    enabled: bool = True
+    color: str = "#EF4444"
+    direction: Optional[Literal["any", "left_to_right", "right_to_left", "inbound", "outbound"]] = "any"
+    alertOnClasses: list[str] = Field(default_factory=lambda: ["person", "car", "truck"])
+    createdAt: Optional[int] = None
+
+
+class ZoneEvent(BaseModel):
+    id: str
+    zoneId: str
+    zoneName: str
+    eventType: Literal["entry", "exit", "breach", "loiter"]
+    objectId: int
+    objectClass: str
+    timestamp: int
+    riskScore: int = 50
+    details: Optional[str] = None
+
+
+class SourceCreateRequest(BaseModel):
+    source_id: Optional[str] = None
+    source_type: Literal["file", "rtsp", "webcam"]
+    source_url: str
+    loop: bool = True
+
+
+class SourceStatusResponse(BaseModel):
+    source_id: str
+    source_type: str
+    source_url: str
+    status: Literal["active", "connecting", "error", "stopped"]
+    fps: float = 0.0
+    width: int = 0
+    height: int = 0
+    total_frames: int = 0
+
+
+class FrameStreamPayload(BaseModel):
+    frame_index: int
+    timestamp: int
+    width: int
+    height: int
+    is_night_mode: bool = False
+    average_luminance: float = 120.0
+    entities: list[TrackedEntity] = Field(default_factory=list)
+    zone_events: list[ZoneEvent] = Field(default_factory=list)
+    plates: list[ANPRResult] = Field(default_factory=list)
