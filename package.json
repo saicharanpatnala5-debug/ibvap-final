@@ -1,44 +1,22 @@
 {
-  "name": "ibvap",
+  "name": "ibvap-monorepo",
   "private": true,
-  "version": "0.0.0",
-  "type": "module",
+  "version": "0.1.0",
+  "workspaces": [
+    "frontend",
+    "gateway"
+  ],
   "scripts": {
-    "dev": "tsx server.ts",
-    "build": "vite build && esbuild server.ts --bundle --platform=node --format=cjs --packages=external --sourcemap --outfile=dist/server.cjs",
-    "start": "node dist/server.cjs",
-    "preview": "vite preview",
-    "clean": "rm -rf dist server.js",
-    "lint": "tsc --noEmit",
-    "test": "vitest run"
-  },
-  "dependencies": {
-    "@google/genai": "^2.4.0",
-    "@tailwindcss/vite": "^4.1.14",
-    "@tensorflow-models/coco-ssd": "^2.2.3",
-    "@tensorflow/tfjs": "^4.22.0",
-    "@vitejs/plugin-react": "^5.0.4",
-    "dotenv": "^17.2.3",
-    "esbuild": "^0.25.0",
-    "express": "^4.21.2",
-    "express-rate-limit": "^8.7.4",
-    "helmet": "^8.3.0",
-    "lucide-react": "^0.546.0",
-    "motion": "^12.23.24",
-    "react": "^19.0.1",
-    "react-dom": "^19.0.1",
-    "react-markdown": "^10.1.0",
-    "tesseract.js": "^7.0.0",
-    "zod": "^4.6.7"
-  },
-  "devDependencies": {
-    "@types/express": "^4.17.21",
-    "@types/node": "^22.14.0",
-    "autoprefixer": "^10.4.21",
-    "tailwindcss": "^4.1.14",
-    "tsx": "^4.21.0",
-    "typescript": "~5.8.2",
-    "vite": "^6.2.3",
-    "vitest": "^5.1.0"
+    "dev": "npm --workspace=gateway run dev",
+    "build": "npm --workspace=frontend run build && npm --workspace=gateway run build",
+    "build:frontend": "npm --workspace=frontend run build",
+    "build:gateway": "npm --workspace=gateway run build",
+    "start": "npm --workspace=gateway run start",
+    "lint": "npm --workspace=frontend run lint && npm --workspace=gateway run lint",
+    "lint:frontend": "npm --workspace=frontend run lint",
+    "lint:gateway": "npm --workspace=gateway run lint",
+    "test": "npm --workspace=frontend run test && npm --workspace=gateway run test",
+    "test:frontend": "npm --workspace=frontend run test",
+    "test:gateway": "npm --workspace=gateway run test"
   }
 }

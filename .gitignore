@@ -1,17 +1,51 @@
-# Dependencies
+# Node / Web Build Artifacts
 node_modules/
-
-# Production build artifacts
 dist/
 build/
 coverage/
 
-# OS and runtime files
-.DS_Store
-*.log
+# Java / Spring Boot Artifacts
+target/
+*.class
+*.jar
+*.war
+*.nar
+*.ear
+!.mvn/wrapper/maven-wrapper.jar
 
-# Environment variables
+# Python Artifacts
+__pycache__/
+*.py[cod]
+*$py.class
+*.so
+.Python
+.pytest_cache/
+.venv/
+venv/
+env/
+ENV/
+
+# Environment Variables & Secrets
 .env
 .env.local
 .env.*
 !.env.example
+
+# Large Neural Model Weights
+*.pt
+*.onnx
+*.engine
+*.bin
+*.weights
+models/*.pt
+models/*.onnx
+frontend/public/models/*.onnx
+!models/README.md
+
+# Operating System and IDE Files
+.DS_Store
+Thumbs.db
+.idea/
+.vscode/
+*.swp
+*.log

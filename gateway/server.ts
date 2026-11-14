@@ -1,5 +1,6 @@
 import express from 'express';
 import path from 'path';
+import fs from 'fs';
 import helmet from 'helmet';
 import rateLimit from 'express-rate-limit';
 import { z } from 'zod';
@@ -29,9 +30,19 @@ app.use(express.json({ limit: '200kb' }));
 const frameJsonParser = express.json({ limit: '10mb' });
 
 // Serve local offline traineddata if requested directly
-const trainedDataPath = path.join(process.cwd(), 'eng.traineddata');
 app.get('/eng.traineddata', (_req, res) => {
-  res.sendFile(trainedDataPath);
+  const candidatePaths = [
+    path.resolve(__dirname, '../frontend/public/eng.traineddata'),
+    path.resolve(process.cwd(), 'frontend/public/eng.traineddata'),
+    path.resolve(__dirname, 'public/eng.traineddata'),
+    path.resolve(process.cwd(), 'public/eng.traineddata'),
+  ];
+  for (const p of candidatePaths) {
+    if (fs.existsSync(p)) {
+      return res.sendFile(p);
+    }
+  }
+  return res.status(404).send('Offline language data not found');
 });
 
 // Rate limiting for AI endpoints: max 30 requests per minute per IP
@@ -642,14 +653,19 @@ app.use(
 // -------------------------------------------------------------
 
 async function startServer() {
+  const frontendRoot = fs.existsSync(path.resolve(process.cwd(), 'frontend'))
+    ? path.resolve(process.cwd(), 'frontend')
+    : path.resolve(__dirname, '../frontend');
+
   if (process.env.NODE_ENV !== 'production') {
     const vite = await createViteServer({
+      root: frontendRoot,
       server: { middlewareMode: true },
       appType: 'spa',
     });
     app.use(vite.middlewares);
   } else {
-    const distPath = path.join(process.cwd(), 'dist');
+    const distPath = path.resolve(frontendRoot, 'dist');
     app.use(express.static(distPath));
     app.get('*', (_req, res) => {
       res.sendFile(path.join(distPath, 'index.html'));
@@ -657,7 +673,7 @@ async function startServer() {
   }
 
   app.listen(PORT, '0.0.0.0', () => {
-    console.log(`IBVAP Full-Stack Server running on port ${PORT} [Model: ${GEMINI_MODEL}]`);
+    console.log(`IBVAP Gateway running on port ${PORT} [Model: ${GEMINI_MODEL}]`);
   });
 }
 
