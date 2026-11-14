@@ -103,9 +103,13 @@ const { pythonCmd, javaCmd, jdkHome } = checkToolchain();
 const childProcesses = [];
 
 function startProcess(name, cmd, args, cwd, env = {}) {
+  const isNpm = cmd === 'npm' || cmd === 'npm.cmd';
+  const isCmdOrBat = typeof cmd === 'string' && (cmd.endsWith('.cmd') || cmd.endsWith('.bat'));
+  const useShell = isNpm || isCmdOrBat;
+
   const p = spawn(cmd, args, {
     cwd,
-    shell: true,
+    shell: useShell,
     env: { ...process.env, ...env },
     stdio: ['inherit', 'pipe', 'pipe'],
   });
@@ -154,14 +158,15 @@ const envForCore = {
 };
 
 if (fs.existsSync(jarPath)) {
-  startProcess('core-service', javaCmd, ['-jar', `"${jarPath}"`, '--server.port=8080'], CORE_DIR, envForCore);
+  startProcess('core-service', javaCmd, ['-jar', jarPath, '--server.port=8080'], CORE_DIR, envForCore);
 } else {
   const mvnwCmd = process.platform === 'win32' ? '.\\mvnw.cmd' : './mvnw';
   startProcess('core-service', mvnwCmd, ['spring-boot:run'], CORE_DIR, envForCore);
 }
 
 // Gateway + Frontend (Port 3000)
-startProcess('gateway', 'npm', ['--workspace=gateway', 'run', 'dev'], ROOT_DIR);
+const npmCmd = process.platform === 'win32' ? 'npm.cmd' : 'npm';
+startProcess('gateway', npmCmd, ['--workspace=gateway', 'run', 'dev'], ROOT_DIR);
 
 // Teardown handler
 function cleanup() {
