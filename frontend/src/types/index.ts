@@ -161,6 +161,8 @@ export interface CameraFeedItem {
   aiSourceId?: string;
 }
 
+export type PlateStatus = 'Valid format' | 'Low confidence - needs review' | 'Unreadable';
+
 export interface VehicleDossier {
   plateNumber: string;
   registeredOwner: string;
@@ -176,16 +178,19 @@ export interface VehicleDossier {
   flagReason?: string;
   lastKnownLocation: string;
   isSimulatedDemo: true;
-  validationStatus?: 'Valid format' | 'Unreadable / invalid format';
+  isSimulated?: boolean;
+  validationStatus?: string;
   formatType?: 'standard' | 'bharat' | 'invalid';
   stateName?: string;
   rtoOffice?: string;
+  hasRecord?: boolean;
 }
 
 export interface PlateRegistryRecord {
   id: string;
   plateNumber: string;
-  formatValidationStatus: 'Valid format' | 'Unreadable / invalid format';
+  status: PlateStatus;
+  formatValidationStatus?: string;
   isValidFormat: boolean;
   formatType?: 'standard' | 'bharat' | 'invalid';
   confidence: number;
@@ -193,8 +198,12 @@ export interface PlateRegistryRecord {
   cameraName: string;
   timestamp: number;
   videoTime?: number;
-  cropUrl?: string;
-  dossier: VehicleDossier;
+  trackId?: number;
+  cropUrl?: string; // plate thumbnail
+  vehicleThumbnailUrl?: string; // vehicle thumbnail
+  dossier?: VehicleDossier | null;
+  manualCorrection?: string;
+  isDemo?: boolean;
 }
 
 export interface AccessibilitySettings {

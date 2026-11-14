@@ -2,6 +2,7 @@ import React, { useState, useRef, useEffect } from 'react';
 import { Camera, FileVideo, Globe, Play, Upload, X, AlertCircle } from 'lucide-react';
 import { CameraFeedItem } from '../types';
 import { SAMPLE_FEED_PRESETS, SampleFeedPreset } from '../data/sampleFeeds';
+import { cleanCameraName } from '../services/storageService';
 import { getDetectionModel } from '../services/detectionEngine';
 
 interface AddCameraModalProps {
@@ -39,11 +40,7 @@ export const AddCameraModal: React.FC<AddCameraModalProps> = ({
       setSelectedFile(file);
       if (!cameraName) {
         // Auto-fill sensible camera name from filename
-        const cleanName = file.name
-          .replace(/\.[^/.]+$/, '')
-          .replace(/[-_]/g, ' ')
-          .replace(/\b\w/g, (l) => l.toUpperCase());
-        setCameraName(`CAM: ${cleanName}`);
+        setCameraName(cleanCameraName(file.name));
       }
       setErrorMessage(null);
     }
@@ -62,11 +59,7 @@ export const AddCameraModal: React.FC<AddCameraModalProps> = ({
       }
       setSelectedFile(file);
       if (!cameraName) {
-        const cleanName = file.name
-          .replace(/\.[^/.]+$/, '')
-          .replace(/[-_]/g, ' ')
-          .replace(/\b\w/g, (l) => l.toUpperCase());
-        setCameraName(`CAM: ${cleanName}`);
+        setCameraName(cleanCameraName(file.name));
       }
       setErrorMessage(null);
     }

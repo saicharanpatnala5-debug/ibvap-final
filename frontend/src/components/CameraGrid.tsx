@@ -40,10 +40,10 @@ export const CameraGrid: React.FC<CameraGridProps> = ({
         </div>
 
         <h2 className="text-xl font-bold tracking-tight sm:text-2xl text-neutral-100">
-          No Ingested Cameras Active
+          Upload footage or connect a camera to begin
         </h2>
         <p className="mt-2 max-w-md text-sm text-neutral-400">
-          IBVAP processes video feeds locally using real-time AI object detection, ANPR, and configurable virtual fence tripwires.
+          IBVAP processes video feeds using real-time AI object detection, ANPR, and configurable virtual fence tripwires.
         </p>
 
         <div className="mt-8 flex flex-col sm:flex-row items-center gap-3">
@@ -104,7 +104,7 @@ export const CameraGrid: React.FC<CameraGridProps> = ({
   }
 
   return (
-    <div id="camera-grid-section" className="space-y-4">
+    <div id="camera-grid-section" className="space-y-4 pb-28">
       {/* Grid Controls Header */}
       <div className="flex items-center justify-between">
         <div className="flex items-center gap-2">

@@ -5,6 +5,7 @@ import {
   Mic,
   MicOff,
   ChevronUp,
+  ChevronDown,
   X,
   ShieldAlert,
   Bot,
@@ -28,6 +29,7 @@ export const CommandBar: React.FC<CommandBarProps> = ({
 }) => {
   const [query, setQuery] = useState('');
   const [isListening, setIsListening] = useState(false);
+  const [isCollapsed, setIsCollapsed] = useState(false);
   const speechRef = useRef<any>(null);
 
   const criticalCount = alerts.filter(
@@ -91,6 +93,30 @@ export const CommandBar: React.FC<CommandBarProps> = ({
     }
   };
 
+  if (isCollapsed) {
+    return (
+      <div
+        id="persistent-command-bar"
+        className="fixed bottom-3 left-1/2 -translate-x-1/2 z-30"
+      >
+        <button
+          type="button"
+          onClick={() => setIsCollapsed(false)}
+          className="flex items-center gap-2 rounded-full border border-neutral-700 bg-neutral-900/95 px-4 py-2 text-xs font-semibold text-neutral-200 shadow-2xl backdrop-blur-md hover:bg-neutral-800 hover:border-amber-500/60 transition-all"
+        >
+          <Sparkles className="h-4 w-4 text-amber-400" />
+          <span>Ask AI Copilot (Cmd+K)</span>
+          {criticalCount > 0 && (
+            <span className="rounded-full bg-red-950 border border-red-800 px-1.5 py-0.2 text-[10px] font-mono text-red-300">
+              {criticalCount}
+            </span>
+          )}
+          <ChevronUp className="h-3.5 w-3.5 text-neutral-400" />
+        </button>
+      </div>
+    );
+  }
+
   return (
     <div
       id="persistent-command-bar"
@@ -147,6 +173,16 @@ export const CommandBar: React.FC<CommandBarProps> = ({
             <Send className="h-3.5 w-3.5" />
           </button>
         </form>
+
+        {/* Collapse button */}
+        <button
+          type="button"
+          onClick={() => setIsCollapsed(true)}
+          className="rounded-lg p-1.5 text-neutral-400 hover:bg-neutral-900 hover:text-neutral-200 transition-colors shrink-0"
+          title="Minimize to pill"
+        >
+          <ChevronDown className="h-4 w-4" />
+        </button>
 
         {/* Expand full center button */}
         <button

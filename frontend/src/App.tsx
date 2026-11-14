@@ -19,7 +19,7 @@ import { CommandBar } from './components/CommandBar';
 import { FootageIntelligenceView } from './components/FootageIntelligence/FootageIntelligenceView';
 import { ANPRRegistryView } from './components/ANPRRegistryView';
 import { PlateRegistryRecord } from './types';
-import { lookupVehicleDossier } from './services/anprEngine';
+import { lookupVehicleDossier, determinePlateStatus } from './services/anprEngine';
 import {
   loadStoredCameras,
   saveStoredCameras,
@@ -29,6 +29,7 @@ import {
   saveStoredPlateRecords,
   loadStoredEventLog,
   appendStoredEvent,
+  clearStoredPlatformData,
   PlatformEventLogEntry,
 } from './services/storageService';
 
@@ -73,12 +74,30 @@ export default function App() {
   // Jump to specific camera and footage timestamp
   const [seekTarget, setSeekTarget] = useState<{ cameraId: string; time: number } | null>(null);
 
-  // Accessibility settings (WCAG AA Compliance)
+  // Accessibility settings (WCAG AA / AAA Compliance)
   const [a11ySettings, setA11ySettings] = useState<AccessibilitySettings>({
     highContrast: false,
     reducedMotion: false,
     textSize: 'normal',
   });
+
+  // Apply accessibility settings to document root
+  useEffect(() => {
+    const root = document.documentElement;
+    if (a11ySettings.highContrast) {
+      root.classList.add('high-contrast');
+    } else {
+      root.classList.remove('high-contrast');
+    }
+
+    if (a11ySettings.reducedMotion) {
+      root.classList.add('reduced-motion');
+    } else {
+      root.classList.remove('reduced-motion');
+    }
+
+    root.setAttribute('data-text-size', a11ySettings.textSize);
+  }, [a11ySettings]);
 
   // Jump to footage handler
   const handleJumpToFootage = (cameraId: string, videoTime: number, _plateNumber: string) => {
@@ -132,7 +151,10 @@ export default function App() {
     // If an ANPR plate was detected in this alert, record into vehicle registry
     if (newAlert.anprPlate) {
       const plate = newAlert.anprPlate.toUpperCase().replace(/[^A-Z0-9]/g, '');
-      const dossier = lookupVehicleDossier(plate);
+      const confidence = newAlert.confidence || 85;
+      const statusInfo = determinePlateStatus(plate, confidence);
+      const status = statusInfo.status;
+      const dossier = status === 'Valid format' ? lookupVehicleDossier(plate) : null;
       const cam = cameras.find((c) => c.id === newAlert.cameraId);
 
       setPlateRecords((prev) => {
@@ -144,16 +166,19 @@ export default function App() {
         const newRecord: PlateRegistryRecord = {
           id: `rec-${plate}-${Date.now()}`,
           plateNumber: plate,
-          formatValidationStatus: dossier.validationStatus || 'Valid format',
-          isValidFormat: dossier.validationStatus === 'Valid format',
-          formatType: dossier.formatType,
-          confidence: newAlert.confidence || 94,
+          status,
+          formatValidationStatus: status,
+          isValidFormat: status === 'Valid format',
+          formatType: statusInfo.formatType || 'invalid',
+          confidence,
           cameraId: newAlert.cameraId,
           cameraName: cam?.name || 'Surveillance Node',
           timestamp: newAlert.timestamp,
           videoTime: newAlert.videoTime !== undefined ? newAlert.videoTime : 0,
           dossier,
           cropUrl: newAlert.snapshotUrl,
+          vehicleThumbnailUrl: newAlert.snapshotUrl,
+          trackId: newAlert.objectId,
         };
         return [newRecord, ...prev];
       });
@@ -266,23 +291,200 @@ export default function App() {
     );
   };
 
+  // Load explicit demo data
+  const handleLoadDemoData = () => {
+    const now = Date.now();
+    const demoCams: CameraFeedItem[] = [
+      {
+        id: 'cam-demo-gate',
+        name: 'Sector 4 Vehicle Checkpoint (Demo)',
+        sourceType: 'stream',
+        status: 'active',
+        fps: 25,
+        resolution: { width: 1920, height: 1080 },
+        sourceUrl: '',
+        isNightMode: false,
+        createdAt: now,
+        zones: [
+          {
+            id: 'zone-demo-gate',
+            cameraId: 'cam-demo-gate',
+            name: 'Restricted Vehicle Portal',
+            points: [
+              { x: 0.1, y: 0.4 },
+              { x: 0.9, y: 0.4 },
+              { x: 0.9, y: 0.95 },
+              { x: 0.1, y: 0.95 },
+            ],
+            type: 'polygon',
+            color: '#ef4444',
+            enabled: true,
+            alertOnClasses: ['person', 'car', 'truck'],
+            createdAt: now,
+          },
+        ],
+      },
+    ];
+
+    const demoAlerts: AlertIncident[] = [
+      {
+        id: `alert-demo-${now}-1`,
+        title: 'Virtual Fence Breach [Demo]',
+        severity: 'critical',
+        timestamp: now - 120000,
+        videoTime: 12.0,
+        cameraName: 'Sector 4 Vehicle Checkpoint (Demo)',
+        cameraId: 'cam-demo-gate',
+        riskScore: 89,
+        riskFactors: [],
+        status: 'active',
+        objectClass: 'person',
+        objectId: 101,
+        confidence: 94,
+        anprPlate: undefined,
+        auditTrail: [],
+      },
+      {
+        id: `alert-demo-${now}-2`,
+        title: 'Watchlist Vehicle Detected [Demo]',
+        severity: 'high',
+        timestamp: now - 360000,
+        videoTime: 24.0,
+        cameraName: 'Sector 4 Vehicle Checkpoint (Demo)',
+        cameraId: 'cam-demo-gate',
+        riskScore: 92,
+        riskFactors: [],
+        status: 'active',
+        objectClass: 'car',
+        objectId: 102,
+        confidence: 91,
+        anprPlate: 'UP16BC9999',
+        auditTrail: [],
+      },
+    ];
+
+    const demoPlates: PlateRegistryRecord[] = [
+      {
+        id: `demo-rec-1-${now}`,
+        plateNumber: 'DL01AB1234',
+        status: 'Valid format',
+        formatValidationStatus: 'Valid format',
+        isValidFormat: true,
+        formatType: 'standard',
+        confidence: 96,
+        cameraId: 'cam-demo-gate',
+        cameraName: 'Sector 4 Vehicle Checkpoint (Demo)',
+        timestamp: now - 3600000,
+        videoTime: 12.4,
+        dossier: lookupVehicleDossier('DL01AB1234'),
+        trackId: 104,
+        isDemo: true,
+      },
+      {
+        id: `demo-rec-2-${now}`,
+        plateNumber: 'HR26?X89',
+        status: 'Low confidence - needs review',
+        formatValidationStatus: 'Low confidence - needs review',
+        isValidFormat: false,
+        formatType: 'invalid',
+        confidence: 52,
+        cameraId: 'cam-demo-gate',
+        cameraName: 'Sector 4 Vehicle Checkpoint (Demo)',
+        timestamp: now - 7200000,
+        videoTime: 24.8,
+        dossier: null,
+        trackId: 105,
+        isDemo: true,
+      },
+      {
+        id: `demo-rec-3-${now}`,
+        plateNumber: 'UNREADABLE',
+        status: 'Unreadable',
+        formatValidationStatus: 'Unreadable',
+        isValidFormat: false,
+        formatType: 'invalid',
+        confidence: 27,
+        cameraId: 'cam-demo-gate',
+        cameraName: 'Sector 4 Vehicle Checkpoint (Demo)',
+        timestamp: now - 10800000,
+        videoTime: 45.2,
+        dossier: null,
+        trackId: 106,
+        isDemo: true,
+      },
+      {
+        id: `demo-rec-4-${now}`,
+        plateNumber: 'UP16BC9999',
+        status: 'Valid format',
+        formatValidationStatus: 'Valid format',
+        isValidFormat: true,
+        formatType: 'standard',
+        confidence: 91,
+        cameraId: 'cam-demo-gate',
+        cameraName: 'Sector 4 Vehicle Checkpoint (Demo)',
+        timestamp: now - 14400000,
+        videoTime: 62.1,
+        dossier: lookupVehicleDossier('UP16BC9999'),
+        trackId: 102,
+        isDemo: true,
+      },
+    ];
+
+    setCameras(demoCams);
+    setAlerts(demoAlerts);
+    setPlateRecords(demoPlates);
+  };
+
+  // Clear all platform data (1-click wipe)
+  const handleClearAllData = () => {
+    clearStoredPlatformData();
+    setCameras([]);
+    setAlerts([]);
+    setPlateRecords([]);
+    setEventLog([]);
+  };
+
+  // Operator manual plate correction
+  const handleCorrectPlate = (recordId: string, newPlate: string) => {
+    const cleaned = newPlate.toUpperCase().replace(/[^A-Z0-9]/g, '');
+    const statusInfo = determinePlateStatus(cleaned, 95);
+    const status = statusInfo.status;
+    const dossier = status === 'Valid format' ? lookupVehicleDossier(cleaned) : null;
+
+    setPlateRecords((prev) =>
+      prev.map((rec) => {
+        if (rec.id !== recordId) return rec;
+        return {
+          ...rec,
+          plateNumber: cleaned,
+          status,
+          formatValidationStatus: status,
+          isValidFormat: status === 'Valid format',
+          formatType: statusInfo.formatType || 'invalid',
+          confidence: Math.max(rec.confidence, 92),
+          dossier,
+          manualCorrection: `Corrected from ${rec.plateNumber} to ${cleaned} by Security Operator`,
+        };
+      })
+    );
+
+    const updatedLog = appendStoredEvent({
+      timestamp: Date.now(),
+      cameraName: 'Vehicle Registry Station',
+      eventType: 'Manual Plate Correction',
+      riskScore: 10,
+      details: `Operator corrected plate record ${recordId} to ${cleaned} (Status: ${status})`,
+    });
+    setEventLog(updatedLog);
+  };
+
   // Count unacknowledged active alerts
   const activeAlertCount = alerts.filter((a) => a.status === 'active').length;
-
-  // Text scaling class
-  const textSizeClass =
-    a11ySettings.textSize === 'large'
-      ? 'text-lg'
-      : a11ySettings.textSize === 'xl'
-      ? 'text-xl'
-      : 'text-base';
 
   return (
     <div
       id="ibvap-root"
-      className={`min-h-screen bg-neutral-950 text-neutral-100 antialiased ${textSizeClass} ${
-        a11ySettings.highContrast ? 'contrast-125' : ''
-      }`}
+      className="min-h-screen bg-neutral-950 text-neutral-100 antialiased"
     >
       {/* Header / Navbar */}
       <Navbar
@@ -296,26 +498,28 @@ export default function App() {
       />
 
       {/* Main Content Area */}
-      <main className="mx-auto max-w-7xl px-4 py-6 sm:px-6">
+      <main className="mx-auto max-w-[1920px] px-3 py-6 sm:px-6">
         {activeTab === 'monitoring' && (
-          <CameraGrid
-            cameras={cameras}
-            onUpdateCamera={handleUpdateCamera}
-            onRemoveCamera={handleRemoveCamera}
-            onAlertGenerated={handleAlertGenerated}
-            onSelectPlate={(plate, cropUrl) => setDossierPlate({ plate, cropUrl })}
-            onOpenAddCamera={() => setIsAddCameraOpen(true)}
-            onAskAI={(prompt) => {
-              setPendingCommandQuery(prompt);
-              setActiveTab('command');
-            }}
-            reducedMotion={a11ySettings.reducedMotion}
-            seekTarget={seekTarget}
-          />
+          <div className="pb-28">
+            <CameraGrid
+              cameras={cameras}
+              onUpdateCamera={handleUpdateCamera}
+              onRemoveCamera={handleRemoveCamera}
+              onAlertGenerated={handleAlertGenerated}
+              onSelectPlate={(plate, cropUrl) => setDossierPlate({ plate, cropUrl })}
+              onOpenAddCamera={() => setIsAddCameraOpen(true)}
+              onAskAI={(prompt) => {
+                setPendingCommandQuery(prompt);
+                setActiveTab('command');
+              }}
+              reducedMotion={a11ySettings.reducedMotion}
+              seekTarget={seekTarget}
+            />
+          </div>
         )}
 
         {activeTab === 'anpr' && (
-          <div className="h-[calc(100vh-140px)]">
+          <div className="h-[calc(100vh-140px)] pb-28">
             <ANPRRegistryView
               records={plateRecords}
               cameras={cameras}
@@ -324,12 +528,16 @@ export default function App() {
                 setPendingCommandQuery(prompt);
                 setActiveTab('command');
               }}
+              onLoadDemoData={handleLoadDemoData}
+              onClearAllData={handleClearAllData}
+              onCorrectPlate={handleCorrectPlate}
+              onOpenAddCamera={() => setIsAddCameraOpen(true)}
             />
           </div>
         )}
 
         {activeTab === 'alerts' && (
-          <div className="h-[calc(100vh-140px)]">
+          <div className="h-[calc(100vh-140px)] pb-28">
             <AlertsPanel
               alerts={alerts}
               onAcknowledgeAlert={handleAcknowledgeAlert}
@@ -342,7 +550,7 @@ export default function App() {
         )}
 
         {activeTab === 'command' && (
-          <div className="h-[calc(100vh-140px)]">
+          <div className="h-[calc(100vh-140px)] pb-28">
             <AICommandCenter
               cameras={cameras}
               alerts={alerts}
@@ -358,7 +566,7 @@ export default function App() {
         )}
 
         {activeTab === 'intelligence' && (
-          <div className="h-[calc(100vh-140px)]">
+          <div className="h-[calc(100vh-140px)] pb-28">
             <FootageIntelligenceView
               cameras={cameras}
               onOpenAddCamera={() => setIsAddCameraOpen(true)}
@@ -367,7 +575,7 @@ export default function App() {
         )}
 
         {activeTab === 'search' && (
-          <div className="h-[calc(100vh-140px)]">
+          <div className="h-[calc(100vh-140px)] pb-28">
             <SearchLogView
               incidents={alerts}
               cameras={cameras}
@@ -379,10 +587,10 @@ export default function App() {
         )}
 
         {activeTab === 'topology' && (
-          <div className="h-[calc(100vh-140px)]">
+          <div className="h-[calc(100vh-140px)] pb-28">
             <TopologyView
               cameras={cameras}
-              onSelectCamera={(camId) => {
+              onSelectCamera={(_camId) => {
                 setActiveTab('monitoring');
               }}
             />

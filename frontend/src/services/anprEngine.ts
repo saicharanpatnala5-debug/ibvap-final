@@ -548,34 +548,41 @@ const DEMO_MAKES_MODELS = [
   { make: 'Royal Enfield', model: 'Classic 350', class: 'Motorcycle', fuel: 'Gasoline' },
 ];
 
-const DEMO_OWNERS = [
-  'R. K. Sharma',
-  'Aditi Deshmukh',
-  'Vikram Malhotra',
-  'Sunil K. Verma',
-  'Pooja Nair',
-  'Rajesh Singhal',
-  'National Logistics Fleet',
-  'Arun Patel',
-  'Kavita Reddy',
-  'Anand Swaminathan',
-];
+// =============================================================================
+// REGISTRY INTEGRITY & SIMULATED VEHICLE DATABASE
+// =============================================================================
 
-const DEMO_COLORS = [
-  'Silver Metallic',
-  'Midnight Black',
-  'Arctic Pearl White',
-  'Deep Navy Blue',
-  'Dark Slate Gray',
-  'Crimson Red',
-  'Titanium Bronze',
-];
+// Named confidence threshold constants
+export const ANPR_CONF_HIGH = 80;
+export const ANPR_CONF_MEDIUM = 60;
+export const ANPR_CONF_MIN = 40;
 
-// Curated explicit records
+// Curated simulated records with explicitly fake names and reserved test numbers
+// Never shares the same owner across vehicles.
 export const SIMULATED_VEHICLE_DATABASE: Record<string, Omit<VehicleDossier, 'isSimulatedDemo'>> = {
+  'DL01AB1234': {
+    plateNumber: 'DL01AB1234',
+    registeredOwner: 'Simulated Citizen 01 (Test)',
+    vehicleMake: 'Hyundai',
+    vehicleModel: 'Creta SX',
+    vehicleClass: 'Compact SUV',
+    color: 'Titan Grey',
+    fuelType: 'Gasoline',
+    registrationDate: '10 Feb 2021',
+    registrationStatus: 'Valid',
+    year: 2021,
+    ownerPhone: '+91 99999 00001',
+    lastKnownLocation: 'North Perimeter Gate - Node 01',
+    validationStatus: 'Valid format',
+    formatType: 'standard',
+    stateName: 'Delhi NCT (DL)',
+    rtoOffice: 'Mall Road RTO (DL-01)',
+    hasRecord: true,
+    isSimulated: true,
+  },
   'MH12AB4029': {
     plateNumber: 'MH12AB4029',
-    registeredOwner: 'R. K. Sharma',
+    registeredOwner: 'Simulated Citizen 02 (Test)',
     vehicleMake: 'Toyota',
     vehicleModel: 'Innova Crysta',
     vehicleClass: 'Multi-Utility Vehicle (MUV)',
@@ -584,16 +591,18 @@ export const SIMULATED_VEHICLE_DATABASE: Record<string, Omit<VehicleDossier, 'is
     registrationDate: '14 May 2021',
     registrationStatus: 'Valid',
     year: 2022,
-    ownerPhone: '+91 98201 44821',
+    ownerPhone: '+91 99999 00002',
     lastKnownLocation: 'North Perimeter Gate - Node 01',
     validationStatus: 'Valid format',
     formatType: 'standard',
     stateName: 'Maharashtra (MH)',
     rtoOffice: 'Pune RTO (MH-12)',
+    hasRecord: true,
+    isSimulated: true,
   },
   'DL01CZ9876': {
     plateNumber: 'DL01CZ9876',
-    registeredOwner: 'Vikram Malhotra',
+    registeredOwner: 'Simulated Citizen 03 (Test)',
     vehicleMake: 'Tata',
     vehicleModel: 'Nexon EV',
     vehicleClass: 'Compact Electric SUV',
@@ -602,16 +611,18 @@ export const SIMULATED_VEHICLE_DATABASE: Record<string, Omit<VehicleDossier, 'is
     registrationDate: '19 Jan 2023',
     registrationStatus: 'Valid',
     year: 2023,
-    ownerPhone: '+91 98110 52391',
+    ownerPhone: '+91 99999 00003',
     lastKnownLocation: 'East Terminal Checkpoint - Node 02',
     validationStatus: 'Valid format',
     formatType: 'standard',
     stateName: 'Delhi NCT (DL)',
     rtoOffice: 'Mall Road RTO (DL-01)',
+    hasRecord: true,
+    isSimulated: true,
   },
   'UP32EV8812': {
     plateNumber: 'UP32EV8812',
-    registeredOwner: 'Sunil K. Verma',
+    registeredOwner: 'Simulated Citizen 04 (Test)',
     vehicleMake: 'Mahindra',
     vehicleModel: 'Scorpio-N',
     vehicleClass: 'Four-Wheel Drive SUV',
@@ -621,16 +632,18 @@ export const SIMULATED_VEHICLE_DATABASE: Record<string, Omit<VehicleDossier, 'is
     registrationStatus: 'Watchlist Flagged',
     flagReason: 'Restricted perimeter boundary alert: unauthorized entry queue',
     year: 2022,
-    ownerPhone: '+91 94500 23114',
+    ownerPhone: '+91 99999 00004',
     lastKnownLocation: 'South Cargo Gate - Node 03',
     validationStatus: 'Valid format',
     formatType: 'standard',
     stateName: 'Uttar Pradesh (UP)',
     rtoOffice: 'Lucknow RTO (UP-32)',
+    hasRecord: true,
+    isSimulated: true,
   },
   '22BH1234AB': {
     plateNumber: '22BH1234AB',
-    registeredOwner: 'National Logistics Fleet (Central Govt)',
+    registeredOwner: 'Simulated Fleet Logistics (Govt Test)',
     vehicleMake: 'Volvo',
     vehicleModel: 'FH16 Heavy Hauler',
     vehicleClass: 'Heavy Commercial Transport',
@@ -639,96 +652,94 @@ export const SIMULATED_VEHICLE_DATABASE: Record<string, Omit<VehicleDossier, 'is
     registrationDate: '12 Sep 2022',
     registrationStatus: 'Valid',
     year: 2022,
-    ownerPhone: '+91 97112 00412',
+    ownerPhone: '+91 99999 00005',
     lastKnownLocation: 'Loading Dock B - Node 04',
     validationStatus: 'Valid format',
     formatType: 'bharat',
     stateName: 'Bharat (BH) All-India Registry',
     rtoOffice: 'Ministry of Road Transport & Highways (MoRTH)',
-  },
-  '7XYZ892': {
-    plateNumber: '7XYZ892',
-    registeredOwner: 'Unverified Entity',
-    vehicleMake: 'Ford',
-    vehicleModel: 'Transit Cargo Van',
-    vehicleClass: 'Commercial Cargo Van',
-    color: 'Arctic Pearl White',
-    fuelType: 'Diesel',
-    registrationDate: '08 Nov 2020',
-    registrationStatus: 'Watchlist Flagged',
-    flagReason: 'Unregistered plate format rejected by NHAI/RTO verification filter',
-    year: 2021,
-    ownerPhone: '+1 (555) 014-9981',
-    lastKnownLocation: 'Loading Dock B - Node 04',
-    validationStatus: 'Unreadable / invalid format',
-    formatType: 'invalid',
-    stateName: 'Non-Indian / Unrecognized Format',
-    rtoOffice: 'Unverified',
+    hasRecord: true,
+    isSimulated: true,
   },
 };
 
 /**
- * Consistent lookup for vehicle and owner details per plate.
- * Validates plate against Indian NHAI/RTO and Bharat series standards.
+ * Determine plate status per requirement:
+ * - "Valid format": validated plate format and confidence >= 80%
+ * - "Low confidence - needs review": validated plate format but confidence < 80%
+ * - "Unreadable": unreadable OCR, format invalid, or garbage text
  */
-export function lookupVehicleDossier(plateNumber: string): VehicleDossier {
-  const cleanKey = plateNumber.toUpperCase().replace(/[^A-Z0-9]/g, '');
-  const validation = sanitizePlateText(cleanKey, 95);
+export function determinePlateStatus(plateText: string, confidence: number): {
+  status: 'Valid format' | 'Low confidence - needs review' | 'Unreadable';
+  isValidFormat: boolean;
+  formatType?: 'standard' | 'bharat' | 'invalid';
+  cleanPlate: string;
+} {
+  const clean = (plateText || '').toUpperCase().replace(/[^A-Z0-9]/g, '');
+  if (!clean || clean.length < 5 || clean.includes('UNREADABLE')) {
+    return {
+      status: 'Unreadable',
+      isValidFormat: false,
+      formatType: 'invalid',
+      cleanPlate: clean || 'UNREADABLE',
+    };
+  }
 
+  const validation = sanitizePlateText(clean, confidence);
+  if (!validation.isValidFormat) {
+    return {
+      status: 'Unreadable',
+      isValidFormat: false,
+      formatType: 'invalid',
+      cleanPlate: clean,
+    };
+  }
+
+  if (confidence >= ANPR_CONF_HIGH) {
+    return {
+      status: 'Valid format',
+      isValidFormat: true,
+      formatType: validation.formatType,
+      cleanPlate: validation.plateText || clean,
+    };
+  }
+
+  return {
+    status: 'Low confidence - needs review',
+    isValidFormat: true,
+    formatType: validation.formatType,
+    cleanPlate: validation.plateText || clean,
+  };
+}
+
+/**
+ * Consistent lookup for vehicle and owner details per plate.
+ * REGISTRY INTEGRITY:
+ * - Dossier is ONLY returned for exact matches in the simulated dataset.
+ * - Unreadable, low confidence, or un-matched plates return NULL (No registry record).
+ * - Never invents fake owners for unread or unmatched plates.
+ */
+export function lookupVehicleDossier(plateNumber: string, confidence = 95): VehicleDossier | null {
+  const statusInfo = determinePlateStatus(plateNumber, confidence);
+  if (statusInfo.status !== 'Valid format') {
+    // Unreadable and low confidence plates NEVER attach a registry dossier!
+    return null;
+  }
+
+  const cleanKey = statusInfo.cleanPlate;
   const found = SIMULATED_VEHICLE_DATABASE[cleanKey];
   if (found) {
     return {
       ...found,
       plateNumber: cleanKey,
       isSimulatedDemo: true,
-      validationStatus: validation.isValidFormat ? 'Valid format' : 'Unreadable / invalid format',
-      formatType: validation.formatType || 'invalid',
-      stateName: found.stateName || (validation.stateCode ? INDIAN_STATE_RTO_NAMES[validation.stateCode] : undefined),
+      isSimulated: true,
+      hasRecord: true,
+      validationStatus: 'Valid format',
+      formatType: statusInfo.formatType || 'standard',
     };
   }
 
-  // Deterministic seed generation for any other plate
-  const hash = hashPlateString(cleanKey);
-  const makeModel = DEMO_MAKES_MODELS[hash % DEMO_MAKES_MODELS.length];
-  const owner = DEMO_OWNERS[hash % DEMO_OWNERS.length];
-  const color = DEMO_COLORS[hash % DEMO_COLORS.length];
-  const year = 2018 + (hash % 6);
-  const day = 1 + (hash % 28);
-  const months = ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec'];
-  const month = months[hash % 12];
-  const regDate = `${day.toString().padStart(2, '0')} ${month} ${year}`;
-
-  const isWatchlist = hash % 5 === 0;
-  const isExpired = !isWatchlist && hash % 7 === 0;
-  const status: VehicleDossier['registrationStatus'] = isWatchlist
-    ? 'Watchlist Flagged'
-    : isExpired
-    ? 'Expired'
-    : 'Valid';
-
-  const stateName = validation.stateCode ? INDIAN_STATE_RTO_NAMES[validation.stateCode] : undefined;
-  const rtoOffice = validation.rtoCode
-    ? `${validation.stateCode}-${validation.rtoCode} Regional Transport Office`
-    : undefined;
-
-  return {
-    plateNumber: cleanKey,
-    registeredOwner: owner,
-    vehicleMake: makeModel.make,
-    vehicleModel: makeModel.model,
-    vehicleClass: makeModel.class,
-    color,
-    fuelType: makeModel.fuel,
-    registrationDate: regDate,
-    registrationStatus: status,
-    year,
-    ownerPhone: `+91 9${(hash % 8900) + 1000} ${(hash % 89000) + 10000}`,
-    flagReason: isWatchlist ? 'Security audit flag: Unscheduled site access' : undefined,
-    lastKnownLocation: `Surveillance Ingestion Node ${(hash % 6) + 1}`,
-    isSimulatedDemo: true,
-    validationStatus: validation.isValidFormat ? 'Valid format' : 'Unreadable / invalid format',
-    formatType: validation.formatType || 'invalid',
-    stateName,
-    rtoOffice,
-  };
+  // Exact match not in simulated database -> return null
+  return null;
 }

@@ -12,12 +12,14 @@ class Settings(BaseModel):
     DEVICE: str = os.getenv("DEVICE", "auto")  # 'auto', 'cpu', 'cuda', 'mps'
     CONF_THRESHOLD: float = float(os.getenv("CONF_THRESHOLD", "0.15"))  # Tuned low (0.15) for 2-stage association
     IOU_THRESHOLD: float = float(os.getenv("IOU_THRESHOLD", "0.45"))
-    IMGSZ: int = int(os.getenv("IMGSZ", "640"))  # 640 default for speed, 960 for distant perimeter objects
+    IMGSZ: int = int(os.getenv("IMGSZ", "960"))  # Default 960 for distant perimeter objects; 640 for speed
     TRACKER: str = os.getenv("TRACKER", "bytetrack")  # 'bytetrack' or 'botsort'
     TRACKER_CONFIG: str = os.getenv("TRACKER_CONFIG", "config/tracker.yaml")
     MIN_HITS: int = int(os.getenv("MIN_HITS", "3"))  # Frames required to confirm tracklet (eliminates 1-frame ghosts)
     MAX_LOST_FRAMES: int = int(os.getenv("MAX_LOST_FRAMES", "60"))  # ~2 seconds at 30 fps
     RELINK: bool = os.getenv("RELINK", "true").lower() == "true"  # Re-ID re-linking for vanished tracks
+    ENABLE_TILED_INFERENCE: bool = os.getenv("ENABLE_TILED_INFERENCE", "false").lower() == "true"
+    TILED_OVERLAP: float = float(os.getenv("TILED_OVERLAP", "0.15"))
     
     # Upstream Core Service configuration
     CORE_SERVICE_URL: str = os.getenv("CORE_SERVICE_URL", "http://localhost:8080")

@@ -16,6 +16,7 @@ import {
   Sparkles,
   Info,
   Trash2,
+  Edit2,
 } from 'lucide-react';
 import {
   AlertIncident,
@@ -93,6 +94,10 @@ export const CameraFeed: React.FC<CameraFeedProps> = ({
     w: 1280,
     h: 720,
   });
+
+  // User-editable camera name
+  const [isEditingName, setIsEditingName] = useState<boolean>(false);
+  const [editedName, setEditedName] = useState<string>(camera.name);
 
   // Detection & Night State
   const [isNightMode, setIsNightMode] = useState<boolean>(camera.isNightMode);
@@ -1055,7 +1060,42 @@ export const CameraFeed: React.FC<CameraFeedProps> = ({
             <span className="relative inline-flex rounded-full h-2.5 w-2.5 bg-emerald-500"></span>
           </span>
           <div>
-            <h3 className="text-sm font-semibold text-neutral-100">{camera.name}</h3>
+            {isEditingName ? (
+              <form
+                onSubmit={(e) => {
+                  e.preventDefault();
+                  const finalName = editedName.trim() || camera.name;
+                  onUpdateCamera({ ...camera, name: finalName });
+                  setIsEditingName(false);
+                }}
+                className="flex items-center gap-1.5"
+              >
+                <input
+                  type="text"
+                  value={editedName}
+                  onChange={(e) => setEditedName(e.target.value)}
+                  className="rounded border border-amber-500 bg-neutral-950 px-2 py-0.5 text-xs text-white focus:outline-none"
+                  autoFocus
+                  onBlur={() => {
+                    const finalName = editedName.trim() || camera.name;
+                    onUpdateCamera({ ...camera, name: finalName });
+                    setIsEditingName(false);
+                  }}
+                />
+              </form>
+            ) : (
+              <div className="flex items-center gap-1.5 group">
+                <h3 className="text-sm font-semibold text-neutral-100">{camera.name}</h3>
+                <button
+                  type="button"
+                  onClick={() => setIsEditingName(true)}
+                  className="opacity-0 group-hover:opacity-100 text-neutral-500 hover:text-amber-400 transition-opacity p-0.5"
+                  title="Rename camera"
+                >
+                  <Edit2 className="h-3 w-3" />
+                </button>
+              </div>
+            )}
             <div className="flex items-center gap-2 text-[11px] text-neutral-400">
               <span>{camera.sourceType === 'file' ? 'Local Video File' : 'IP Stream'}</span>
               <span>•</span>

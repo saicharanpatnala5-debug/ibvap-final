@@ -16,6 +16,7 @@ import {
   ArrowUpRight,
   Car,
   User,
+  Plus,
 } from 'lucide-react';
 import { AlertIncident, AlertSeverity } from '../types';
 
@@ -26,6 +27,7 @@ interface AlertsPanelProps {
   onCloseAlert: (alertId: string) => void;
   onInvestigateAlert: (alert: AlertIncident) => void;
   onSelectPlate: (plate: string, cropUrl?: string) => void;
+  onOpenAddCamera?: () => void;
 }
 
 export const AlertsPanel: React.FC<AlertsPanelProps> = ({
@@ -35,6 +37,7 @@ export const AlertsPanel: React.FC<AlertsPanelProps> = ({
   onCloseAlert,
   onInvestigateAlert,
   onSelectPlate,
+  onOpenAddCamera,
 }) => {
   const [severityFilter, setSeverityFilter] = useState<AlertSeverity | 'all'>('all');
   const [expandedAlertIds, setExpandedAlertIds] = useState<Set<string>>(new Set());
@@ -181,13 +184,33 @@ export const AlertsPanel: React.FC<AlertsPanelProps> = ({
       </div>
 
       {/* Alert Feed List */}
-      <div className="flex-1 overflow-y-auto p-4 space-y-3">
-        {filteredAlerts.length === 0 ? (
+      <div className="flex-1 overflow-y-auto p-4 space-y-3 pb-24">
+        {alerts.length === 0 ? (
+          <div id="alerts-empty-state" className="flex flex-col items-center justify-center py-20 text-center text-neutral-400">
+            <div className="flex h-14 w-14 items-center justify-center rounded-2xl bg-neutral-900 border border-neutral-800 text-amber-400 mb-4">
+              <ShieldAlert className="h-7 w-7" />
+            </div>
+            <h3 className="text-base font-semibold text-neutral-200">No Incidents Recorded</h3>
+            <p className="mt-1 text-xs text-neutral-400 max-w-sm">
+              Upload footage or connect a camera to begin monitoring. System alerts are generated in real-time when boundary tripwires or restricted zones are crossed.
+            </p>
+            {onOpenAddCamera && (
+              <button
+                type="button"
+                onClick={onOpenAddCamera}
+                className="mt-6 inline-flex items-center gap-2 rounded-xl bg-amber-500 px-4 py-2.5 text-xs font-semibold text-neutral-950 hover:bg-amber-400 shadow-md transition-colors"
+              >
+                <Plus className="h-4 w-4" />
+                Upload Footage / Add Camera
+              </button>
+            )}
+          </div>
+        ) : filteredAlerts.length === 0 ? (
           <div className="flex flex-col items-center justify-center py-16 text-center text-neutral-500">
             <CheckCircle2 className="h-10 w-10 text-neutral-600 mb-2" />
-            <p className="text-sm font-medium text-neutral-400">No active incidents detected</p>
+            <p className="text-sm font-medium text-neutral-400">No active incidents match this filter</p>
             <p className="mt-1 text-xs max-w-xs">
-              Continuous background AI detection is monitoring all ingested camera feeds.
+              Try switching severity filter to "all".
             </p>
           </div>
         ) : (

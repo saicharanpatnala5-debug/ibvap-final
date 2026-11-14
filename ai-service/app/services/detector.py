@@ -10,6 +10,7 @@ from app.services.appearance import extract_entity_appearance
 from app.services.anpr import (
     crop_license_plate_region,
     preprocess_plate_crop,
+    compute_crop_sharpness,
     PlateValidator,
     PlateVotingTracker,
     ANPRResult,
@@ -161,9 +162,10 @@ class SurveillanceDetector:
                         anpr_res = None
                         if cls_name in ["car", "truck", "bus"]:
                             plate_crop = crop_license_plate_region(obj_crop)
+                            sharpness = compute_crop_sharpness(plate_crop)
                             candidate_plate = self._extract_plate_heuristic(plate_crop, track_id)
                             if candidate_plate:
-                                confirmed = self.plate_voter.add_reading(track_id, candidate_plate)
+                                confirmed = self.plate_voter.add_reading(track_id, candidate_plate, sharpness=sharpness)
                                 if confirmed:
                                     anpr_res = confirmed
                                     plates.append(confirmed)
@@ -199,7 +201,7 @@ class SurveillanceDetector:
     def _extract_plate_heuristic(self, plate_crop: np.ndarray, track_id: int) -> Optional[ANPRResult]:
         """
         Attempts RapidOCR if installed; otherwise executes high-contrast character
-        boundary detection with Indian license plate format validation.
+        boundary detection with position-aware Indian license plate format validation.
         """
         if plate_crop is None or plate_crop.size == 0 or plate_crop.shape[0] < 12 or plate_crop.shape[1] < 30:
             return None
@@ -215,17 +217,18 @@ class SurveillanceDetector:
                     raw_text = line[1]
                     conf = float(line[2]) * 100
                     cleaned = PlateValidator.clean_text(raw_text)
-                    is_valid, ftype, vstatus = PlateValidator.validate(cleaned)
-                    if cleaned and len(cleaned) >= 6:
+                    corrected = PlateValidator.position_aware_correction(cleaned)
+                    is_valid, ftype, vstatus = PlateValidator.validate(corrected)
+                    if corrected and len(corrected) >= 6:
                         return ANPRResult(
-                            plateText=cleaned,
+                            plateText=corrected,
                             confidence=round(conf, 1),
                             isReadable=True,
                             isValidFormat=is_valid,
                             formatType=ftype,
                             validationStatus=vstatus,
-                            stateCode=cleaned[:2] if is_valid and ftype == "standard" else None,
-                            plateNumber=cleaned,
+                            stateCode=corrected[:2] if is_valid and ftype == "standard" else None,
+                            plateNumber=corrected,
                             processedAt=int(time.time() * 1000),
                         )
         except Exception:

@@ -1,1 +1,53 @@
 @import "tailwindcss";
+
+/* Accessibility Modes (WCAG AAA Support) */
+
+/* High Contrast Mode */
+html.high-contrast {
+  filter: contrast(115%);
+}
+
+html.high-contrast body {
+  background-color: #000000 !important;
+  color: #ffffff !important;
+}
+
+html.high-contrast button,
+html.high-contrast input,
+html.high-contrast select,
+html.high-contrast textarea {
+  border-color: #a3a3a3 !important;
+}
+
+html.high-contrast .border-neutral-800,
+html.high-contrast .border-neutral-700 {
+  border-color: #737373 !important;
+}
+
+/* Reduced Motion Mode */
+html.reduced-motion *,
+html.reduced-motion *::before,
+html.reduced-motion *::after {
+  animation-duration: 0.001ms !important;
+  animation-iteration-count: 1 !important;
+  transition-duration: 0.001ms !important;
+  scroll-behavior: auto !important;
+}
+
+/* Typography Scaling */
+html[data-text-size="large"] {
+  font-size: 17px;
+}
+
+html[data-text-size="xl"] {
+  font-size: 19px;
+}
+
+/* Scrollbar Utility for Horizontal Swipe on Mobile */
+.no-scrollbar::-webkit-scrollbar {
+  display: none;
+}
+.no-scrollbar {
+  -ms-overflow-style: none;
+  scrollbar-width: none;
+}

@@ -35,6 +35,33 @@ function safeJsonParse<T>(raw: string | null, fallback: T): T {
   }
 }
 
+// Clean raw filenames into human-readable camera names
+export function cleanCameraName(rawName: string, fallbackIndex = 1): string {
+  if (!rawName || typeof rawName !== 'string') return `Camera ${fallbackIndex}`;
+  let clean = rawName.trim();
+  // Strip file extensions
+  clean = clean.replace(/\.(mp4|avi|mov|mkv|webm|m4v|flv|wmv)$/i, '');
+  // Strip common camera/phone boilerplate prefixes
+  clean = clean.replace(/^(WhatsApp\s*Video|VID|REC|CCTV|DVR|MOV|DSC|CLIP)[-_\s]*/i, '');
+  // Strip timestamps like "at 8.42.08 PM" or "8.42.08 PM"
+  clean = clean.replace(/\bat\s*\d{1,2}[.:]\d{2}[.:]\d{2}\s*(?:AM|PM)?/i, '');
+  clean = clean.replace(/\b\d{1,2}[.:]\d{2}[.:]\d{2}\s*(?:AM|PM)?/i, '');
+  // Strip date formats like "2026-09-09" or "2026_09_09" or "20260909"
+  clean = clean.replace(/\b\d{4}[-_.]\d{2}[-_.]\d{2}\b/g, '');
+  clean = clean.replace(/\b\d{6,14}\b/g, '');
+  clean = clean.replace(/[-_]+/g, ' ').trim();
+  // If only digits or punctuation remain, or string is too short, default to Camera N
+  if (!clean || clean.length < 2 || !/[a-zA-Z]/.test(clean)) {
+    return `Camera ${fallbackIndex}`;
+  }
+  return clean;
+}
+
+export function clearStoredPlatformData() {
+  if (typeof window === 'undefined') return;
+  Object.values(STORAGE_KEYS).forEach((key) => localStorage.removeItem(key));
+}
+
 // -------------------------------------------------------------
 // CAMERAS & VIRTUAL ZONES
 // -------------------------------------------------------------
@@ -42,8 +69,14 @@ function safeJsonParse<T>(raw: string | null, fallback: T): T {
 export function loadStoredCameras(): CameraFeedItem[] {
   if (typeof window === 'undefined') return [];
   const stored = safeJsonParse<CameraFeedItem[]>(localStorage.getItem(STORAGE_KEYS.CAMERAS), []);
-  // Ensure zones and attributes exist
-  return stored.map((c) => ({
+  // Filter out dead file cameras that had non-persisted blob URLs with no source
+  const valid = stored.filter((c) => {
+    if (c.sourceType === 'file' && (!c.sourceUrl || c.sourceUrl.trim() === '')) {
+      return false;
+    }
+    return true;
+  });
+  return valid.map((c) => ({
     ...c,
     zones: Array.isArray(c.zones) ? c.zones : [],
   }));
