@@ -8,6 +8,7 @@
   ],
   "scripts": {
     "dev": "npm --workspace=gateway run dev",
+    "dev:all": "node tools/dev-all.js",
     "build": "npm --workspace=frontend run build && npm --workspace=gateway run build",
     "build:frontend": "npm --workspace=frontend run build",
     "build:gateway": "npm --workspace=gateway run build",

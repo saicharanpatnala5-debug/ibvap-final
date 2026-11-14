@@ -11,6 +11,7 @@ from fastapi import (
     UploadFile,
     File,
     Form,
+    Request,
     WebSocket,
     WebSocketDisconnect,
     Response,
@@ -24,13 +25,26 @@ from app.models.schemas import (
     SourceStatusResponse,
     FrameStreamPayload,
 )
+import base64
+import time
+import cv2
+import numpy as np
+from app.services.detector import SurveillanceDetector
 from app.services.video_source import VideoSourceManager
 from app.services.core_client import CoreServiceClient
 
 source_manager = VideoSourceManager()
 core_client = CoreServiceClient()
+shared_detector: Optional[SurveillanceDetector] = None
 UPLOAD_DIR = os.path.join(os.getcwd(), "data", "uploads")
 os.makedirs(UPLOAD_DIR, exist_ok=True)
+
+
+def get_shared_detector() -> SurveillanceDetector:
+    global shared_detector
+    if shared_detector is None:
+        shared_detector = SurveillanceDetector()
+    return shared_detector
 
 
 @asynccontextmanager
@@ -223,3 +237,69 @@ async def websocket_source_stream(websocket: WebSocket, source_id: str):
         source.subscribers.discard(websocket)
     except Exception:
         source.subscribers.discard(websocket)
+
+
+@app.post("/detect")
+async def detect_frame(
+    request: Request,
+    file: Optional[UploadFile] = File(None),
+    frameBase64: Optional[str] = Form(None),
+):
+    frame_bgr = None
+    if file is not None:
+        contents = await file.read()
+        nparr = np.frombuffer(contents, np.uint8)
+        frame_bgr = cv2.imdecode(nparr, cv2.IMREAD_COLOR)
+    else:
+        content_type = request.headers.get("content-type", "")
+        if "application/json" in content_type:
+            try:
+                body = await request.json()
+                b64 = body.get("frameBase64") or body.get("frame") or body.get("image")
+                if b64:
+                    clean_b64 = b64.split(",")[-1]
+                    decoded = base64.b64decode(clean_b64)
+                    nparr = np.frombuffer(decoded, np.uint8)
+                    frame_bgr = cv2.imdecode(nparr, cv2.IMREAD_COLOR)
+            except Exception:
+                pass
+        if frame_bgr is None and frameBase64:
+            clean_b64 = frameBase64.split(",")[-1]
+            decoded = base64.b64decode(clean_b64)
+            nparr = np.frombuffer(decoded, np.uint8)
+            frame_bgr = cv2.imdecode(nparr, cv2.IMREAD_COLOR)
+
+    if frame_bgr is None or frame_bgr.size == 0:
+        raise HTTPException(status_code=400, detail="Invalid or empty image frame provided.")
+
+    detector = get_shared_detector()
+    raw_entities, raw_plates = detector.process_frame(frame_bgr, time.time())
+
+    detections = []
+    for ent in raw_entities:
+        detections.append({
+            "id": ent.track_id,
+            "class": ent.class_name,
+            "confidence": ent.confidence / 100.0,
+            "bbox": {
+                "x": ent.bbox.x,
+                "y": ent.bbox.y,
+                "width": ent.bbox.width,
+                "height": ent.bbox.height,
+            },
+            "appearance": ent.appearance.dict() if ent.appearance else None,
+            "anpr": ent.anpr_plate,
+            "velocity": ent.velocity,
+            "direction": ent.direction,
+            "speed": ent.speed,
+            "state": ent.state,
+        })
+
+    return {
+        "status": "ok",
+        "engine": "ai-service",
+        "model": detector.active_model_name,
+        "detections": detections,
+        "count": len(detections),
+    }
+

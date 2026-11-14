@@ -2,189 +2,182 @@
 
 [![License: MIT](https://img.shields.io/badge/License-MIT-blue.svg)](LICENSE)
 [![React](https://img.shields.io/badge/React-19-blue?logo=react)](https://react.dev/)
-[![Vite](https://img.shields.io/badge/Vite-6-purple?logo=vite)](https://vitejs.dev/)
-[![TensorFlow.js](https://img.shields.io/badge/TensorFlow.js-COCO--SSD-orange?logo=tensorflow)](https://www.tensorflow.org/js)
-[![Tesseract.js](https://img.shields.io/badge/Tesseract.js-ANPR-yellow)](https://tesseract.projectnaptha.com/)
-[![Gemini API](https://img.shields.io/badge/Google%20GenAI-Gemini%202.5%20Flash-4285F4?logo=google)](https://ai.google.dev/)
+[![TypeScript](https://img.shields.io/badge/TypeScript-5.8-blue?logo=typescript)](https://www.typescriptlang.org/)
+[![Java](https://img.shields.io/badge/Java-21%20LTS-orange?logo=openjdk)](https://adoptium.net/)
+[![Spring Boot](https://img.shields.io/badge/Spring%20Boot-3.3.5-brightgreen?logo=springboot)](https://spring.io/projects/spring-boot)
+[![Python](https://img.shields.io/badge/Python-3.11%20%7C%203.14-yellow?logo=python)](https://python.org/)
+[![FastAPI](https://img.shields.io/badge/FastAPI-0.115-teal?logo=fastapi)](https://fastapi.tiangolo.com/)
+[![YOLO](https://img.shields.io/badge/YOLO-YOLO26%20%2F%20v11-red)](https://github.com/ultralytics/ultralytics)
 
-An enterprise-grade, real-time tactical surveillance operations suite designed for perimeter security, virtual-fence intrusion detection, automated number plate recognition (ANPR), and an interactive AI Copilot backed by Google Gemini multimodal intelligence and a local grounded heuristic engine.
+IBVAP is an enterprise-grade polyglot multi-service surveillance platform engineered for tactical border security, perimeter defense, virtual-zone intrusion monitoring, automatic number plate recognition (ANPR), and AI-driven forensic copilot reasoning.
 
 ---
 
-## Architecture Diagram
+## 🏛️ Target Multi-Service Architecture
+
+Each programming language in IBVAP executes a dedicated operational domain:
 
 ```mermaid
 flowchart TD
-    subgraph Client["IBVAP Frontend (React 19 + Vite + Tailwind)"]
-        UI["CCTV Operator Dashboard & Video Canvas"]
-        TFJS["TensorFlow.js (COCO-SSD MobileNet)"]
-        OCR["Tesseract.js OCR (Offline Traineddata)"]
-        Tracker["Persistent Multi-Object & Motion Tracker"]
-        VirtualFence["Virtual Fence & Point-in-Polygon Engine"]
-        Storage["Storage & Append-Only Audit Ledger"]
+    subgraph Client["Operator Client (frontend/)"]
+        UI["React 19 Dashboard & Canvas HUD"]
+        Worker["Browser YOLO Worker (detector.worker.js)"]
+        CocoFallback["In-Browser COCO-SSD (MobileNet)"]
     end
 
-    subgraph Backend["IBVAP Server (Express 4 + Node.js 22)"]
-        Middleware["Security Middleware (Helmet, Rate-Limit, Access Control)"]
-        Validation["Zod Request Body Schemas"]
-        GeminiClient["Google GenAI Client (Timeout Protected)"]
-        FallbackEngine["Local Grounded Heuristic Reasoning Engine"]
+    subgraph GatewayLayer["API Gateway & Reverse Proxy (gateway/)"]
+        GW["Express 4 Gateway (Port 3000)"]
+        AggHealth["Aggregated Health Monitor (/api/health)"]
+        GeminiHost["Gemini Multimodal Copilot Engine"]
+        ProxyCore["Core Service Transparent Proxy (/api/core/*)"]
+        ProxyVision["AI Vision Transparent Proxy (/api/vision/*)"]
     end
 
-    subgraph External["External Services"]
-        Gemini["Google Gemini Multimodal API (gemini-2.5-flash)"]
+    subgraph VisionService["Vision Analytics Service (ai-service/)"]
+        FastAPI["FastAPI + Uvicorn (Port 8000)"]
+        YOLO["Ultralytics YOLO26 Object Detection"]
+        ByteTrack["ByteTrack Multi-Object Kinematics & Re-ID"]
+        LowLight["CLAHE Adaptive Night Enhancement"]
+        ANPR["RapidOCR License Plate Engine"]
     end
 
-    UI --> TFJS
-    TFJS --> Tracker
-    Tracker --> VirtualFence
-    Tracker -->|Vehicle Crop| OCR
-    VirtualFence -->|Alert Incidents| Storage
-    OCR -->|Validated Plates| Storage
-    UI -->|Visual Snapshot + Telemetry| Middleware
-    Middleware --> Validation
-    Validation --> GeminiClient
-    GeminiClient -->|Online API Call| Gemini
-    GeminiClient -.->|No Key / Timeout / Error| FallbackEngine
-    FallbackEngine -->|Honest Telemetry Response| UI
-    Gemini -->|Multimodal Visual Reasoning| UI
+    subgraph CoreService["System of Record (core-service/)"]
+        SpringBoot["Spring Boot 3 + Java 21 LTS (Port 8080)"]
+        CamRepo["Camera & Sensor Registry"]
+        ZoneRepo["Virtual Boundary Zones"]
+        AlertEngine["Alert Incident State Machine & SSE Stream"]
+        AuditLedger["Immutable Audit Trail Ledger"]
+        RiskScore["Real-Time Threat & Risk Scoring Engine"]
+        VehicleDb["National / RTO Vehicle Registry Database"]
+    end
+
+    subgraph ExternalServices["External Cloud Services"]
+        Gemini["Google Gemini 2.5 Flash Multimodal API"]
+    end
+
+    UI -->|Static Assets & API Requests| GW
+    GW --> AggHealth
+    GW --> GeminiHost
+    GeminiHost -.->|Online API Call| Gemini
+    GW --> ProxyCore --> SpringBoot
+    GW --> ProxyVision --> FastAPI
+
+    UI -.->|Rung 1: Primary Vision| ProxyVision
+    UI -.->|Rung 2: Onnxruntime Web| Worker
+    UI -.->|Rung 3: Offline MobileNet| CocoFallback
 ```
 
----
-
-## Core Features
-
-- **Multi-Node CCTV Monitoring**: Simultaneous multi-camera grid with support for local file uploads, simulated CCTV streams, and aspect-ratio-preserved canvas rendering.
-- **Aspect-Preserved Neural Object Detection**: Client-side inference powered by TensorFlow.js COCO-SSD with dynamic aspect-ratio compensation, low-light gamma/contrast enhancement, and vertical structure rejection (preventing tree trunks and poles from triggering human alerts).
-- **Persistent Multi-Object Tracking & Re-ID**: Centroid displacement, directional vector forecasting, and 8-bin color histogram signatures that retain entity identity through brief occlusions.
-- **Virtual Fencing & Perimeter Defense**: Interactive line tripwires and multi-point polygons with ray-casting point-in-polygon intrusion detection, directional filters (`left_to_right`, `right_to_left`, `inbound`, `outbound`), and duplicate alert suppression.
-- **Automated Number Plate Recognition (ANPR)**: High-resolution vehicle bumper cropping, grayscale contrast-stretch thresholding, uppercase character whitelisting, and strict regex validation against Indian NHAI/RTO and Bharat (BH) formats with offline `eng.traineddata` bundling.
-- **Surveillance AI Copilot (Google Gemini & Grounded Fallback)**: Multimodal visual reasoning via Google GenAI (`gemini-2.5-flash`) with prompt-injection defenses, sanitized `<TELEMETRY_DATA>` blocks, and a local heuristic fallback engine that ensures complete operational readiness with zero external API keys.
-- **Auditability & Compliance**: State persistence across page reloads (alerts, zones, chat history, plate records) and an immutable append-only event log with single-click export to CSV and JSON.
-- **Accessibility & Operator Usability**: Keyboard shortcuts, high contrast mode, reduced motion support, and WCAG AA compliance.
-
----
-
-## How It Works
-
-### 1. Neural Detection & Video Scaling
-Uploaded surveillance clips (or camera streams) are rendered on an internal video element. Rather than squashing the frame into an arbitrary box, the detection engine samples at an aspect-preserved dimension ($576\text{px}$ width scaled proportionally to the source aspect ratio). Coordinates are mathematically normalized ($[0..1]$) and rendered onto a 1:1 hardware-accelerated overlay canvas.
-
-When ambient luminance drops below configurable thresholds, the pre-inference canvas executes contrast-stretching and non-linear gamma curves to lift dark foreground silhouettes out of shadows.
-
-### 2. Multi-Object Tracking & Virtual Fences
-Each detected bounding box is evaluated against active tracks using an aggregate metric combining Intersection over Union (IoU), trajectory velocity prediction, and normalized HSV color histograms.
-- **Line Tripwires**: Line-segment intersection tests compute whether an entity's trajectory vector intersected the configured boundary line and verifies compliance with configured traversal directions.
-- **Polygons**: A ray-casting algorithm tracks polygon entry and exit events. Entities spawning already inside restricted areas trigger immediate alerts, while existing entities outside are flagged upon boundary penetration.
-
-### 3. Automated Number Plate Recognition (ANPR)
-When a vehicle (`car`, `truck`, `bus`, `motorcycle`) is acquired, the engine isolates the lower 35% bumper region:
-1. Upscales the crop to high-resolution OCR canvas.
-2. Applies grayscale luminance weighting ($0.299R + 0.587G + 0.114B$) and Otsu-style thresholding.
-3. Feeds the image to a persistent singleton Tesseract.js worker loaded from offline `eng.traineddata`.
-4. Enforces character whitelist `[A-Z0-9]`.
-5. Tests the recognized string against Indian standard NHAI/RTO formats (`^[A-Z]{2}\d{1,2}[A-Z]{1,3}\d{4}$`) and Bharat series (`^\d{2}BH\d{4}[A-Z]{2}$`). If invalid or unreadable, it marks the plate `Unreadable` rather than fabricating characters.
-
-### 4. AI Copilot (Gemini & Heuristic Fallback)
-When an operator issues a query or requests visual explanation:
-1. The client captures a still JPEG snapshot of the active feed and formats active telemetry (detected entities, active alerts, virtual fence definitions, plate scans).
-2. The server sanitizes all telemetry strings (stripping non-printable and control characters, truncating fields) and wraps them inside an explicit `<<<TELEMETRY_DATA>>>` container instructing the model to treat the data as untrusted text, not commands.
-3. If `GEMINI_API_KEY` is present, the server executes a 20-second timeout-protected call to the Gemini API (`gemini-2.5-flash`).
-4. If no key is configured, if the call times out, or if the API returns an error or empty response, the server automatically routes the query to the local heuristic engine. Every response returns an explicit `source` (`"gemini"` or `"fallback"`) and `reason` (`"no key"`, `"timeout"`, `"api error"`, `"empty response"`), which is displayed as a badge on the operator interface.
+### Language & Service Responsibilities
+1. **Python 3.11+ (`ai-service/`)**: FastAPI + Uvicorn + Ultralytics YOLO26 + OpenCV. All computer vision processing: object detection, ByteTrack kinematics (`min_hits=3`, EMA box smoothing, footpoint velocity), CLAHE low-light enhancement, virtual zone breaches, and RapidOCR ANPR.
+2. **Java 21 LTS (`core-service/`)**: Spring Boot 3 + Maven. System of record: auth sessions, cameras, virtual zones, alert lifecycle (Open $\rightarrow$ Acknowledged $\rightarrow$ Resolved), immutable audit logging, risk scoring engine (0–100), simulated vehicle registry, and Server-Sent Events (SSE) alert push.
+3. **TypeScript (`gateway/` & `frontend/`)**:
+   - `gateway/`: Express reverse proxy, aggregates `/api/health` across all services, transparently forwards `/api/core/*` and `/api/vision/*`, hosts the Gemini multimodal copilot with grounded fallback reasoning.
+   - `frontend/`: React 19 + Tailwind CCTV operator workstation with HUD overlay, multi-camera grid, and responsive layout (390px to 1920px).
+4. **JavaScript (Plain .js)**:
+   - `frontend/public/workers/detector.worker.js`: In-browser fallback detector powered by ONNX Runtime Web.
+   - `tools/camera-simulator.js`: Synthetic border camera telemetry & incident generator.
+   - `tools/load-test.js`: High-concurrency HTTP benchmark & latency percentile tester.
+   - `tools/dev-all.js`: Cross-platform single-command orchestrator.
 
 ---
 
-## Environment Variables
+## ⚡ Detection Fallback Ladder
 
-Copy `.env.example` to `.env` or `.env.local` to configure:
+The frontend implements a strict, graceful 3-tier detection ladder that guarantees zero UI crashes under any failure scenario:
 
-| Variable | Type | Default | Description |
-| :--- | :--- | :--- | :--- |
-| `GEMINI_API_KEY` | String | *Empty* | Optional Google Gemini API key. If absent, the platform uses the local heuristic engine. |
-| `GEMINI_MODEL` | String | `gemini-2.5-flash` | Gemini model ID to use for multimodal inference. |
-| `API_ACCESS_TOKEN` | String | *Empty* | Optional shared secret for protecting `/api/ai/*` routes via `Authorization: Bearer <TOKEN>` or `x-api-key: <TOKEN>`. If empty, same-origin verification is enforced. |
-| `PORT` | Number | `3000` | Port for the full-stack server. |
-| `NODE_ENV` | String | `development` | Environment mode (`development` or `production`). |
-| `APP_URL` | String | `http://localhost:3000` | Deployment origin URL. |
-| `DISABLE_HMR` | Boolean | `false` | Disable Vite HMR file watchers in CPU/memory constrained environments. |
+| Tier | Engine | Execution Environment | Latency | Condition |
+| :--- | :--- | :--- | :--- | :--- |
+| **Tier 1** | **Python AI-Service (YOLO26)** | Server-side / GPU / CPU via Gateway | 20–50 ms | Default high-accuracy pipeline |
+| **Tier 2** | **Browser YOLO (ONNX)** | Background Web Worker (`ort-web`) | 60–90 ms | Selected when AI-Service is offline |
+| **Tier 3** | **Browser COCO-SSD** | In-Browser MobileNet (TensorFlow.js) | 70–100 ms | Last resort offline fallback |
 
 ---
 
-## Installation & Local Setup
+## 🚦 Clean Empty State & Data Integrity Guarantees
 
-### Prerequisites
-- Node.js 20+ or 22+
-- npm 10+
+- **No Hardcoded Mock Data on Boot**: On initial load with no footage uploaded, the platform initializes with **0 cameras, 0 alerts, 0 logged plates, and 0 tracked entities**. Nav badges are hidden when counts are zero.
+- **Safe Demo Mode**: To explore features without connecting real hardware, an explicit **"Load Demo Data"** button seeds demo feeds, zones, and alerts with explicit `[Demo]` labels. A single click on **"Clear Demo Data"** restores the pristine empty state.
+- **Dossier Isolation**: License plates flagged as `UNREADABLE` or with low OCR confidence (<60%) **never** attach to vehicle dossiers, fabricated owners, or verified badges. Operators can manually correct misreads via an audit-logged dialog.
 
-### Setup Steps
+---
+
+## 🛠️ Toolchain Prerequisites & Installation
+
+Check system requirements before starting:
+- **Node.js**: `v20+` or `v22+` (`node -v`)
+- **Python**: `3.11+` (`python --version`) with virtual environment support
+- **Java**: `Java 21 LTS` (`java -version`, Temurin JDK 21 recommended)
+- **Maven**: Maven 3.9+ or use the included Maven wrapper (`./mvnw` / `.\mvnw.cmd`)
+
+---
+
+## 🚀 One-Command Launch
+
+### Method 1: All-in-One CLI Runner (Recommended)
+From the repository root:
 ```bash
-# 1. Clone repository
-git clone https://github.com/saicharanpatnala5-debug/ibvap-final.git
-cd ibvap-final
+npm run dev:all
+```
+This automatically verifies toolchains, initializes the Python venv, starts Core-Service (8080), AI-Service (8000), and Gateway/Frontend (3000), and wires unified Ctrl+C teardown.
 
-# 2. Install dependencies via npm
-npm install
+### Method 2: Docker Compose
+```bash
+docker compose up --build
+```
 
-# 3. Configure environment variables (optional)
-cp .env.example .env
+### Method 3: Running Services Individually
+```bash
+# Terminal 1 - Java Core Service
+cd core-service
+./mvnw spring-boot:run
 
-# 4. Run development server (full-stack with Vite middleware)
+# Terminal 2 - Python AI Service
+cd ai-service
+.\.venv\Scripts\uvicorn app.main:app --host 0.0.0.0 --port 8000
+
+# Terminal 3 - Express Gateway & Frontend
 npm run dev
 ```
 
-Visit `http://localhost:3000` in your browser.
-
 ---
 
-## Build, Test & Lint
+## 🧪 Testing & Verification
 
+### Unit & Integration Tests
 ```bash
-# Run TypeScript typechecks
-npm run lint
+# Frontend Unit Tests (Vitest: 17/17 passed)
+npm --workspace=frontend run test
 
-# Run unit and integration test suite (Vitest)
-npm test
+# Gateway Tests (Vitest: 11/11 passed)
+npm --workspace=gateway run test
 
-# Build production bundle (client assets + bundled server.cjs)
-npm run build
+# Python AI-Service Tests (Pytest: 18/18 passed)
+cd ai-service && pytest
 
-# Start production server
-npm start
+# Java Core-Service Tests (Maven Surefire: 13/13 passed)
+cd core-service && ./mvnw test
+```
+
+### Accuracy & Kinematics Benchmarks
+```bash
+# ANPR RapidOCR Accuracy Benchmark
+python ai-service/scripts/eval_anpr.py
+
+# Object Detection & Night Enhancement Evaluator
+python ai-service/scripts/eval_detection.py
+
+# ByteTrack Multi-Object Tracking & Kinematics Evaluator
+python ai-service/scripts/eval_tracking.py
+```
+
+### HTTP Service Load Testing
+```bash
+node tools/load-test.js --requests 50 --concurrency 10
 ```
 
 ---
 
-## Docker Deployment
+## 📜 Operator Documentation & Guides
 
-Build and run using the optimized multi-stage `Dockerfile`:
-
-```bash
-# Build Docker image
-docker build -t ibvap:latest .
-
-# Run container
-docker run -d \
-  -p 3000:3000 \
-  -e GEMINI_API_KEY="your-optional-key" \
-  -e API_ACCESS_TOKEN="your-optional-token" \
-  --name ibvap-container \
-  ibvap:latest
-```
-
----
-
-## Security Notes
-
-1. **Access Control**: All AI endpoints (`/api/ai/chat` and `/api/ai/explain-scene`) are protected by `express-rate-limit` (30 requests/min per IP) and token authorization (`API_ACCESS_TOKEN`) or strict same-origin browser request verification.
-2. **Payload Protection**: Global JSON parsing is capped at 200KB; a dedicated 10MB limit is applied strictly to visual frame routes. Oversized base64 payloads and non-image data URLs are rejected with HTTP 400.
-3. **Information Disclosure Prevention**: Internal server errors and stack traces are logged server-side and never returned in API responses.
-4. **Prompt Injection Hardening**: All client telemetry is sanitized, bounded, and isolated inside an untrusted data block with negative command constraints.
-5. **Simulated / Demo Data Transparency**: All simulated RTO vehicle records and synthetic owner dossiers are prominently marked with `Simulated / Demo data` notices in the UI and codebase to prevent misrepresenting mock data as live governmental databases.
-
----
-
-## Known Limitations
-
-- **Browser-Side Inference**: TensorFlow.js COCO-SSD operates directly in the operator's browser using WebGL/Wasm. Performance depends on the operator's local GPU/CPU hardware.
-- **ANPR Perspective Limits**: Optical character recognition is optimized for front/rear bumper perspectives. Severe angle deviations (>45° pitch/yaw) or extreme motion blur will output `Unreadable`.
-- **Single-Frame Copilot Grounding**: The AI Copilot receives a captured snapshot and telemetry summary from the active camera node; it does not process live multi-gigabyte continuous video streams directly in the cloud.
+- [Operator Walkthrough & 5-Minute Demo Guide](docs/DEMO_GUIDE.md)
+- [Comprehensive Upgrade & Verification Report](REPORT.md)

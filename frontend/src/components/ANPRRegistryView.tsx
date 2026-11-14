@@ -191,7 +191,7 @@ export const ANPRRegistryView: React.FC<ANPRRegistryViewProps> = ({
         <div className="grid grid-cols-2 sm:grid-cols-4 gap-3 mt-5 pt-4 border-t border-neutral-800/70">
           <div className="rounded-lg bg-neutral-950/70 border border-neutral-800/80 p-3">
             <span className="text-[11px] font-medium text-neutral-400 block">Total Plates Logged</span>
-            <span className="text-xl font-bold text-neutral-100 font-mono">{metrics.total}</span>
+            <span id="anpr-total-plates-metric" className="text-xl font-bold text-neutral-100 font-mono">{metrics.total} Logged Reads</span>
           </div>
           <div className="rounded-lg bg-neutral-950/70 border border-neutral-800/80 p-3">
             <span className="text-[11px] font-medium text-neutral-400 block">Format Valid</span>
@@ -240,6 +240,7 @@ export const ANPRRegistryView: React.FC<ANPRRegistryViewProps> = ({
             {onLoadDemoData && (
               <button
                 type="button"
+                id="load-demo-anpr-btn"
                 onClick={onLoadDemoData}
                 className="flex items-center gap-2 rounded-xl border border-neutral-700 bg-neutral-800 px-5 py-3 text-sm font-medium text-neutral-200 hover:bg-neutral-700 transition-colors"
               >
@@ -520,6 +521,7 @@ export const ANPRRegistryView: React.FC<ANPRRegistryViewProps> = ({
                       {!isEditingPlate ? (
                         <button
                           type="button"
+                          id="open-plate-correction-btn"
                           onClick={() => {
                             setIsEditingPlate(true);
                             setCorrectionInput(activeRecord.plateNumber === 'UNREADABLE' ? '' : activeRecord.plateNumber);
@@ -533,6 +535,7 @@ export const ANPRRegistryView: React.FC<ANPRRegistryViewProps> = ({
                         <form onSubmit={handleApplyCorrection} className="flex items-center gap-2">
                           <input
                             type="text"
+                            id="manual-plate-input"
                             value={correctionInput}
                             onChange={(e) => setCorrectionInput(e.target.value.toUpperCase())}
                             placeholder="e.g. MH12AB4029"
@@ -541,6 +544,7 @@ export const ANPRRegistryView: React.FC<ANPRRegistryViewProps> = ({
                           />
                           <button
                             type="submit"
+                            id="submit-plate-correction-btn"
                             className="rounded-lg bg-amber-500 px-3 py-1.5 text-xs font-semibold text-neutral-950 hover:bg-amber-400"
                           >
                             Save

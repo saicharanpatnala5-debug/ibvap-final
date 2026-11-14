@@ -18,6 +18,8 @@ const app = express();
 const PORT = parseInt(process.env.PORT || '3000', 10);
 const GEMINI_MODEL = process.env.GEMINI_MODEL || 'gemini-2.5-flash';
 const GEMINI_TIMEOUT_MS = 20000;
+const CORE_SERVICE_URL = process.env.CORE_SERVICE_URL || 'http://localhost:8080';
+const AI_SERVICE_URL = process.env.AI_SERVICE_URL || 'http://localhost:8000';
 
 // Basic security headers via helmet
 app.use(
@@ -375,13 +377,126 @@ export function generateGroundedFallbackResponse(
 // API ROUTES
 // -------------------------------------------------------------
 
-app.get('/api/health', (_req, res) => {
+app.get('/api/health', async (_req, res) => {
+  let aiHealth: any = { status: 'offline', details: 'unreachable' };
+  let coreHealth: any = { status: 'offline', details: 'unreachable' };
+
+  try {
+    const aiRes = await fetch(`${AI_SERVICE_URL}/health`, { signal: AbortSignal.timeout(1500) });
+    if (aiRes.ok) aiHealth = await aiRes.json();
+  } catch (err: any) {
+    aiHealth = { status: 'offline', details: err.message };
+  }
+
+  try {
+    const coreRes = await fetch(`${CORE_SERVICE_URL}/api/health`, { signal: AbortSignal.timeout(1500) });
+    if (coreRes.ok) coreHealth = await coreRes.json();
+  } catch (err: any) {
+    coreHealth = { status: 'offline', details: err.message };
+  }
+
   res.json({
     status: 'ok',
+    gateway: 'online',
     hasGeminiKey: !!process.env.GEMINI_API_KEY?.trim(),
     model: GEMINI_MODEL,
+    services: {
+      gateway: { status: 'online', port: PORT },
+      aiService: { url: AI_SERVICE_URL, ...aiHealth },
+      coreService: { url: CORE_SERVICE_URL, ...coreHealth },
+    },
     timestamp: Date.now(),
   });
+});
+
+// Proxy routes to Java Core Service (System of Record)
+app.all('/api/core/*', async (req, res) => {
+  const subpath = req.path.replace(/^\/api\/core/, '');
+  const targetUrl = `${CORE_SERVICE_URL}/api${subpath}${req.url.includes('?') ? req.url.slice(req.url.indexOf('?')) : ''}`;
+
+  try {
+    const headers: Record<string, string> = {};
+    for (const [key, val] of Object.entries(req.headers)) {
+      if (val !== undefined && key !== 'host' && key !== 'content-length' && key !== 'transfer-encoding') {
+        headers[key] = Array.isArray(val) ? val.join(';') : String(val);
+      }
+    }
+
+    const fetchOptions: RequestInit = {
+      method: req.method,
+      headers,
+      signal: AbortSignal.timeout(10000),
+    };
+
+    if (req.method !== 'GET' && req.method !== 'HEAD' && req.body && Object.keys(req.body).length > 0) {
+      fetchOptions.body = JSON.stringify(req.body);
+      headers['content-type'] = 'application/json';
+    }
+
+    const upstreamRes = await fetch(targetUrl, fetchOptions);
+    const data = await upstreamRes.text();
+    res.status(upstreamRes.status);
+    upstreamRes.headers.forEach((val, key) => {
+      if (key !== 'content-encoding' && key !== 'content-length') {
+        res.setHeader(key, val);
+      }
+    });
+    res.send(data);
+  } catch (err: any) {
+    // Graceful degradation when Core Service is offline
+    res.status(200).json({
+      status: 'fallback',
+      source: 'gateway-proxy-fallback',
+      error: 'Core service is currently unreachable.',
+      details: err.message,
+      timestamp: Date.now(),
+    });
+  }
+});
+
+// Proxy routes to Python AI-Service (YOLO / Vision Analytics)
+app.all('/api/vision/*', async (req, res) => {
+  const subpath = req.path.replace(/^\/api\/vision/, '');
+  const targetUrl = `${AI_SERVICE_URL}${subpath}${req.url.includes('?') ? req.url.slice(req.url.indexOf('?')) : ''}`;
+
+  try {
+    const headers: Record<string, string> = {};
+    for (const [key, val] of Object.entries(req.headers)) {
+      if (val !== undefined && key !== 'host' && key !== 'content-length' && key !== 'transfer-encoding') {
+        headers[key] = Array.isArray(val) ? val.join(';') : String(val);
+      }
+    }
+
+    const fetchOptions: RequestInit = {
+      method: req.method,
+      headers,
+      signal: AbortSignal.timeout(15000),
+    };
+
+    if (req.method !== 'GET' && req.method !== 'HEAD' && req.body && Object.keys(req.body).length > 0) {
+      fetchOptions.body = JSON.stringify(req.body);
+      headers['content-type'] = 'application/json';
+    }
+
+    const upstreamRes = await fetch(targetUrl, fetchOptions);
+    const data = await upstreamRes.text();
+    res.status(upstreamRes.status);
+    upstreamRes.headers.forEach((val, key) => {
+      if (key !== 'content-encoding' && key !== 'content-length') {
+        res.setHeader(key, val);
+      }
+    });
+    res.send(data);
+  } catch (err: any) {
+    // Graceful degradation when AI Vision service is offline
+    res.status(200).json({
+      status: 'fallback',
+      source: 'gateway-proxy-fallback',
+      error: 'AI vision service is currently unreachable.',
+      details: err.message,
+      timestamp: Date.now(),
+    });
+  }
 });
 
 // POST /api/ai/chat - Conversational interactive surveillance assistant

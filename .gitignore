@@ -3,6 +3,9 @@ node_modules/
 dist/
 build/
 coverage/
+test-results/
+playwright-report/
+samples/debug_detections/
 
 # Java / Spring Boot Artifacts
 target/

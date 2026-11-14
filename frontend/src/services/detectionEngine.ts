@@ -521,6 +521,183 @@ export async function performSurveillanceInference(
   }
 }
 
+export type DetectionEngineType = 'ai-service' | 'yolo-worker' | 'coco-ssd';
+
+export interface LadderInferenceResult {
+  detections: RawDetection[];
+  engine: DetectionEngineType;
+  latencyMs: number;
+}
+
+let workerInstance: Worker | null = null;
+let workerReady = false;
+let workerFailed = false;
+
+function getWorker(): Worker | null {
+  if (workerFailed || typeof window === 'undefined' || !window.Worker) return null;
+  if (!workerInstance) {
+    try {
+      workerInstance = new Worker('/workers/detector.worker.js');
+      workerInstance.postMessage({ type: 'INIT', payload: { modelUrl: '/models/yolo26n.onnx' } });
+      workerInstance.onmessage = (e) => {
+        if (e.data?.type === 'INIT_RESULT') {
+          workerReady = !!e.data.success;
+          if (!workerReady) workerFailed = true;
+        }
+      };
+      workerInstance.onerror = () => {
+        workerFailed = true;
+        workerReady = false;
+      };
+    } catch {
+      workerFailed = true;
+    }
+  }
+  return workerInstance;
+}
+
+let aiServiceHealthy = true;
+let lastAiServiceCheck = 0;
+
+export async function performLadderSurveillanceInference(
+  model: cocoSsd.ObjectDetection | null,
+  video: HTMLVideoElement,
+  isNightMode: boolean,
+  options?: {
+    forceEngine?: DetectionEngineType;
+    scoreThreshold?: number;
+  }
+): Promise<LadderInferenceResult> {
+  const startTime = performance.now();
+
+  // Rung 1: ai-service (Python YOLO26) via Gateway /api/vision/detect
+  if (options?.forceEngine === 'ai-service' || (!options?.forceEngine && aiServiceHealthy)) {
+    try {
+      const vW = video.videoWidth;
+      const vH = video.videoHeight;
+      if (vW && vH && video.readyState >= 2) {
+        if (!cachedInferenceCanvas) {
+          cachedInferenceCanvas = document.createElement('canvas');
+        }
+        const targetW = 640;
+        const targetH = Math.round(targetW * (vH / vW));
+        cachedInferenceCanvas.width = targetW;
+        cachedInferenceCanvas.height = targetH;
+        const ctx = cachedInferenceCanvas.getContext('2d', { willReadFrequently: true });
+        if (ctx) {
+          ctx.drawImage(video, 0, 0, targetW, targetH);
+          const b64 = cachedInferenceCanvas.toDataURL('image/jpeg', 0.7);
+
+          const res = await fetch('/api/vision/detect', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ frameBase64: b64 }),
+            signal: AbortSignal.timeout(2000),
+          });
+
+          if (res.ok) {
+            const data = await res.json();
+            if (data.status === 'ok' && Array.isArray(data.detections)) {
+              const mapped: RawDetection[] = data.detections.map((d: any) => ({
+                class: (mapCocoClass(d.class) || 'person') as ObjectClass,
+                confidence: d.confidence,
+                bbox: d.bbox,
+                appearance: d.appearance,
+              }));
+              return {
+                detections: applyNmsDetections(mapped, 0.4),
+                engine: 'ai-service',
+                latencyMs: Math.round(performance.now() - startTime),
+              };
+            }
+          }
+        }
+      }
+    } catch {
+      if (Date.now() - lastAiServiceCheck > 10000) {
+        aiServiceHealthy = false;
+        lastAiServiceCheck = Date.now();
+        setTimeout(async () => {
+          try {
+            const chk = await fetch('/api/vision/health', { signal: AbortSignal.timeout(1000) });
+            if (chk.ok) aiServiceHealthy = true;
+          } catch {
+            aiServiceHealthy = false;
+          }
+        }, 5000);
+      }
+    }
+  }
+
+  // Rung 2: browser YOLO worker (onnxruntime-web)
+  if (workerReady && !workerFailed) {
+    try {
+      const worker = getWorker();
+      if (worker && cachedInferenceCanvas) {
+        const ctx = cachedInferenceCanvas.getContext('2d');
+        if (ctx) {
+          const imgData = ctx.getImageData(0, 0, cachedInferenceCanvas.width, cachedInferenceCanvas.height);
+          const workerPromise = new Promise<RawDetection[]>((resolve, reject) => {
+            const timer = setTimeout(() => reject(new Error('Worker timeout')), 1000);
+            const handler = (e: MessageEvent) => {
+              if (e.data?.type === 'DETECT_RESULT') {
+                clearTimeout(timer);
+                worker.removeEventListener('message', handler);
+                if (e.data.success && Array.isArray(e.data.detections)) {
+                  resolve(
+                    e.data.detections.map((d: any) => ({
+                      class: (mapCocoClass(d.class) || 'person') as ObjectClass,
+                      confidence: d.confidence,
+                      bbox: d.bbox,
+                    }))
+                  );
+                } else {
+                  reject(new Error(e.data?.reason || 'Worker failed'));
+                }
+              }
+            };
+            worker.addEventListener('message', handler);
+            worker.postMessage({
+              type: 'DETECT',
+              payload: {
+                imageData: imgData,
+                width: cachedInferenceCanvas.width,
+                height: cachedInferenceCanvas.height,
+                timestamp: Date.now(),
+              },
+            });
+          });
+
+          const detections = await workerPromise;
+          return {
+            detections: applyNmsDetections(detections, 0.4),
+            engine: 'yolo-worker',
+            latencyMs: Math.round(performance.now() - startTime),
+          };
+        }
+      }
+    } catch {
+      // Step down to Rung 3
+    }
+  }
+
+  // Rung 3: COCO-SSD (in-browser MobileNet fallback)
+  if (model) {
+    const rawDetections = await performSurveillanceInference(model, video, isNightMode, options);
+    return {
+      detections: rawDetections,
+      engine: 'coco-ssd',
+      latencyMs: Math.round(performance.now() - startTime),
+    };
+  }
+
+  return {
+    detections: [],
+    engine: 'coco-ssd',
+    latencyMs: Math.round(performance.now() - startTime),
+  };
+}
+
 /**
  * Merges multi-pass detections using Non-Maximum Suppression (IoU threshold)
  */

@@ -84,7 +84,7 @@ test.describe('IBVAP Surveillance Platform - Phase 7 E2E Smoke Tests', () => {
     await unreadableRow.click();
 
     // Dossier modal: check that NO fake owner or verified badge appears
-    await expect(page.locator('text=No Registry Record Attached')).toBeVisible();
+    await expect(page.locator('text=No Registry Record Attached').first()).toBeVisible();
     await expect(page.locator('text=RTO Verified')).toHaveCount(0);
 
     // Operator manual plate correction

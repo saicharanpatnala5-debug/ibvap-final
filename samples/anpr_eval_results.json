@@ -6,68 +6,8 @@
   "total_character_errors": 14,
   "character_error_rate_pct": 17.72,
   "valid_format_pct": 75.0,
-  "avg_latency_ms": 1806.73,
+  "avg_latency_ms": 1896.12,
   "results": [
-    {
-      "filename": "DL01AB1234.png",
-      "ground_truth": "DL01AB1234",
-      "raw_ocr": "DL01AB1234",
-      "corrected": "DL01AB1234",
-      "is_exact_match": true,
-      "edit_distance": 0,
-      "is_valid_format": true,
-      "format_type": "standard",
-      "confidence": 84.8,
-      "latency_ms": 1525.94
-    },
-    {
-      "filename": "MH12CD5678.png",
-      "ground_truth": "MH12CD5678",
-      "raw_ocr": "MH12CD5678",
-      "corrected": "MH12CD5678",
-      "is_exact_match": true,
-      "edit_distance": 0,
-      "is_valid_format": true,
-      "format_type": "standard",
-      "confidence": 85.3,
-      "latency_ms": 2106.48
-    },
-    {
-      "filename": "KA04E9999.png",
-      "ground_truth": "KA04E9999",
-      "raw_ocr": "KA04E9999",
-      "corrected": "KA04E9999",
-      "is_exact_match": true,
-      "edit_distance": 0,
-      "is_valid_format": true,
-      "format_type": "standard",
-      "confidence": 78.1,
-      "latency_ms": 1732.31
-    },
-    {
-      "filename": "UP16BC9999.png",
-      "ground_truth": "UP16BC9999",
-      "raw_ocr": "UP16BC99",
-      "corrected": "UP168C99",
-      "is_exact_match": false,
-      "edit_distance": 3,
-      "is_valid_format": false,
-      "format_type": "invalid",
-      "confidence": 73.2,
-      "latency_ms": 1724.62
-    },
-    {
-      "filename": "HR26DK8821.png",
-      "ground_truth": "HR26DK8821",
-      "raw_ocr": "HR260K8821",
-      "corrected": "HR26OK8821",
-      "is_exact_match": false,
-      "edit_distance": 1,
-      "is_valid_format": true,
-      "format_type": "standard",
-      "confidence": 83.8,
-      "latency_ms": 1682.51
-    },
     {
       "filename": "22BH1234AA.png",
       "ground_truth": "22BH1234AA",
@@ -78,19 +18,19 @@
       "is_valid_format": true,
       "format_type": "bharat",
       "confidence": 85.3,
-      "latency_ms": 1348.09
+      "latency_ms": 1978.7
     },
     {
-      "filename": "TN09AZ4321.png",
-      "ground_truth": "TN09AZ4321",
-      "raw_ocr": "TN09AZ4321",
-      "corrected": "TN09AZ4321",
+      "filename": "DL01AB1234.png",
+      "ground_truth": "DL01AB1234",
+      "raw_ocr": "DL01AB1234",
+      "corrected": "DL01AB1234",
       "is_exact_match": true,
       "edit_distance": 0,
       "is_valid_format": true,
       "format_type": "standard",
-      "confidence": 86.5,
-      "latency_ms": 1673.39
+      "confidence": 84.8,
+      "latency_ms": 1319.15
     },
     {
       "filename": "GJ01XY5555.png",
@@ -102,7 +42,67 @@
       "is_valid_format": false,
       "format_type": "invalid",
       "confidence": 66.1,
-      "latency_ms": 2660.5
+      "latency_ms": 2845.69
+    },
+    {
+      "filename": "HR26DK8821.png",
+      "ground_truth": "HR26DK8821",
+      "raw_ocr": "HR260K8821",
+      "corrected": "HR26OK8821",
+      "is_exact_match": false,
+      "edit_distance": 1,
+      "is_valid_format": true,
+      "format_type": "standard",
+      "confidence": 83.8,
+      "latency_ms": 1710.16
+    },
+    {
+      "filename": "KA04E9999.png",
+      "ground_truth": "KA04E9999",
+      "raw_ocr": "KA04E9999",
+      "corrected": "KA04E9999",
+      "is_exact_match": true,
+      "edit_distance": 0,
+      "is_valid_format": true,
+      "format_type": "standard",
+      "confidence": 78.1,
+      "latency_ms": 1761.01
+    },
+    {
+      "filename": "MH12CD5678.png",
+      "ground_truth": "MH12CD5678",
+      "raw_ocr": "MH12CD5678",
+      "corrected": "MH12CD5678",
+      "is_exact_match": true,
+      "edit_distance": 0,
+      "is_valid_format": true,
+      "format_type": "standard",
+      "confidence": 85.3,
+      "latency_ms": 2175.07
+    },
+    {
+      "filename": "TN09AZ4321.png",
+      "ground_truth": "TN09AZ4321",
+      "raw_ocr": "TN09AZ4321",
+      "corrected": "TN09AZ4321",
+      "is_exact_match": true,
+      "edit_distance": 0,
+      "is_valid_format": true,
+      "format_type": "standard",
+      "confidence": 86.5,
+      "latency_ms": 1667.71
+    },
+    {
+      "filename": "UP16BC9999.png",
+      "ground_truth": "UP16BC9999",
+      "raw_ocr": "UP16BC99",
+      "corrected": "UP168C99",
+      "is_exact_match": false,
+      "edit_distance": 3,
+      "is_valid_format": false,
+      "format_type": "invalid",
+      "confidence": 73.2,
+      "latency_ms": 1711.48
     }
   ]
 }

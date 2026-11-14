@@ -36,6 +36,8 @@ import {
   getDetectionModel,
   mapCocoClass,
   performSurveillanceInference,
+  performLadderSurveillanceInference,
+  DetectionEngineType,
   ObjectTracker,
   LightweightMotionTracker,
 } from '../services/detectionEngine';
@@ -135,6 +137,8 @@ export const CameraFeed: React.FC<CameraFeedProps> = ({
     if (typeof window === 'undefined') return false;
     return new URLSearchParams(window.location.search).get('debug') === '1';
   });
+
+  const [currentEngine, setCurrentEngine] = useState<DetectionEngineType>('ai-service');
 
   // WebSocket streaming connection state to ai-service
   const [isWsConnected, setIsWsConnected] = useState<boolean>(false);
@@ -429,18 +433,14 @@ export const CameraFeed: React.FC<CameraFeedProps> = ({
         }
       }
 
-      // 2. Real Detection Pass on Frame Content using Multi-Scale Aspect-Preserved Surveillance Inference
+      // 2. Real Detection Pass using Fallback Ladder: ai-service -> browser YOLO worker -> COCO-SSD
       const model = await getDetectionModel();
-      if (!model) {
-        isDetectingRef.current = false;
-        return;
-      }
 
-      const detectStart = performance.now();
-      const rawDetections = await performSurveillanceInference(model, video, isNightMode);
-      const detectDuration = performance.now() - detectStart;
-      setInferenceFps(Math.round(1000 / Math.max(1, detectDuration)));
-      setDetectionLatencyMs(Math.round(detectDuration));
+      const ladderResult = await performLadderSurveillanceInference(model, video, isNightMode);
+      const rawDetections = ladderResult.detections;
+      setCurrentEngine(ladderResult.engine);
+      setInferenceFps(Math.round(1000 / Math.max(1, ladderResult.latencyMs)));
+      setDetectionLatencyMs(ladderResult.latencyMs);
 
       // 3. Multi-object tracker update with persistent IDs, provisional reconciliation & trajectories
       const updatedTracks = trackerRef.current.update(rawDetections, Date.now());
@@ -945,8 +945,15 @@ export const CameraFeed: React.FC<CameraFeedProps> = ({
 
             ctx.font = '10px monospace';
             ctx.fillStyle = '#94a3b8';
+            const engineLabel = isWsConnected
+              ? 'WebSocket AI-Service'
+              : currentEngine === 'ai-service'
+              ? 'Python AI-Service (YOLO26)'
+              : currentEngine === 'yolo-worker'
+              ? 'Browser YOLO (ONNX)'
+              : 'Browser COCO-SSD (Fallback)';
             ctx.fillText(
-              `Pipeline: ${isWsConnected ? 'WebSocket AI-Service' : 'In-Browser Vision'}`,
+              `Pipeline: ${engineLabel}`,
               hudX + 8,
               hudY + 32
             );
