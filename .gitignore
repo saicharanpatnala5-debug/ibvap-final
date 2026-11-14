@@ -17,6 +17,9 @@ samples/*.webm
 *.mkv
 *.webm
 samples/debug_detections/
+samples/debug_videos/
+docs/anpr_review.html
+*.debug.mp4
 
 # Java / Spring Boot Artifacts
 target/
