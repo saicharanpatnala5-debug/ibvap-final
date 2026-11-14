@@ -5,6 +5,17 @@ build/
 coverage/
 test-results/
 playwright-report/
+# Video footage and media captures
+samples/*.mp4
+samples/*.avi
+samples/*.mov
+samples/*.mkv
+samples/*.webm
+*.mp4
+*.avi
+*.mov
+*.mkv
+*.webm
 samples/debug_detections/
 
 # Java / Spring Boot Artifacts
