@@ -16,6 +16,12 @@ export interface AICommandState {
   sessionMemory: AISessionMemory;
 }
 
+export function safeShortId(id?: unknown): string {
+  if (typeof id === 'string') return id.slice(-4);
+  if (typeof id === 'number') return String(id).slice(-4);
+  return '0000';
+}
+
 /**
  * Format timestamp into readable surveillance time string (HH:MM:SS)
  */
@@ -198,7 +204,7 @@ export function generateInvestigationReport(
     cameraId: incident.cameraId,
     cameraName: incident.cameraName,
     timestamp: incident.timestamp,
-    summary: `Forensic analysis of Incident #${incident.id.slice(-4)}: A ${incident.objectClass.toUpperCase()} was detected on ${incident.cameraName} exhibiting an overall threat rating of ${incident.riskScore}/100. Key triggers include ${incident.riskFactors.map((f) => f.label).join(', ')}.`,
+    summary: `Forensic analysis of Incident #${safeShortId(incident.id)}: A ${incident.objectClass.toUpperCase()} was detected on ${incident.cameraName} exhibiting an overall threat rating of ${incident.riskScore}/100. Key triggers include ${incident.riskFactors.map((f) => f.label).join(', ')}.`,
     objectClass: incident.objectClass,
     objectId: incident.objectId,
     anprPlate: incident.anprPlate,
@@ -314,7 +320,9 @@ export async function processAICommand(
 
   // 1. Check direct ID matches (e.g. "alert-1721...", or suffix "#2812")
   const idMatch = alerts.find(
-    (a) => q.includes(a.id.toLowerCase()) || (a.id.length > 5 && q.includes(a.id.slice(-4).toLowerCase()))
+    (a) =>
+      typeof a?.id === 'string' &&
+      (q.includes(a.id.toLowerCase()) || (a.id.length > 5 && q.includes(safeShortId(a.id).toLowerCase())))
   );
   if (idMatch) {
     targetIncident = idMatch;
@@ -449,7 +457,7 @@ ${
 
 ${
   topAlertOnCam
-    ? `**Current Risk Assessment**: Incident #${topAlertOnCam.id.slice(-4)} (${topAlertOnCam.title}) flagged with **${topAlertOnCam.riskScore}/100 Risk Score** (${topAlertOnCam.severity.toUpperCase()}).`
+    ? `**Current Risk Assessment**: Incident #${safeShortId(topAlertOnCam.id)} (${topAlertOnCam.title}) flagged with **${topAlertOnCam.riskScore}/100 Risk Score** (${topAlertOnCam.severity.toUpperCase()}).`
     : `**Current Risk Assessment**: Baseline nominal activity. No critical threat escalations present in this frame.`
 }`;
 
@@ -582,7 +590,7 @@ To initiate deep forensic analysis, select an incident or reply with:
     return {
       id: `msg-${now}`,
       sender: 'ai',
-      text: `I have compiled a forensic **Investigation Report** for **Incident #${targetIncident.id.slice(-4)}** (${targetIncident.title}) on **${targetIncident.cameraName}**.
+      text: `I have compiled a forensic **Investigation Report** for **Incident #${safeShortId(targetIncident.id)}** (${targetIncident.title}) on **${targetIncident.cameraName}**.
 
 ### Investigation Highlights
 - **Primary Subject**: ${targetIncident.objectClass.toUpperCase()} #${targetIncident.objectId}
@@ -625,7 +633,7 @@ Review the structured investigation card and timeline below. You can accept or m
     return {
       id: `msg-${now}`,
       sender: 'ai',
-      text: `Based on real-time telemetry from **${targetIncident.cameraName}** (Incident #${targetIncident.id.slice(-4)}: ${targetIncident.title}), here is the explainable operational recommendation.
+      text: `Based on real-time telemetry from **${targetIncident.cameraName}** (Incident #${safeShortId(targetIncident.id)}: ${targetIncident.title}), here is the explainable operational recommendation.
 
 As per platform governance, the AI will not execute actions autonomously. Please **Accept**, **Modify**, or **Reject** below to commit this decision to the audit log:`,
       timestamp: now,
@@ -897,7 +905,7 @@ ${predictions.map((p) => `**⚠️ PREDICTION: ${p.title}**
 - **Cameras**: ${cameras.length} feed(s) (${cameras.map((c) => c.name).join(', ') || 'None'})
 - **Total Recorded Incidents**: ${alerts.length}
 - **Active Critical Alerts**: ${alerts.filter((a) => a.severity === 'critical').length}
-${topAlert ? `- **Latest Incident**: #${topAlert.id.slice(-4)} (${topAlert.title}) on ${topAlert.cameraName} (Score: ${topAlert.riskScore}/100)` : ''}
+${topAlert ? `- **Latest Incident**: #${safeShortId(topAlert.id)} (${topAlert.title}) on ${topAlert.cameraName} (Score: ${topAlert.riskScore}/100)` : ''}
 
 You can ask me to:
 • *"Show me today's critical events"*

@@ -294,6 +294,9 @@ export interface AIChatMessage {
   sender: 'user' | 'ai' | 'system';
   text: string;
   timestamp: number;
+  source?: 'gemini' | 'fallback';
+  reason?: string;
+  model?: string;
   referencedEntities?: {
     cameraIds?: string[];
     incidentIds?: string[];

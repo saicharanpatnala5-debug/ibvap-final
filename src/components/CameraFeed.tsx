@@ -264,13 +264,28 @@ export const CameraFeed: React.FC<CameraFeedProps> = ({
 
   // Continuous background detection loop
   const runDetectionPass = useCallback(async () => {
+    // Pause immediately if browser tab is hidden to conserve system resources
+    if (typeof document !== 'undefined' && document.hidden) {
+      return;
+    }
+
     const video = videoRef.current;
     const canvas = canvasRef.current;
-    if (!video || !canvas || video.readyState < 1 || isDetectingRef.current) {
+    if (!video || !canvas || video.readyState < 2) {
       return;
     }
 
     const now = performance.now();
+
+    // Safety watchdog: recover if a previous inference pass timed out or hung
+    if (isDetectingRef.current && now - lastDetectionTimeRef.current > 1500) {
+      isDetectingRef.current = false;
+    }
+
+    if (isDetectingRef.current) {
+      return;
+    }
+
     // Low debounce limit (75ms) allowing pipelined passes at ~8-10 FPS without UI contention
     if (now - lastDetectionTimeRef.current < 75) {
       return;
@@ -429,11 +444,12 @@ export const CameraFeed: React.FC<CameraFeedProps> = ({
     } finally {
       isDetectingRef.current = false;
     }
-  }, [camera, isNightMode, onAlertGenerated]);
+  }, [camera, isNightMode, onAlertGenerated, onSelectPlate]);
 
   // Continuous Pipelined Background Detection Loop:
   // Starts processing frames simultaneously with upload/playback setup,
-  // synchronized with compositor frame presentation via requestVideoFrameCallback or fast timer
+  // synchronized with compositor frame presentation via requestVideoFrameCallback or throttled timer.
+  // Automatically suspends when browser tab is hidden to eliminate idle GPU/CPU drain.
   useEffect(() => {
     let timeoutId: number | null = null;
     let rvfcId: number | null = null;
@@ -441,14 +457,15 @@ export const CameraFeed: React.FC<CameraFeedProps> = ({
 
     const triggerPass = async () => {
       if (isCancelled) return;
+      if (document.hidden) return; // Tab paused
+
       const video = videoRef.current;
-      if (video && video.readyState >= 1) {
+      if (video && video.readyState >= 2) {
         await runDetectionPass();
       }
-      if (!isCancelled) {
-        // Use requestVideoFrameCallback when available to keep pace with video decoding in real time
+      if (!isCancelled && !document.hidden) {
         const videoEl = videoRef.current as any;
-        if (videoEl && typeof videoEl.requestVideoFrameCallback === 'function' && !video.paused) {
+        if (videoEl && typeof videoEl.requestVideoFrameCallback === 'function' && !video?.paused) {
           rvfcId = videoEl.requestVideoFrameCallback(() => {
             triggerPass();
           });
@@ -458,10 +475,19 @@ export const CameraFeed: React.FC<CameraFeedProps> = ({
       }
     };
 
+    // Tab visibility listener: resume immediately when operator returns to tab
+    const handleVisibilityChange = () => {
+      if (!document.hidden && !isCancelled) {
+        triggerPass();
+      }
+    };
+    document.addEventListener('visibilitychange', handleVisibilityChange);
+
     triggerPass();
 
     return () => {
       isCancelled = true;
+      document.removeEventListener('visibilitychange', handleVisibilityChange);
       if (timeoutId) clearTimeout(timeoutId);
       const videoEl = videoRef.current as any;
       if (videoEl && rvfcId && typeof videoEl.cancelVideoFrameCallback === 'function') {

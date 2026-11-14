@@ -46,6 +46,7 @@ import {
   generateInvestigationReport,
 } from '../services/aiCommandCenter';
 import { getActiveCameraFrameSnapshot } from '../services/cameraFrameRegistry';
+import { loadStoredChatHistory, saveStoredChatHistory } from '../services/storageService';
 import { ExplainableRecommendationCard } from './ExplainableRecommendationCard';
 import { InvestigationReportCard } from './InvestigationReportCard';
 import { AIPredictiveCard, AnomalyCard } from './AIPredictiveCard';
@@ -80,19 +81,30 @@ export const AICommandCenter: React.FC<AICommandCenterProps> = ({
   // Active Subtab inside Command Center: 'chat' | 'anomalies_predictions' | 'audit_log'
   const [activeSubTab, setActiveSubTab] = useState<'chat' | 'anomalies_predictions' | 'audit_log'>('chat');
 
-  // Chat message state
-  const [messages, setMessages] = useState<AIChatMessage[]>([
-    {
-      id: 'welcome-msg',
-      sender: 'ai',
-      text: `**IBVAP AI Command Center is active & grounded in live surveillance state.**
+  // Chat message state initialized from persistent storage
+  const [messages, setMessages] = useState<AIChatMessage[]>(() => {
+    const stored = loadStoredChatHistory();
+    if (stored && stored.length > 0) return stored;
+    return [
+      {
+        id: 'welcome-msg',
+        sender: 'ai',
+        source: 'fallback',
+        reason: 'platform initialized',
+        text: `**IBVAP AI Command Center is active & grounded in live surveillance state.**
 
 I continuously analyze your registered cameras (${cameras.length} active), real-time alerts (${alerts.length} logged), virtual perimeter breaches, and ANPR license plate scans.
 
 Ask me anything or pick a quick command to begin:`,
-      timestamp: Date.now() - 10000,
-    },
-  ]);
+        timestamp: Date.now() - 10000,
+      },
+    ];
+  });
+
+  // Persist chat messages on update
+  useEffect(() => {
+    saveStoredChatHistory(messages);
+  }, [messages]);
 
   const [inputQuery, setInputQuery] = useState('');
   const [isProcessing, setIsProcessing] = useState(false);
@@ -266,6 +278,9 @@ Ask me anything or pick a quick command to begin:`,
       };
 
       let aiMessageText = '';
+      let aiSource: 'gemini' | 'fallback' = 'fallback';
+      let aiReason: string | undefined = undefined;
+      let aiModel: string | undefined = undefined;
 
       // Call backend AI Copilot endpoint
       try {
@@ -286,9 +301,22 @@ Ask me anything or pick a quick command to begin:`,
           if (data.text) {
             aiMessageText = data.text;
           }
+          if (data.source === 'gemini') {
+            aiSource = 'gemini';
+            aiModel = data.model;
+          } else {
+            aiSource = 'fallback';
+            aiReason = data.reason || 'local engine';
+          }
+        } else {
+          const errData = await res.json().catch(() => ({}));
+          aiSource = 'fallback';
+          aiReason = errData.reason || `server error ${res.status}`;
         }
-      } catch (networkErr) {
+      } catch (networkErr: any) {
         console.warn('AI endpoint network notice, utilizing grounded fallback engine:', networkErr);
+        aiSource = 'fallback';
+        aiReason = 'network error';
       }
 
       // Also compute structured action recommendations (investigation report, action dispatch)
@@ -307,6 +335,9 @@ Ask me anything or pick a quick command to begin:`,
         sender: 'ai',
         text: aiMessageText || localAnalysis.text,
         timestamp: Date.now(),
+        source: aiSource,
+        reason: aiReason,
+        model: aiModel,
         recommendation: localAnalysis.recommendation,
         investigationReport: localAnalysis.investigationReport,
         predictiveSignals: localAnalysis.predictiveSignals,
@@ -721,6 +752,34 @@ Try clicking one of the suggested command actions above or retry your query.`,
                               className="max-h-48 rounded object-cover"
                             />
                           )}
+                        </div>
+                      )}
+
+                      {/* AI Engine & Fallback Status Badge */}
+                      {isAi && (
+                        <div className="flex items-center justify-between gap-2 mb-2 pb-1.5 border-b border-neutral-800/80">
+                          <div className="flex items-center gap-1.5">
+                            {msg.source === 'gemini' ? (
+                              <span
+                                className="inline-flex items-center gap-1 rounded bg-emerald-950/80 border border-emerald-700/60 px-2 py-0.5 text-[10px] font-semibold text-emerald-300"
+                                title={`Grounded by Gemini Multimodal API (${msg.model || 'gemini-2.5-flash'})`}
+                              >
+                                <Sparkles className="h-2.5 w-2.5 text-emerald-400" />
+                                <span>Gemini AI {msg.model ? `(${msg.model})` : ''}</span>
+                              </span>
+                            ) : (
+                              <span
+                                className="inline-flex items-center gap-1 rounded bg-amber-950/80 border border-amber-700/60 px-2 py-0.5 text-[10px] font-semibold text-amber-300"
+                                title={`Grounded by Local Heuristic Engine (${msg.reason || 'telemetry'})`}
+                              >
+                                <Bot className="h-2.5 w-2.5 text-amber-400" />
+                                <span>Local Heuristic Fallback {msg.reason ? `• ${msg.reason}` : ''}</span>
+                              </span>
+                            )}
+                          </div>
+                          <span className="font-mono text-[10px] text-neutral-500">
+                            {new Date(msg.timestamp).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit', second: '2-digit' })}
+                          </span>
                         </div>
                       )}
 

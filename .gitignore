@@ -1,8 +1,17 @@
+# Dependencies
 node_modules/
-build/
+
+# Production build artifacts
 dist/
+build/
 coverage/
+
+# OS and runtime files
 .DS_Store
 *.log
-.env*
+
+# Environment variables
+.env
+.env.local
+.env.*
 !.env.example

@@ -1,34 +1,41 @@
 import { createWorker, Worker } from 'tesseract.js';
 import { ANPRResult, BoundingBox, VehicleDossier } from '../types';
 
-let ocrWorker: Worker | null = null;
-let ocrInitializing = false;
-let ocrFailed = false;
+let ocrWorkerPromise: Promise<Worker | null> | null = null;
 
 async function getOcrWorker(): Promise<Worker | null> {
-  if (ocrWorker) return ocrWorker;
-  if (ocrFailed) return null;
-  if (ocrInitializing) {
-    let attempts = 0;
-    while (ocrInitializing && attempts < 30) {
-      await new Promise((r) => setTimeout(r, 100));
-      attempts++;
-    }
-    return ocrWorker;
-  }
+  if (ocrWorkerPromise) return ocrWorkerPromise;
 
-  try {
-    ocrInitializing = true;
-    const worker = await createWorker('eng');
-    ocrWorker = worker;
-    ocrInitializing = false;
-    return worker;
-  } catch (err) {
-    console.warn('Tesseract OCR worker initialization note:', err);
-    ocrFailed = true;
-    ocrInitializing = false;
-    return null;
-  }
+  ocrWorkerPromise = (async () => {
+    try {
+      const origin = typeof window !== 'undefined' ? window.location.origin : undefined;
+      const worker = await createWorker('eng', 1, {
+        langPath: origin,
+        gzip: false,
+        errorHandler: (err) => console.warn('[IBVAP ANPR Tesseract Notice]', err),
+      });
+
+      await worker.setParameters({
+        tessedit_char_whitelist: 'ABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789',
+      });
+
+      return worker;
+    } catch (err) {
+      console.warn('[IBVAP ANPR] Local offline traineddata load notice, retrying with standard loader:', err);
+      try {
+        const worker = await createWorker('eng');
+        await worker.setParameters({
+          tessedit_char_whitelist: 'ABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789',
+        });
+        return worker;
+      } catch (fallbackErr) {
+        console.error('[IBVAP ANPR] Tesseract worker initialization failed:', fallbackErr);
+        return null;
+      }
+    }
+  })();
+
+  return ocrWorkerPromise;
 }
 
 export const INDIAN_STATE_RTO_NAMES: Record<string, string> = {
@@ -520,7 +527,14 @@ function hashPlateString(str: string): number {
   return Math.abs(hash);
 }
 
-// Curated demo databases for realistic surveillance lookup
+// =========================================================================
+// SIMULATED / DEMO VEHICLE REGISTRY DATA
+// NOTE: All vehicle registration data, owners, contacts, and vehicle dossiers
+// below are strictly SIMULATED / DEMO DATA for prototype verification. They are
+// NOT sourced from or connected to real RTO, Vahan, or governmental databases.
+// =========================================================================
+
+// Curated demo databases for realistic surveillance lookup (SIMULATED / DEMO DATA)
 const DEMO_MAKES_MODELS = [
   { make: 'Toyota', model: 'Innova Crysta', class: 'Multi-Utility Vehicle (MUV)', fuel: 'Diesel' },
   { make: 'Tata', model: 'Nexon EV', class: 'Compact Electric SUV', fuel: 'Electric (BEV)' },
