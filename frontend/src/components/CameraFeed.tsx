@@ -125,6 +125,90 @@ export const CameraFeed: React.FC<CameraFeedProps> = ({
   const targetTracksRef = useRef<TrackedObject[]>([]);
   const lastUiUpdateRef = useRef<number>(0);
 
+  // Hidden debug mode (?debug=1 in URL parameter, off by default)
+  const [isDebugMode] = useState<boolean>(() => {
+    if (typeof window === 'undefined') return false;
+    return new URLSearchParams(window.location.search).get('debug') === '1';
+  });
+
+  // WebSocket streaming connection state to ai-service
+  const [isWsConnected, setIsWsConnected] = useState<boolean>(false);
+  const lastRenderTimeRef = useRef<number>(performance.now());
+  const renderFpsRef = useRef<number>(60);
+  const frameCountRef = useRef<number>(0);
+  const lastFpsCalcTimeRef = useRef<number>(performance.now());
+
+  // WebSocket ingestion for ai-service streaming & zone telemetry
+  useEffect(() => {
+    const wsUrl = camera.wsUrl || (camera.aiSourceId ? `ws://${window.location.hostname}:8000/ws/${camera.aiSourceId}` : null);
+    if (!wsUrl) return;
+
+    let ws: WebSocket | null = null;
+    let isCancelled = false;
+
+    try {
+      ws = new WebSocket(wsUrl);
+      ws.onopen = () => {
+        if (!isCancelled) setIsWsConnected(true);
+      };
+      ws.onmessage = (event) => {
+        try {
+          const payload = JSON.parse(event.data);
+          if (payload.entities && Array.isArray(payload.entities)) {
+            const mappedTracks: TrackedObject[] = payload.entities.map((e: any) => ({
+              id: typeof e.id === 'number' ? e.id : parseInt(String(e.id).replace(/\D/g, ''), 10) || 100,
+              class: (e.class || 'moving_object') as ObjectClass,
+              confidence: Math.round((e.confidence ?? 0.8) * 100),
+              confidenceTier: (e.confidence ?? 0.8) > 0.7 ? 'high' : (e.confidence ?? 0.8) > 0.4 ? 'medium' : 'low',
+              bbox: {
+                x: e.box[0],
+                y: e.box[1],
+                width: e.box[2],
+                height: e.box[3],
+              },
+              firstSeenTimestamp: Date.now() - (e.age ?? 0) * 33,
+              lastSeenTimestamp: Date.now(),
+              trajectory: [],
+              velocity: Math.round(e.speed ?? 0),
+              direction: e.direction || 'Stationary',
+              isLoitering: false,
+              hasCrossedZoneIds: [],
+              state: e.state,
+              age: e.age,
+              hits: e.hits,
+              speed: e.speed,
+              footpoint: e.footpoint ? { x: e.footpoint[0], y: e.footpoint[1] } : undefined,
+            }));
+
+            targetTracksRef.current = mappedTracks;
+
+            // Debounced state update for UI lists
+            const now = performance.now();
+            if (now - lastUiUpdateRef.current > 200) {
+              setTrackedObjects(mappedTracks);
+              lastUiUpdateRef.current = now;
+            }
+          }
+        } catch {
+          // Ignore malformed ws frame
+        }
+      };
+      ws.onerror = () => {
+        if (!isCancelled) setIsWsConnected(false);
+      };
+      ws.onclose = () => {
+        if (!isCancelled) setIsWsConnected(false);
+      };
+    } catch {
+      setIsWsConnected(false);
+    }
+
+    return () => {
+      isCancelled = true;
+      if (ws) ws.close();
+    };
+  }, [camera.wsUrl, camera.aiSourceId]);
+
   // Register active camera frame provider for AI visual grounding
   useEffect(() => {
     registerCameraFrameProvider(camera.id, camera.name, () => {
@@ -264,6 +348,11 @@ export const CameraFeed: React.FC<CameraFeedProps> = ({
 
   // Continuous background detection loop
   const runDetectionPass = useCallback(async () => {
+    // If remote ai-service is actively streaming over WebSocket, bypass local in-browser model pass
+    if (isWsConnected) {
+      return;
+    }
+
     // Pause immediately if browser tab is hidden to conserve system resources
     if (typeof document !== 'undefined' && document.hidden) {
       return;
@@ -444,7 +533,7 @@ export const CameraFeed: React.FC<CameraFeedProps> = ({
     } finally {
       isDetectingRef.current = false;
     }
-  }, [camera, isNightMode, onAlertGenerated, onSelectPlate]);
+  }, [camera, isNightMode, onAlertGenerated, onSelectPlate, isWsConnected]);
 
   // Continuous Pipelined Background Detection Loop:
   // Starts processing frames simultaneously with upload/playback setup,
@@ -518,11 +607,25 @@ export const CameraFeed: React.FC<CameraFeedProps> = ({
           const cH = canvas.height;
           ctx.clearRect(0, 0, cW, cH);
 
-          // 0. Lightweight Optical/Motion Tracking: instant visual feedback (<30ms) between AI passes
+          // Calculate render delta-time for framerate-independent box interpolation
           const nowPerf = performance.now();
+          const dt = Math.min(0.1, Math.max(0.001, (nowPerf - lastRenderTimeRef.current) / 1000));
+          lastRenderTimeRef.current = nowPerf;
+
+          // Rolling FPS calculation for debug display
+          frameCountRef.current++;
+          if (nowPerf - lastFpsCalcTimeRef.current >= 500) {
+            renderFpsRef.current = Math.round(
+              (frameCountRef.current * 1000) / (nowPerf - lastFpsCalcTimeRef.current)
+            );
+            frameCountRef.current = 0;
+            lastFpsCalcTimeRef.current = nowPerf;
+          }
+
+          // 0. Lightweight Optical/Motion Tracking: instant visual feedback (<30ms) between AI passes
           if (nowPerf - lastMotionCheckRef.current > 32) {
             lastMotionCheckRef.current = nowPerf;
-            if (!video.paused && video.readyState >= 2) {
+            if (!video.paused && video.readyState >= 2 && !isWsConnected) {
               const motionRegions = motionTrackerRef.current.detectMotion(video);
               if (motionRegions.length > 0) {
                 const updated = trackerRef.current.addProvisionalMotion(motionRegions, Date.now());
@@ -615,9 +718,11 @@ export const CameraFeed: React.FC<CameraFeedProps> = ({
           }
 
           // 3. Interpolate Tracked Objects for Smooth 60 FPS Bounding Box Transitions
+          // Framerate-independent exponential smoothing between incoming detections & WebSocket packets
           const displayMap = displayTracksRef.current;
           const targetTracks = targetTracksRef.current;
           const targetIdSet = new Set(targetTracks.map((t) => t.id));
+          const lerpFactor = reducedMotion ? 1 : 1 - Math.exp(-dt * 18.0);
 
           targetTracks.forEach((tgt) => {
             let disp = displayMap.get(tgt.id);
@@ -629,8 +734,6 @@ export const CameraFeed: React.FC<CameraFeedProps> = ({
               };
               displayMap.set(tgt.id, disp);
             }
-            // Smooth lerp (factor 0.22 per frame = ~80ms smooth transition)
-            const lerpFactor = reducedMotion ? 1 : 0.22;
             disp.bbox.x += (tgt.bbox.x - disp.bbox.x) * lerpFactor;
             disp.bbox.y += (tgt.bbox.y - disp.bbox.y) * lerpFactor;
             disp.bbox.width += (tgt.bbox.width - disp.bbox.width) * lerpFactor;
@@ -649,7 +752,7 @@ export const CameraFeed: React.FC<CameraFeedProps> = ({
             }
           }
 
-          // 4. Render Tracked Objects with High Precision and ANPR Validation
+          // 4. Render Tracked Objects with Compact IDs & High Precision
           for (const disp of displayMap.values()) {
             const obj = disp.track;
             const bbox = disp.bbox;
@@ -681,10 +784,10 @@ export const CameraFeed: React.FC<CameraFeedProps> = ({
             ctx.save();
             ctx.globalAlpha = Math.max(0.05, Math.min(1, disp.alpha));
 
-            // Trajectory trail
-            if (!reducedMotion && obj.trajectory.length > 1) {
+            // Trajectory trail: shown in debug mode or when motion trails enabled
+            if (isDebugMode || (!reducedMotion && obj.trajectory.length > 1)) {
               ctx.save();
-              ctx.lineWidth = 1.5;
+              ctx.lineWidth = isDebugMode ? 2 : 1.5;
               ctx.strokeStyle = isProvisional
                 ? 'rgba(245, 158, 11, 0.45)'
                 : isPerson
@@ -693,27 +796,53 @@ export const CameraFeed: React.FC<CameraFeedProps> = ({
                 ? 'rgba(239, 68, 68, 0.45)'
                 : 'rgba(16, 185, 129, 0.45)';
               ctx.beginPath();
-              const start = obj.trajectory[0];
-              ctx.moveTo(start.x * cW, start.y * cH);
-              for (let i = 1; i < obj.trajectory.length; i++) {
-                ctx.lineTo(obj.trajectory[i].x * cW, obj.trajectory[i].y * cH);
+              if (obj.trajectory.length > 0) {
+                const start = obj.trajectory[0];
+                ctx.moveTo(start.x * cW, start.y * cH);
+                for (let i = 1; i < obj.trajectory.length; i++) {
+                  ctx.lineTo(obj.trajectory[i].x * cW, obj.trajectory[i].y * cH);
+                }
+                ctx.stroke();
+
+                if (isDebugMode) {
+                  for (const pt of obj.trajectory) {
+                    ctx.fillStyle = ctx.strokeStyle;
+                    ctx.beginPath();
+                    ctx.arc(pt.x * cW, pt.y * cH, 2, 0, Math.PI * 2);
+                    ctx.fill();
+                  }
+                }
               }
-              ctx.stroke();
               ctx.restore();
             }
 
-            // Bounding Box (provisional boxes use animated dash pattern)
+            // Bounding Box
             ctx.save();
             ctx.lineWidth = isProvisional ? 1.8 : obj.confidenceTier === 'high' ? 2 : 1.5;
             ctx.strokeStyle = color;
-            if (isProvisional) {
+            if (isProvisional || obj.state === 'tentative') {
               ctx.setLineDash([5, 3]);
-            } else if (obj.confidenceTier === 'low') {
+            } else if (obj.confidenceTier === 'low' || obj.state === 'lost') {
               ctx.setLineDash([4, 3]);
             } else {
               ctx.setLineDash([]);
             }
             ctx.strokeRect(bx, by, bw, bh);
+
+            // Footpoint crosshair in debug mode (?debug=1)
+            if (isDebugMode) {
+              const footX = bx + bw / 2;
+              const footY = by + bh;
+              ctx.save();
+              ctx.strokeStyle = '#38bdf8';
+              ctx.fillStyle = '#0284c7';
+              ctx.lineWidth = 1.5;
+              ctx.beginPath();
+              ctx.arc(footX, footY, 3, 0, Math.PI * 2);
+              ctx.fill();
+              ctx.stroke();
+              ctx.restore();
+            }
 
             // Secondary Person Head / Face Frame if available
             if (isPerson && obj.headBbox) {
@@ -728,21 +857,24 @@ export const CameraFeed: React.FC<CameraFeedProps> = ({
               ctx.strokeRect(hx, hy, hw, hh);
             }
 
-            // Top Badge
-            const confSuffix = isProvisional
-              ? ' (Fast Motion)'
-              : obj.confidenceTier === 'low'
-              ? ' (Low)'
-              : '';
-            const dirSuffix =
-              obj.direction && obj.direction !== 'Stationary' ? ` • ${obj.direction}` : '';
-            const labelText = isProvisional
-              ? `⚡ #${obj.id} ${obj.provisionalLabel || 'MOTION DETECTED'}${confSuffix}`
-              : `#${obj.id} ${obj.class.toUpperCase()} ${obj.confidence}%${confSuffix}${dirSuffix}`;
-            ctx.font = '600 11px system-ui, -apple-system, sans-serif';
+            // Compact ID Top Badge (clean, un-cluttered; detailed only in ?debug=1)
+            let labelText: string;
+            if (isDebugMode) {
+              const stateStr = (obj.state || (isProvisional ? 'tentative' : 'confirmed')).toUpperCase();
+              const hitsStr = obj.hits !== undefined ? ` h:${obj.hits}` : '';
+              const speedStr = obj.speed !== undefined ? ` ${Math.round(obj.speed)}px/s` : '';
+              labelText = `[${stateStr}] #${obj.id} ${obj.class}${hitsStr}${speedStr} ${obj.confidence}%`;
+            } else {
+              const speedTag = obj.speed && obj.speed > 8 ? ` • ${Math.round(obj.speed)}px/s` : '';
+              labelText = isProvisional
+                ? `⚡ #${obj.id} MOTION`
+                : `#${obj.id} ${obj.class}${speedTag}`;
+            }
+
+            ctx.font = '600 10px system-ui, -apple-system, sans-serif';
             const textWidth = ctx.measureText(labelText).width;
-            const badgeH = 18;
-            const badgeW = textWidth + 12;
+            const badgeH = 16;
+            const badgeW = textWidth + 10;
 
             const badgeY = by < badgeH + 2 ? by + 2 : by - badgeH;
             const badgeX = Math.max(1, Math.min(cW - badgeW - 1, bx));
@@ -756,7 +888,7 @@ export const CameraFeed: React.FC<CameraFeedProps> = ({
 
             ctx.fillStyle = '#ffffff';
             ctx.textAlign = 'left';
-            ctx.fillText(labelText, badgeX + 6, badgeY + 13);
+            ctx.fillText(labelText, badgeX + 5, badgeY + 12);
 
             // ANPR License Plate Badge on Vehicles with Indian NHAI/RTO Format Validation Status
             if (isVehicle && obj.anpr) {
@@ -787,6 +919,57 @@ export const CameraFeed: React.FC<CameraFeedProps> = ({
 
             ctx.restore();
           }
+
+          // 5. In-Canvas Debug Telemetry HUD when ?debug=1 is enabled
+          if (isDebugMode) {
+            ctx.save();
+            const hudX = 12;
+            const hudY = 12;
+            const hudW = 270;
+            const hudH = 86;
+            ctx.fillStyle = 'rgba(15, 23, 42, 0.90)';
+            ctx.fillRect(hudX, hudY, hudW, hudH);
+            ctx.strokeStyle = '#0284c7';
+            ctx.lineWidth = 1;
+            ctx.strokeRect(hudX, hudY, hudW, hudH);
+
+            ctx.font = '700 11px monospace';
+            ctx.fillStyle = '#38bdf8';
+            ctx.textAlign = 'left';
+            ctx.fillText('⚡ TRACKING HUD (?debug=1)', hudX + 8, hudY + 16);
+
+            ctx.font = '10px monospace';
+            ctx.fillStyle = '#94a3b8';
+            ctx.fillText(
+              `Pipeline: ${isWsConnected ? 'WebSocket AI-Service' : 'In-Browser Vision'}`,
+              hudX + 8,
+              hudY + 32
+            );
+            ctx.fillText(
+              `Display FPS: ${renderFpsRef.current} | Latency: ${detectionLatencyMs}ms`,
+              hudX + 8,
+              hudY + 46
+            );
+
+            const confirmedCount = Array.from(displayMap.values()).filter(
+              (d) => (d.track.state || 'confirmed') === 'confirmed'
+            ).length;
+            const tentativeCount = Array.from(displayMap.values()).filter(
+              (d) => d.track.state === 'tentative' || d.track.isProvisional
+            ).length;
+            ctx.fillText(
+              `Tracks: ${displayMap.size} (Conf: ${confirmedCount}, Tent: ${tentativeCount})`,
+              hudX + 8,
+              hudY + 60
+            );
+
+            const activeIds = Array.from(displayMap.keys())
+              .map((id) => `#${id}`)
+              .slice(0, 6)
+              .join(' ');
+            ctx.fillText(`Track IDs: ${activeIds || 'None'}`, hudX + 8, hudY + 74);
+            ctx.restore();
+          }
         }
       }
       animationFrameId = requestAnimationFrame(renderLoop);
@@ -794,7 +977,7 @@ export const CameraFeed: React.FC<CameraFeedProps> = ({
 
     animationFrameId = requestAnimationFrame(renderLoop);
     return () => cancelAnimationFrame(animationFrameId);
-  }, [camera.zones, isDrawingMode, inProgressPoints, reducedMotion]);
+  }, [camera.zones, isDrawingMode, inProgressPoints, reducedMotion, isDebugMode, isWsConnected]);
 
   // Handle canvas click during zone drawing mode or interactive ANPR inspection
   const handleCanvasClick = (e: React.MouseEvent<HTMLCanvasElement>) => {
@@ -893,6 +1076,18 @@ export const CameraFeed: React.FC<CameraFeedProps> = ({
         </div>
 
         <div className="flex items-center gap-2">
+          {/* Hidden Debug Mode Indicator */}
+          {isDebugMode && (
+            <div
+              id={`debug-mode-badge-${camera.id}`}
+              className="flex items-center gap-1 rounded-full border border-sky-500/50 bg-sky-950/60 px-2.5 py-1 text-xs font-mono font-medium text-sky-300"
+              title="Tracking Debug Telemetry Active (?debug=1)"
+            >
+              <span className="h-2 w-2 rounded-full bg-sky-400 animate-pulse" />
+              <span>DEBUG (?debug=1)</span>
+            </div>
+          )}
+
           {/* Automatic Night Mode Indicator */}
           <div
             id={`night-mode-badge-${camera.id}`}

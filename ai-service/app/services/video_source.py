@@ -31,7 +31,7 @@ class ActiveVideoSource:
         self.running = False
         self.thread: Optional[threading.Thread] = None
         self.detector = SurveillanceDetector()
-        self.zone_monitor = ZoneBreachMonitor()
+        self.zone_monitor = ZoneBreachMonitor(debounce_frames=3)
         if zones:
             self.zone_monitor.set_zones(zones)
 

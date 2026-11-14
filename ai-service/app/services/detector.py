@@ -1,4 +1,5 @@
 import math
+import os
 import time
 from typing import Optional
 import numpy as np
@@ -13,6 +14,7 @@ from app.services.anpr import (
     PlateVotingTracker,
     ANPRResult,
 )
+from app.services.tracking_manager import TrackingManager, compute_direction_string
 
 # Standard border surveillance target classes
 ALLOWED_CLASSES = {
@@ -28,44 +30,38 @@ ALLOWED_CLASSES = {
 }
 
 
-def compute_direction_string(dx: float, dy: float, velocity: float) -> str:
-    """
-    Computes cardinal or intercardinal direction vector from displacement deltas.
-    """
-    if velocity < 3.0:
-        return "Stationary"
-
-    # Screen coordinates: +x is East (right), +y is South (down)
-    angle_deg = math.degrees(math.atan2(dy, dx))  # -180 to 180
-
-    if -22.5 <= angle_deg < 22.5:
-        return "Eastbound"
-    elif 22.5 <= angle_deg < 67.5:
-        return "South-East"
-    elif 67.5 <= angle_deg < 112.5:
-        return "Southbound (Inbound)"
-    elif 112.5 <= angle_deg < 157.5:
-        return "South-West"
-    elif angle_deg >= 157.5 or angle_deg < -157.5:
-        return "Westbound"
-    elif -157.5 <= angle_deg < -112.5:
-        return "North-West"
-    elif -112.5 <= angle_deg < -67.5:
-        return "Northbound (Outbound)"
-    elif -67.5 <= angle_deg < -22.5:
-        return "North-East"
-
-    return "Moving"
-
-
 class SurveillanceDetector:
     def __init__(self):
         self.model = None
         self.active_model_name = "unloaded"
         self.device = "cpu"
-        self.track_history: dict[int, list[dict]] = {}  # id -> [{x, y, time}]
+        self.tracker_config_path = self._resolve_tracker_config()
+        self.tracking_manager = TrackingManager(
+            min_hits=settings.MIN_HITS,
+            max_lost_frames=settings.MAX_LOST_FRAMES,
+            enable_relink=settings.RELINK,
+        )
         self.plate_voter = PlateVotingTracker(required_votes=2)
         self._init_model()
+
+    def _resolve_tracker_config(self) -> str:
+        """
+        Resolves the path to the custom tracker config (bytetrack.yaml or botsort.yaml)
+        with support for TRACKER env var override.
+        """
+        if settings.TRACKER == "botsort":
+            return "botsort.yaml"
+
+        candidates = [
+            settings.TRACKER_CONFIG,
+            os.path.join(os.getcwd(), "config", "tracker.yaml"),
+            os.path.join(os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__)))), "config", "tracker.yaml"),
+        ]
+        for p in candidates:
+            if os.path.exists(p):
+                return p
+
+        return "bytetrack.yaml"
 
     def _init_model(self):
         """
@@ -108,25 +104,26 @@ class SurveillanceDetector:
         timestamp_sec: float,
     ) -> tuple[list[TrackedEntity], list[ANPRResult]]:
         """
-        Runs object detection, ByteTrack tracking, appearance extraction, and ANPR on the frame.
+        Runs object detection with low initial confidence (0.15) for ByteTrack 2nd-stage association,
+        followed by lifecycle track filtering, EMA box smoothing, and footpoint kinematics.
         """
         if frame_bgr is None or frame_bgr.size == 0:
             return [], []
 
         h, w = frame_bgr.shape[:2]
-        entities: list[TrackedEntity] = []
+        raw_detections: list[dict] = []
         plates: list[ANPRResult] = []
-        active_ids_in_frame = set()
 
         if self.model is not None:
             try:
-                # model.track with persist=True and ByteTrack tracker
+                # Run tracker with custom tracker config and imgsz
                 results = self.model.track(
                     source=frame_bgr,
                     persist=True,
-                    tracker="bytetrack.yaml",
-                    conf=settings.CONF_THRESHOLD,
+                    tracker=self.tracker_config_path,
+                    conf=settings.CONF_THRESHOLD,  # Low conf (0.15) feeds 2nd-stage association
                     iou=settings.IOU_THRESHOLD,
+                    imgsz=settings.IMGSZ,
                     device=self.device,
                     verbose=False,
                 )
@@ -145,8 +142,6 @@ class SurveillanceDetector:
                         conf_pct = int(round(float(box.conf[0].item()) * 100))
                         track_id = int(box.id[0].item()) if box.id is not None else int(time.time() * 1000) % 9999
 
-                        active_ids_in_frame.add(track_id)
-
                         # Normalized bounding box (0 to 1)
                         norm_box = BoundingBox(
                             x=max(0.0, float(x1 / w)),
@@ -159,25 +154,6 @@ class SurveillanceDetector:
                         ix1, iy1, ix2, iy2 = max(0, int(x1)), max(0, int(y1)), min(w, int(x2)), min(h, int(y2))
                         obj_crop = frame_bgr[iy1:iy2, ix1:ix2]
 
-                        # Velocity & Direction Tracking
-                        cx = norm_box.x + norm_box.width / 2.0
-                        cy = norm_box.y + norm_box.height / 2.0
-                        history = self.track_history.setdefault(track_id, [])
-                        history.append({"x": cx, "y": cy, "t": timestamp_sec})
-                        if len(history) > 16:
-                            history.pop(0)
-
-                        velocity = 0.0
-                        direction = "Stationary"
-                        if len(history) >= 2:
-                            dt = history[-1]["t"] - history[0]["t"]
-                            if dt > 0.05:
-                                dx = (history[-1]["x"] - history[0]["x"]) * w
-                                dy = (history[-1]["y"] - history[0]["y"]) * h
-                                dist_px = math.hypot(dx, dy)
-                                velocity = float(dist_px / dt)
-                                direction = compute_direction_string(dx, dy, velocity)
-
                         # Appearance extraction from HSV histogram
                         appearance = extract_entity_appearance(obj_crop, cls_name)
 
@@ -185,8 +161,6 @@ class SurveillanceDetector:
                         anpr_res = None
                         if cls_name in ["car", "truck", "bus"]:
                             plate_crop = crop_license_plate_region(obj_crop)
-                            # Simple OCR character heuristics (RapidOCR fallback)
-                            # Check if vehicle has candidate plate
                             candidate_plate = self._extract_plate_heuristic(plate_crop, track_id)
                             if candidate_plate:
                                 confirmed = self.plate_voter.add_reading(track_id, candidate_plate)
@@ -194,44 +168,32 @@ class SurveillanceDetector:
                                     anpr_res = confirmed
                                     plates.append(confirmed)
 
-                        # Head region for person tracking
-                        head_box = None
-                        if cls_name == "person":
-                            head_box = BoundingBox(
-                                x=norm_box.x + norm_box.width * 0.2,
-                                y=norm_box.y,
-                                width=norm_box.width * 0.6,
-                                height=min(norm_box.height * 0.25, 0.12),
-                            )
+                        raw_detections.append({
+                            "id": track_id,
+                            "class": cls_name,
+                            "bbox": norm_box,
+                            "conf": conf_pct,
+                            "appearance": appearance,
+                            "anpr": anpr_res,
+                        })
 
-                        entities.append(
-                            TrackedEntity(
-                                id=track_id,
-                                class_name=cls_name,
-                                confidence=conf_pct,
-                                confidenceTier="high" if conf_pct >= 70 else "medium" if conf_pct >= 40 else "low",
-                                bbox=norm_box,
-                                velocity=round(velocity, 1),
-                                direction=direction,
-                                appearance=appearance,
-                                anpr=anpr_res,
-                                headBbox=head_box,
-                                isLoitering=velocity < 4.0 and len(history) >= 10,
-                            )
-                        )
             except Exception as infer_err:
                 print(f"[IBVAP AI-Service] Inference exception: {infer_err}")
 
-        # Prune stale tracking history older than 3 seconds
-        stale_ids = [
-            tid
-            for tid, hist in self.track_history.items()
-            if tid not in active_ids_in_frame and (timestamp_sec - hist[-1]["t"]) > 3.0
-        ]
-        for tid in stale_ids:
-            self.track_history.pop(tid, None)
+        # Pass through tracking lifecycle manager:
+        # Enforces tentative -> confirmed -> lost -> removed
+        # Eliminates 1-frame ghosts, applies EMA smoothing & footpoint kinematics
+        entities = self.tracking_manager.update_tracks(
+            raw_detections=raw_detections,
+            timestamp=timestamp_sec,
+            frame_width=w,
+            frame_height=h,
+        )
 
-        self.plate_voter.prune(active_ids_in_frame)
+        # Prune plate voter
+        active_ids = {e.id for e in entities}
+        self.plate_voter.prune(active_ids)
+
         return entities, plates
 
     def _extract_plate_heuristic(self, plate_crop: np.ndarray, track_id: int) -> Optional[ANPRResult]:
@@ -242,10 +204,8 @@ class SurveillanceDetector:
         if plate_crop is None or plate_crop.size == 0 or plate_crop.shape[0] < 12 or plate_crop.shape[1] < 30:
             return None
 
-        # Preprocess plate crop
         prep = preprocess_plate_crop(plate_crop)
 
-        # Try RapidOCR
         try:
             from rapidocr_onnxruntime import RapidOCR
             ocr = RapidOCR()

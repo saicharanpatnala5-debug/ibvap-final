@@ -89,6 +89,11 @@ export interface TrackedObject {
   isProvisional?: boolean; // Fast local motion tracker provisional box prior to AI confirmation
   provisionalLabel?: string;
   appearance?: EntityAppearance;
+  state?: 'tentative' | 'confirmed' | 'lost' | 'removed';
+  age?: number;
+  hits?: number;
+  speed?: number;
+  footpoint?: Point;
 }
 
 export interface FrameAnalysisResult {
@@ -152,6 +157,8 @@ export interface CameraFeedItem {
   isNightMode: boolean;
   zones: VirtualZone[];
   createdAt: number;
+  wsUrl?: string;
+  aiSourceId?: string;
 }
 
 export interface VehicleDossier {

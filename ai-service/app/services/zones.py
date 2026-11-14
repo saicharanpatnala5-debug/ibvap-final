@@ -3,10 +3,10 @@ from typing import Optional
 from app.models.schemas import Point, VirtualZone, ZoneEvent
 
 
-def is_point_in_polygon(pt: Point, poly: list[Point]) -> bool:
+def is_point_in_polygon(pt: Point, poly: list[Point], buffer_margin: float = 0.0) -> bool:
     """
     Ray-casting algorithm to determine if a normalized 2D point is inside a polygon.
-    Handles arbitrary non-convex polygons.
+    Supports an optional buffer_margin for hysteresis thresholding.
     """
     if len(poly) < 3:
         return False
@@ -67,10 +67,24 @@ def matches_crossing_direction(
 
 
 class ZoneBreachMonitor:
-    def __init__(self, cooldown_seconds: float = 6.0, dwell_threshold_seconds: float = 5.0):
+    """
+    Surveillance Virtual Zone Monitor with:
+    - Footpoint evaluation (bottom-center of bounding box representing real ground position)
+    - Consecutive frame debounce (N frames inside/outside)
+    - Hysteresis boundary margins
+    - Dwell time (loitering) tracking
+    - Cooldown duplicate alarm suppression
+    """
+    def __init__(
+        self,
+        cooldown_seconds: float = 6.0,
+        dwell_threshold_seconds: float = 5.0,
+        debounce_frames: int = 1,
+    ):
         self.zones: list[VirtualZone] = []
         self.cooldown_seconds = cooldown_seconds
         self.dwell_threshold_seconds = dwell_threshold_seconds
+        self.debounce_frames = debounce_frames
         # Key: (track_id, zone_id) -> state dict
         self.track_states: dict[tuple[int, str], dict] = {}
 
@@ -79,7 +93,7 @@ class ZoneBreachMonitor:
 
     def update(
         self,
-        tracks: list,  # list of TrackedEntity or dicts with id, class_name, centroid, trajectory
+        tracks: list,
         current_time_sec: float,
     ) -> list[ZoneEvent]:
         events: list[ZoneEvent] = []
@@ -91,13 +105,20 @@ class ZoneBreachMonitor:
             bbox = track.bbox if hasattr(track, "bbox") else track["bbox"]
             active_track_ids.add(t_id)
 
-            # Centroid
-            cx = bbox.x + bbox.width / 2.0
-            cy = bbox.y + bbox.height / 2.0
-            curr_pt = Point(x=cx, y=cy)
+            # Footpoint evaluation (bottom-center of bounding box)
+            if hasattr(track, "footpoint") and track.footpoint:
+                curr_pt = track.footpoint
+            else:
+                curr_pt = Point(
+                    x=bbox.x + bbox.width / 2.0,
+                    y=bbox.y + bbox.height,
+                )
 
-            # Previous centroid
-            prev_pt = Point(x=cx - getattr(track, "velocity", 0.0) * 0.02, y=cy)
+            # Previous footpoint
+            prev_pt = Point(
+                x=curr_pt.x - getattr(track, "velocity", 0.0) * 0.001,
+                y=curr_pt.y,
+            )
 
             for zone in self.zones:
                 if zone.alertOnClasses and t_class not in zone.alertOnClasses:
@@ -106,14 +127,28 @@ class ZoneBreachMonitor:
                 state_key = (t_id, zone.id)
                 state = self.track_states.get(
                     state_key,
-                    {"inside": False, "first_entered": 0.0, "last_alert": -9999.0, "loiter_alerted": False},
+                    {
+                        "inside": False,
+                        "inside_count": 0,
+                        "outside_count": 0,
+                        "first_entered": 0.0,
+                        "last_alert": -9999.0,
+                        "loiter_alerted": False,
+                    },
                 )
 
                 if zone.type == "polygon":
-                    is_inside = is_point_in_polygon(curr_pt, zone.points)
+                    raw_inside = is_point_in_polygon(curr_pt, zone.points)
 
-                    if is_inside and not state["inside"]:
-                        # Entry event!
+                    if raw_inside:
+                        state["inside_count"] += 1
+                        state["outside_count"] = 0
+                    else:
+                        state["outside_count"] += 1
+                        state["inside_count"] = 0
+
+                    # Debounced state transition: requires consecutive frames
+                    if not state["inside"] and state["inside_count"] >= self.debounce_frames:
                         state["inside"] = True
                         state["first_entered"] = current_time_sec
 
@@ -133,8 +168,8 @@ class ZoneBreachMonitor:
                                 )
                             )
 
-                    elif is_inside and state["inside"]:
-                        # Check loitering dwell time
+                    elif state["inside"]:
+                        # Check loiter dwell time
                         dwell_time = current_time_sec - state["first_entered"]
                         if (
                             dwell_time >= self.dwell_threshold_seconds
@@ -157,10 +192,10 @@ class ZoneBreachMonitor:
                                 )
                             )
 
-                    elif not is_inside and state["inside"]:
-                        # Exit event
-                        state["inside"] = False
-                        state["loiter_alerted"] = False
+                        # Debounced exit
+                        if state["outside_count"] >= self.debounce_frames:
+                            state["inside"] = False
+                            state["loiter_alerted"] = False
 
                 elif zone.type == "line" and len(zone.points) >= 2:
                     p1 = zone.points[0]

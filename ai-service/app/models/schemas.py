@@ -39,11 +39,16 @@ class TrackedEntity(BaseModel):
     confidence: int  # 0 to 100
     confidenceTier: Literal["high", "medium", "low"] = "medium"
     bbox: BoundingBox
-    velocity: float = 0.0  # approximate px/s or normalized delta
+    state: Literal["tentative", "confirmed", "lost", "removed"] = "confirmed"
+    age: int = 1
+    hits: int = 1
+    velocity: float = 0.0  # approximate px/s
+    speed: str = "0 px/s"
     direction: str = "Stationary"
     appearance: Optional[EntityAppearance] = None
     anpr: Optional[ANPRResult] = None
     headBbox: Optional[BoundingBox] = None
+    footpoint: Optional[Point] = None
     isLoitering: bool = False
     hasCrossedZoneIds: list[str] = Field(default_factory=list)
 

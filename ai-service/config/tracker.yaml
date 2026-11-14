@@ -1,0 +1,30 @@
+# ==============================================================================
+# IBVAP Surveillance Multi-Object Tracker Configuration
+# Tuned for high-accuracy border surveillance: persistent IDs, low occlusion drops,
+# zero ghost tracks, and stable trajectory estimation.
+# ==============================================================================
+
+tracker_type: bytetrack # ['bytetrack', 'botsort']
+
+# Detection confidence thresholds for ByteTrack 2-stage association
+track_high_thresh: 0.25 # Threshold for 1st-stage association (clear, high-confidence detections)
+track_low_thresh: 0.10  # Threshold for 2nd-stage association (partially occluded, motion-blurred, distant targets)
+new_track_thresh: 0.25  # Minimum detector confidence required to spawn a new tentative tracklet
+
+# Track buffer: frame count to retain lost tracks in memory before deletion
+# At 30 fps, 60 frames = 2.0 seconds. Preserves track continuity through occlusion behind pillars/vehicles.
+track_buffer: 60
+
+# Matching threshold for association cost matrix (IoU / spatial distance)
+match_thresh: 0.80
+
+# Whether to fuse detection confidence score with spatial motion similarity
+fuse_score: True
+
+# ------------------------------------------------------------------------------
+# BoT-SORT specific configurations (Activated when TRACKER=botsort)
+# ------------------------------------------------------------------------------
+gmc_method: sparseOptFlow # Global Motion Compensation method: ['orb', 'sift', 'ecc', 'sparseOptFlow', None]
+proximity_thresh: 0.50   # Spatial proximity threshold for camera motion compensation
+appearance_thresh: 0.25  # Appearance embedding similarity threshold
+with_reid: False         # Deep visual Re-ID embedding toggle (CPU-optimized: disabled by default)
