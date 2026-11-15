@@ -350,8 +350,17 @@ class PlateVotingTracker:
 
         return self.confirmed_plates.get(track_id)
 
+    def is_confirmed(self, track_id: int) -> bool:
+        """Checks if a plate has already reached multi-frame confirmation for this track."""
+        return track_id in self.confirmed_plates
+
     def get_confirmed(self, track_id: int) -> Optional[ANPRResult]:
         return self.confirmed_plates.get(track_id)
+
+    def reset(self):
+        """Resets all tracking histories and confirmed plates between video streams."""
+        self.readings_history.clear()
+        self.confirmed_plates.clear()
 
     def prune(self, active_track_ids: set[int]):
         stale = [t for t in self.readings_history.keys() if t not in active_track_ids]

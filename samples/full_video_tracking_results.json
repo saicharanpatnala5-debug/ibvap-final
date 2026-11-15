@@ -1,0 +1,34 @@
+{
+  "label": "full_video",
+  "timestamp": 1794688096,
+  "total_clips": 2,
+  "total_track_ids": 353,
+  "total_fragmentations": 253,
+  "avg_track_lifetime_sec": 1.64,
+  "overall_id_changes_per_min": 507.69,
+  "avg_fps": 4.1,
+  "clips": [
+    {
+      "file": "whatsapp_video_2026_09_09_533pm.mp4",
+      "frames": 361,
+      "duration_sec": 12.03,
+      "unique_track_ids": 161,
+      "avg_lifetime_sec": 1.89,
+      "ghost_share_pct": 49.1,
+      "fragmentations": 91,
+      "id_changes_per_min": 453.74,
+      "fps": 4.9
+    },
+    {
+      "file": "whatsapp_video_2026_09_09_842pm.mp4",
+      "frames": 536,
+      "duration_sec": 17.87,
+      "unique_track_ids": 192,
+      "avg_lifetime_sec": 1.39,
+      "ghost_share_pct": 58.9,
+      "fragmentations": 162,
+      "id_changes_per_min": 544.03,
+      "fps": 3.3
+    }
+  ]
+}

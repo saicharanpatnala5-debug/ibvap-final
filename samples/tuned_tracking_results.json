@@ -1,0 +1,34 @@
+{
+  "label": "tuned",
+  "timestamp": 1794687840,
+  "total_clips": 2,
+  "total_track_ids": 130,
+  "total_fragmentations": 73,
+  "avg_track_lifetime_sec": 1.41,
+  "overall_id_changes_per_min": 146.49,
+  "avg_fps": 3.9,
+  "clips": [
+    {
+      "file": "whatsapp_video_2026_09_09_533pm.mp4",
+      "frames": 150,
+      "duration_sec": 12.03,
+      "unique_track_ids": 65,
+      "avg_lifetime_sec": 1.53,
+      "ghost_share_pct": 52.3,
+      "fragmentations": 26,
+      "id_changes_per_min": 129.64,
+      "fps": 4.6
+    },
+    {
+      "file": "whatsapp_video_2026_09_09_842pm.mp4",
+      "frames": 150,
+      "duration_sec": 17.87,
+      "unique_track_ids": 65,
+      "avg_lifetime_sec": 1.28,
+      "ghost_share_pct": 60.0,
+      "fragmentations": 47,
+      "id_changes_per_min": 157.84,
+      "fps": 3.3
+    }
+  ]
+}

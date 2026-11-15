@@ -48,6 +48,7 @@ import {
   unregisterCameraFrameProvider,
 } from '../services/cameraFrameRegistry';
 import { ZoneDrawer } from './ZoneDrawer';
+import { videoAnalysisService } from '../services/videoAnalysisService';
 
 interface CameraFeedProps {
   camera: CameraFeedItem;
@@ -142,6 +143,31 @@ export const CameraFeed: React.FC<CameraFeedProps> = ({
 
   // WebSocket streaming connection state to ai-service
   const [isWsConnected, setIsWsConnected] = useState<boolean>(false);
+
+  // Smooth Demo Mode ("Analyze, then play") state
+  const [isPreAnalyzed, setIsPreAnalyzed] = useState<boolean>(() => videoAnalysisService.isAnalyzed(camera.id));
+  const [isAnalyzingVideo, setIsAnalyzingVideo] = useState<boolean>(() => videoAnalysisService.isAnalyzing(camera.id));
+  const [analysisProgress, setAnalysisProgress] = useState<number>(() => videoAnalysisService.getProgress(camera.id));
+
+  const handleTogglePreAnalysis = async () => {
+    if (isPreAnalyzed) {
+      setIsPreAnalyzed(false);
+      return;
+    }
+    if (isAnalyzingVideo || !videoRef.current) return;
+    setIsAnalyzingVideo(true);
+    setAnalysisProgress(0);
+    try {
+      await videoAnalysisService.analyzeVideo(camera.id, videoRef.current, (pct) => {
+        setAnalysisProgress(pct);
+      });
+      setIsPreAnalyzed(true);
+    } catch (err) {
+      console.error('Failed to pre-analyze video:', err);
+    } finally {
+      setIsAnalyzingVideo(false);
+    }
+  };
   const lastRenderTimeRef = useRef<number>(performance.now());
   const renderFpsRef = useRef<number>(60);
   const frameCountRef = useRef<number>(0);
@@ -358,7 +384,7 @@ export const CameraFeed: React.FC<CameraFeedProps> = ({
   // Continuous background detection loop
   const runDetectionPass = useCallback(async () => {
     // If remote ai-service is actively streaming over WebSocket, bypass local in-browser model pass
-    if (isWsConnected) {
+    if (isWsConnected || isPreAnalyzed) {
       return;
     }
 
@@ -627,8 +653,11 @@ export const CameraFeed: React.FC<CameraFeedProps> = ({
             lastFpsCalcTimeRef.current = nowPerf;
           }
 
-          // 0. Lightweight Optical/Motion Tracking: instant visual feedback (<30ms) between AI passes
-          if (nowPerf - lastMotionCheckRef.current > 32) {
+          // 0. Smooth Demo Mode ("Analyze, then play") sync OR Lightweight Optical/Motion Tracking
+          if (isPreAnalyzed && video.readyState >= 2) {
+            const cachedTracks = videoAnalysisService.getDetectionsAtTime(camera.id, video.currentTime);
+            targetTracksRef.current = cachedTracks;
+          } else if (nowPerf - lastMotionCheckRef.current > 32) {
             lastMotionCheckRef.current = nowPerf;
             if (!video.paused && video.readyState >= 2 && !isWsConnected) {
               const motionRegions = motionTrackerRef.current.detectMotion(video);
@@ -1173,6 +1202,36 @@ export const CameraFeed: React.FC<CameraFeedProps> = ({
             </button>
           )}
 
+          {/* Smooth Demo Mode Button for Uploaded Videos */}
+          {camera.sourceType === 'file' && (
+            <button
+              id={`smooth-demo-btn-${camera.id}`}
+              onClick={handleTogglePreAnalysis}
+              disabled={isAnalyzingVideo}
+              className={`flex items-center gap-1.5 rounded-lg px-2.5 py-1 text-xs font-medium border transition-colors ${
+                isPreAnalyzed
+                  ? 'border-emerald-500/60 bg-emerald-950/40 text-emerald-300 hover:bg-emerald-900/50'
+                  : isAnalyzingVideo
+                  ? 'border-cyan-500/60 bg-cyan-950/50 text-cyan-300'
+                  : 'border-neutral-700 bg-neutral-800 text-neutral-300 hover:bg-neutral-700'
+              }`}
+              title={
+                isPreAnalyzed
+                  ? 'Smooth 30 FPS Demo Mode Active (Click to switch to live inference)'
+                  : 'Pre-analyze video in background for smooth 30 FPS playback with zero stutter'
+              }
+            >
+              <Sparkles className={`h-3 w-3 ${isPreAnalyzed ? 'text-emerald-400' : isAnalyzingVideo ? 'text-cyan-400 animate-spin' : 'text-neutral-400'}`} />
+              <span>
+                {isPreAnalyzed
+                  ? '⚡ 30 FPS Mode'
+                  : isAnalyzingVideo
+                  ? `Analyzing ${analysisProgress}%`
+                  : 'Analyze & Play'}
+              </span>
+            </button>
+          )}
+
           {/* Zones drawer toggle */}
           <button
             id={`toggle-zones-btn-${camera.id}`}
@@ -1230,6 +1289,25 @@ export const CameraFeed: React.FC<CameraFeedProps> = ({
             isDrawingMode ? 'cursor-crosshair' : 'cursor-default'
           }`}
         />
+
+        {/* Minimalist Pre-Analysis Progress Bar Overlay ("Analyze, then play") */}
+        {isAnalyzingVideo && (
+          <div className="absolute inset-x-6 bottom-16 z-30 flex flex-col gap-1.5 rounded-xl bg-neutral-950/90 border border-cyan-800/80 p-3 shadow-2xl backdrop-blur-md">
+            <div className="flex items-center justify-between text-xs font-mono text-cyan-300">
+              <span className="flex items-center gap-2">
+                <span className="h-2 w-2 rounded-full bg-cyan-400 animate-ping" />
+                Analyzing footage for smooth 30 FPS playback...
+              </span>
+              <span className="font-bold">{analysisProgress}%</span>
+            </div>
+            <div className="h-1.5 w-full bg-neutral-800 rounded-full overflow-hidden">
+              <div
+                className="h-full bg-gradient-to-r from-cyan-500 to-emerald-400 transition-all duration-150"
+                style={{ width: `${analysisProgress}%` }}
+              />
+            </div>
+          </div>
+        )}
 
         {/* Model Loading indicator */}
         {modelLoading && (

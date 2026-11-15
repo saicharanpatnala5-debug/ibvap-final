@@ -1,0 +1,47 @@
+[
+  {
+    "tracker": "baseline",
+    "frames": 176,
+    "mota_pct": 98.9,
+    "motp": 0.073,
+    "idf1_pct": 85.02,
+    "idp_pct": 85.4,
+    "idr_pct": 84.65,
+    "mostly_tracked": 3,
+    "mostly_lost": 0,
+    "num_false_positives": 0,
+    "num_misses": 4,
+    "num_switches": 1,
+    "num_fragmentations": 1
+  },
+  {
+    "tracker": "bytetrack",
+    "frames": 176,
+    "mota_pct": 98.68,
+    "motp": 0.073,
+    "idf1_pct": 99.34,
+    "idp_pct": 100.0,
+    "idr_pct": 98.68,
+    "mostly_tracked": 3,
+    "mostly_lost": 0,
+    "num_false_positives": 0,
+    "num_misses": 6,
+    "num_switches": 0,
+    "num_fragmentations": 0
+  },
+  {
+    "tracker": "botsort",
+    "frames": 176,
+    "mota_pct": 98.68,
+    "motp": 0.073,
+    "idf1_pct": 99.34,
+    "idp_pct": 100.0,
+    "idr_pct": 98.68,
+    "mostly_tracked": 3,
+    "mostly_lost": 0,
+    "num_false_positives": 0,
+    "num_misses": 6,
+    "num_switches": 0,
+    "num_fragmentations": 0
+  }
+]

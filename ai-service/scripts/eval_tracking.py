@@ -32,6 +32,7 @@ from app.config import settings
 
 
 def run_video_evaluation(video_path: str, detector: SurveillanceDetector, max_frames: int = 0) -> Dict[str, Any]:
+    detector.reset()
     cap = cv2.VideoCapture(video_path)
     if not cap.isOpened():
         print(f"Error: Could not open {video_path}")
@@ -169,6 +170,7 @@ def main():
     video_files = []
     for ext in ("*.mp4", "*.avi", "*.mov", "*.mkv", "*.webm"):
         video_files.extend(glob.glob(os.path.join(sample_dir, ext)))
+    video_files = [f for f in video_files if "debug" not in os.path.basename(f) and "synthetic" not in os.path.basename(f) and "crossing" not in os.path.basename(f)]
 
     if not video_files:
         print(f"No video files found in '{sample_dir}'. Please add videos to run evaluation.")

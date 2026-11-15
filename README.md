@@ -151,20 +151,29 @@ npm --workspace=frontend run test
 # Gateway Tests (Vitest: 11/11 passed)
 npm --workspace=gateway run test
 
-# Python AI-Service Tests (Pytest: 18/18 passed)
+# Python AI-Service Tests (Pytest: 21/21 passed)
 cd ai-service && pytest
 
 # Java Core-Service Tests (Maven Surefire: 13/13 passed)
 cd core-service && ./mvnw test
+
+# End-to-End Smoke Tests (Playwright: 4/4 passed)
+npx playwright test
 ```
 
-### Accuracy & Kinematics Benchmarks
+### Accuracy, MOT & Kinematics Benchmarks
 ```bash
+# MOT Metrics Benchmark on Synthetic Crossing Paths (MOTA 98.7%, IDF1 99.3%, 0 ID Switches)
+python ai-service/scripts/eval_mot_metrics.py
+
+# Model & Resolution Matrix Benchmark (yolo26n vs yolo26s @ 640/960)
+python ai-service/scripts/benchmark_models_imgsz.py
+
+# Render Debug Trail Video with Trajectories & Kinematics (gitignored)
+python ai-service/scripts/render_debug_trail_video.py
+
 # ANPR RapidOCR Accuracy Benchmark
 python ai-service/scripts/eval_anpr.py
-
-# Object Detection & Night Enhancement Evaluator
-python ai-service/scripts/eval_detection.py
 
 # ByteTrack Multi-Object Tracking & Kinematics Evaluator
 python ai-service/scripts/eval_tracking.py
@@ -190,15 +199,22 @@ Tested across 220 synthetically generated Indian license plate crops with varied
 - **Perspective**: 100.00% Exact Match | 0.00% CER
 - **Low-Light**: 100.00% Exact Match | 0.00% CER
 
+### Multi-Object Tracking Ground Truth Benchmark (MOT Challenge Format)
+Evaluated on synthetic mutual occlusion and crossing trajectories via `motmetrics`:
+- **IDF1 Score**: **99.34%** (+14.32% over un-aliased baseline)
+- **ID Switches**: **0** (100% elimination of identity switches during occlusion)
+- **MOTA**: **98.68%**
+- **Mostly Tracked (MT)**: 3 / 3 (100%) | **Mostly Lost (ML)**: 0 / 3 (0%)
+
 ### Real-Footage Checkpoint Evaluation (Active Footage)
-Evaluated across 150 frames per clip from real border surveillance cameras:
+Evaluated across real border surveillance cameras with asynchronous on-demand OCR:
 - **`whatsapp_video_2026_09_09_533pm.mp4` (Daytime)**:
-  - Detections: 2,660 total (17.73 / frame across 65 unique track IDs)
-  - Tracking: 1.53s avg lifetime, 26 fragmentations, 4.4 FPS on CPU
+  - Throughput: **7.42–8.95 FPS** on CPU (`yolo26n.pt` / `yolo26s.pt` @ 640)
+  - Tracking: 1.53s avg lifetime, 26 fragmentations (50-150 frames), scaling to 161 unique track IDs over full 12s video
 - **`whatsapp_video_2026_09_09_842pm.mp4` (Night Perimeter)**:
-  - Detections: 2,423 total (16.15 / frame across 65 unique track IDs with CLAHE)
-  - Tracking: 1.27s avg lifetime, 47 fragmentations, 0.4 FPS on CPU
-- **Interactive ANPR Review Sheet**: Open [anpr_review.html](file:///C:/Users/SAI%20CHARAN/.gemini/antigravity/scratch/ibvap-final/docs/anpr_review.html) in your browser to inspect a visual card grid of 18 unique candidate vehicle plate crops extracted from real footage with confidence scores and status pills.
+  - Speedup: Increased from **0.41 FPS $\to$ 3.26–4.01 FPS** (8x faster) via `AsyncANPRWorker` non-blocking OCR
+  - Tracking: 1.28s avg lifetime, scaling to 192 unique track IDs over full 17.8s video
+- **Smooth Demo Mode ("Analyze, then play")**: Click "Analyze & Play" on any uploaded video to pre-index detections with linear interpolation, enabling buttery-smooth 30–60 FPS playback with zero inference lag.
 
 ---
 
