@@ -125,8 +125,8 @@ class VideoAnalysisService {
       const vW = video.videoWidth || 1280;
       const vH = video.videoHeight || 720;
 
-      // Analysis step: sample every 0.1s (10 FPS keyframes) for fast pre-analysis
-      const stepSec = 0.10;
+      // Analysis step: sample every 0.2s (5 FPS keyframes with 60 FPS interpolation) for fast pre-analysis
+      const stepSec = 0.20;
       const totalSteps = Math.ceil(duration / stepSec);
 
       // Reusable offscreen canvas

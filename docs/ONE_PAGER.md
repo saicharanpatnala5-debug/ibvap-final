@@ -48,7 +48,7 @@ flowchart TD
         SpringBoot["Java 21 LTS / Spring Boot 3 (Port 8080)"]
         AlertEngine["Incident State Machine & SSE Push"]
         ZoneRepo["Virtual Boundary Zones"]
-        AuditLedger["Immutable Audit Trail Ledger"]
+        AuditLedger["Append-Only Audit Log"]
         RiskScore["Real-Time Risk Scoring Engine"]
     end
 
@@ -77,7 +77,7 @@ To maintain absolute integrity for operators and evaluators, platform capabiliti
 | **ANPR Plate Crop Extraction** | **100% Real** | Fast-ALPR ONNX (`yolo-v9-t-384-license-plate-end2end`) detects plate coordinates within vehicle tracks and extracts tight bounding crops. |
 | **Plate Format Validation & Confidence Gating** | **100% Real** | Strict regex validates 28 Indian States + 8 UTs and Bharat Series. Reads with character confidence $<55\%$ or average $<70\%$ are rejected. |
 | **Offline AI Copilot** | **100% Real** | Grounded deterministic local engine generates structured situational assessments from live telemetry when internet or Gemini API key is absent. |
-| **Vehicle Owner / RTO Dossier** | **Simulated (Demo RTO)** | While plate numbers, crops, and timestamps are real, owner identities use simulated Indian RTO registration mock records because official government Vahan/Parivahan API access requires agency authorization. Unreadable/distance-gated plates show no dossier. |
+| **Vehicle Owner / RTO Dossier** | **Simulated / Pluggable** | While plate numbers, crops, and timestamps are real, the vehicle registry is a simulated service with a pluggable interface boundary and no real external integration (official government Vahan/Parivahan API access requires authorized agency credentials). Unreadable/distance-gated plates show no dossier. |
 | **Topology Network Graph** | **Simulated Graph (Labs)** | Node graph visualizes live `/api/health` status, but network layout is fixed-topology rather than dynamically discovered via SNMP/LLDP. |
 
 ---
@@ -98,31 +98,31 @@ Tested across 220 synthetically generated Indian license plate crops with varied
 - **Distance Gated ($w < 120$px or $h < 80$px)**: 40 tracks (74.1%) designated as `"Plate not legible at this distance"`.
 - **Eligible Vehicle Tracks ($w \ge 120$px, $h \ge 80$px)**: 14 tracks.
 - **Plates Localized**: 4 candidate plate bounding boxes.
-- **Valid Indian Plate Reads**: **0 of 54 vehicle tracks produced a validated Indian license plate**.
-- **Reason**: The real clips are low-resolution messaging app exports ($768\times 432$). At $>15$ meters distance, license plates have heights under 18 pixels, physically lacking sufficient optical resolution for character segmentation. Candidate strings (`KA037755`, `KA03AHD`) were properly rejected by the format validator.
+- **Valid Indian Plate Reads**: **0 of 54 vehicle tracks produced a validated plate (40 were distance-gated, 14 were large enough to attempt)**.
+- **Reason**: The real clips are low-resolution messaging app exports ($768\times 432$). At $>15$ meters distance, license plates have heights under 18 pixels, physically lacking sufficient optical resolution for character recognition. Candidate strings (`KA037755`, `KA03AHD`) were properly rejected by the format validator.
 
 ---
 
 ## 5. Known Limitations & Technical Boundaries
 
-1. **Resolution Nyquist Limit**: Optical character recognition on vehicle plates requires at least $28\times 100$ pixels of optical resolution. Distant vehicles in low-resolution video cannot be resolved without optical zoom lenses.
+1. **Physical Resolution Limit**: Optical character recognition on vehicle plates requires at least $28\times 100$ pixels of optical resolution. Distant vehicles in low-resolution video cannot be resolved without optical zoom lenses or closer camera positioning.
 2. **Auto-Rickshaw Geometry**: The fragile aspect-ratio heuristic was removed to prevent mislabeling frontal cars. Domain-specific fine-tuning is required for native auto-rickshaw classification.
-3. **CPU Execution Throughput**: Processing 1080p video on CPU achieves 6–10 FPS. Real-time 30 FPS multi-stream processing requires GPU acceleration.
+3. **CPU Execution Throughput**: Processing 1080p video on CPU achieves measured 4.6–11.5 FPS depending on quality mode. Real-time 30 FPS multi-stream processing requires GPU acceleration.
 
 ---
 
 ## 6. Roadmap & Future Work
 
-1. **NVIDIA GPU Acceleration (TensorRT / CUDA)**: Transitioning ONNX models to TensorRT on NVIDIA Jetson Orin or RTX GPUs reduces per-frame latency from 45ms to $< 8$ms, enabling 60+ FPS concurrent streams.
+1. **NVIDIA GPU Acceleration (TensorRT / CUDA)**: Transitioning ONNX models to TensorRT on NVIDIA Jetson Orin or RTX GPUs reduces per-frame latency; scaling to 60+ FPS concurrent streams is an untested architectural projection.
 2. **Native RTSP / ONVIF Streaming Engine**: Integrating hardware-accelerated H.264/H.265 RTSP ingestion pipelines directly into `VideoSourceManager`.
-3. **Fine-Tuned Indian Traffic Classifier**: Fine-tuning YOLO on the Indian Driving Dataset (IDD) to detect auto-rickshaws, e-rickshaws, and tempo vehicles natively (estimated: 5,000 images, 8 GPU hours, ~$15 cloud compute).
-4. **Government Vahan / Parivahan Integration**: Connecting the Core-Service vehicle registry to the official NIC Parivahan gateway via authenticated mTLS for production law enforcement deployment.
+3. **Fine-Tuned Indian Traffic Classifier**: Fine-tuning YOLO on the Indian Driving Dataset (IDD) to detect auto-rickshaws, e-rickshaws, and tempo vehicles natively (estimated / rough estimate to be verified: 5,000 images, 8 GPU hours, ~$15 cloud compute).
+4. **Government Vahan / Parivahan Integration**: Connecting the Core-Service vehicle registry to the official NIC Parivahan gateway once agency credentials and network access are authorized.
 
 ---
 
 ## 7. Open-Source Licenses & Attribution
 
-IBVAP is constructed with strict compliance to open-source software licenses:
+Main open-source licences identified across dependencies (no formal legal audit):
 
 | Component | Upstream Project | License | Usage & Compliance Notes |
 | :--- | :--- | :--- | :--- |

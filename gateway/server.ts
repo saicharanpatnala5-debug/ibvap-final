@@ -51,6 +51,18 @@ app.get('/eng.traineddata', (_req, res) => {
   return res.status(404).send('Offline language data not found');
 });
 
+// Serve sample clips for demo scenarios and offline video playback
+const candidateSampleDirs = [
+  path.resolve(process.cwd(), 'samples'),
+  path.resolve(__dirname, '../samples'),
+];
+for (const sDir of candidateSampleDirs) {
+  if (fs.existsSync(sDir)) {
+    app.use('/samples', express.static(sDir));
+    break;
+  }
+}
+
 // Rate limiting for AI endpoints: max 30 requests per minute per IP
 const aiRateLimiter = rateLimit({
   windowMs: 60 * 1000,

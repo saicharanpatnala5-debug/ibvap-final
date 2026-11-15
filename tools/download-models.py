@@ -59,6 +59,25 @@ def main():
     except Exception as e:
         log(f"Warning loading RapidOCR: {e}")
 
+    # 4. In-Browser Fallback Models (COCO-SSD MobileNet v1)
+    try:
+        import urllib.request
+        root_dir = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+        coco_dir = os.path.join(root_dir, "frontend", "public", "models", "coco-ssd")
+        os.makedirs(coco_dir, exist_ok=True)
+        base_url = "https://storage.googleapis.com/tfjs-models/savedmodel/ssd_mobilenet_v1/"
+        coco_files = ["model.json"] + [f"group1-shard{i}of7" for i in range(1, 8)]
+        missing = [f for f in coco_files if not os.path.exists(os.path.join(coco_dir, f))]
+        if missing:
+            log(f"Downloading {len(missing)} missing in-browser fallback model assets...")
+            for f in missing:
+                urllib.request.urlretrieve(base_url + f, os.path.join(coco_dir, f))
+            log("✓ In-browser COCO-SSD assets cached locally.")
+        else:
+            log("✓ In-browser COCO-SSD assets already cached.")
+    except Exception as e:
+        log(f"Warning caching in-browser models: {e}")
+
     elapsed = time.time() - start_time
     log(f"All runtime models verified and cached in {elapsed:.2f}s.")
     log("Platform is fully prepped for 100% OFFLINE operation.")

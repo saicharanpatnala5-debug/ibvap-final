@@ -1,9 +1,9 @@
-# IBVAP Security Policy, Architecture Controls & Audit Assessment
+# IBVAP Baseline Security Controls, Architecture Assessment & Audit Scope
 
 **Project**: Intelligent Border Video Analytics Platform (IBVAP)  
 **Date**: November 15, 2026  
 **Status**: Tactical Surveillance Prototype / Evaluation Build  
-**Disclaimer**: This document details security controls, residual architectural risks, and test boundaries. **No claim is made that this system is impenetrable or completely "secure".** Production deployment in critical infrastructure requires third-party penetration testing and formal accreditation.
+**Disclaimer**: This document details baseline security controls, residual architectural risks, and test boundaries. **No claim is made that this system is impenetrable or completely "secure".** Production deployment in critical infrastructure requires third-party penetration testing and formal accreditation.
 
 ---
 
@@ -48,24 +48,28 @@ flowchart LR
 
 ### D. File Upload Validation & Path Traversal Prevention
 - **Sanitized Filenames**: Video uploads in `ai-service/app/main.py` apply `os.path.basename()` to strip directory navigation sequences (`../`, `..\`).
-- **UUID Destination Isolation**: Files are stored with cryptographically unique identifiers (`f"{source_id}{ext}"`) inside an isolated `data/uploads/` directory.
+- **UUID Destination Isolation**: Files are stored with UUID-based unique identifiers (`f"{source_id}{ext}"`) inside an isolated `data/uploads/` directory.
 - **Strict Format Allowlist**: File extensions are restricted to supported video containers: `[".mp4", ".avi", ".mov", ".mkv", ".webm"]`. Unapproved executable or script extensions (`.exe`, `.sh`, `.py`, `.js`, `.php`) are rejected with `HTTP 400 Bad Request`.
 
-### E. Privacy & Footage Untracking
+### E. Append-Only Audit Logging
+- **In-Memory Audit Trail**: `AuditService.java` in `core-service/` records security events, operator overrides, and state changes into an in-memory `ConcurrentLinkedDeque` (capped at 10,000 events).
+- **Explicit Scope Boundary**: The log is append-only by interface (no update/delete API exists). It is **not** cryptographically signed, hash-chained, or an immutable ledger.
+
+### F. Privacy & Footage Untracking
 - **Repository Cleanliness**: Surveillance video recordings (`samples/*.mp4`), real license plate crops, face crops, and generated review sheets (`docs/*review*.html`) are strictly gitignored.
 - **Pushed History Verification**: Verified that no raw surveillance clips exist in pushed git branches.
 
 ---
 
-## 3. Dependency Vulnerability Assessment
+## 3. Dependency Vulnerability Assessment & Licensing
 
-Automated software composition analysis (SCA) conducted on November 15, 2026:
+Main open-source licenses were identified across dependencies; no formal legal compliance audit was conducted. Software composition assessment conducted on November 15, 2026:
 
 | Ecosystem | Tool | Findings | Remediation Status |
 | :--- | :--- | :--- | :--- |
 | **Node.js / Monorepo** | `npm audit` | **0 vulnerabilities** | Clean |
 | **Python (`ai-service`)** | `pip-audit` | **0 vulnerabilities** | Clean (`pip` upgraded to 26.3) |
-| **Java (`core-service`)** | `mvn dependency:tree` | **0 vulnerabilities** | Clean (Spring Boot 3.3.5, Jackson 2.17.2, Tomcat 10.1.31) |
+| **Java (`core-service`)** | `mvn dependency:tree` | Dependencies mapped; no CVE scanner run | Not scanned with a specialized CVE tool (e.g. OWASP dependency-check) |
 
 ---
 

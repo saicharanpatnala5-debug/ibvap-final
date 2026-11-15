@@ -1,0 +1,68 @@
+[
+  {
+    "clip": "whatsapp_video_2026_09_09_533pm.mp4",
+    "quality": "fast",
+    "model": "yolo26n.pt",
+    "processed_frames": 361,
+    "total_video_frames": 361,
+    "video_duration_sec": 12.03,
+    "total_analyze_time_sec": 31.67,
+    "analyze_fps": 11.4,
+    "ms_per_frame": 87.7
+  },
+  {
+    "clip": "whatsapp_video_2026_09_09_533pm.mp4",
+    "quality": "balanced",
+    "model": "yolo26s.pt",
+    "processed_frames": 361,
+    "total_video_frames": 361,
+    "video_duration_sec": 12.03,
+    "total_analyze_time_sec": 77.82,
+    "analyze_fps": 4.64,
+    "ms_per_frame": 215.6
+  },
+  {
+    "clip": "whatsapp_video_2026_09_09_533pm.mp4",
+    "quality": "high",
+    "model": "yolo26m.pt",
+    "processed_frames": 361,
+    "total_video_frames": 361,
+    "video_duration_sec": 12.03,
+    "total_analyze_time_sec": 334.15,
+    "analyze_fps": 1.08,
+    "ms_per_frame": 925.6
+  },
+  {
+    "clip": "whatsapp_video_2026_09_09_842pm.mp4",
+    "quality": "fast",
+    "model": "yolo26n.pt",
+    "processed_frames": 536,
+    "total_video_frames": 536,
+    "video_duration_sec": 17.87,
+    "total_analyze_time_sec": 46.41,
+    "analyze_fps": 11.55,
+    "ms_per_frame": 86.6
+  },
+  {
+    "clip": "whatsapp_video_2026_09_09_842pm.mp4",
+    "quality": "balanced",
+    "model": "yolo26s.pt",
+    "processed_frames": 536,
+    "total_video_frames": 536,
+    "video_duration_sec": 17.87,
+    "total_analyze_time_sec": 113.8,
+    "analyze_fps": 4.71,
+    "ms_per_frame": 212.3
+  },
+  {
+    "clip": "whatsapp_video_2026_09_09_842pm.mp4",
+    "quality": "high",
+    "model": "yolo26m.pt",
+    "processed_frames": 536,
+    "total_video_frames": 536,
+    "video_duration_sec": 17.87,
+    "total_analyze_time_sec": 530.42,
+    "analyze_fps": 1.01,
+    "ms_per_frame": 989.6
+  }
+]

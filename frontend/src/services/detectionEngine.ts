@@ -20,14 +20,15 @@ export async function getDetectionModel(): Promise<cocoSsd.ObjectDetection | nul
   try {
     // Set tfjs backend to webgl or cpu
     await tf.ready();
-    // Use mobilenet_v1 for CCTV surveillance: significantly higher vehicle detection recall & mAP
+    // Use local offline cached mobilenet_v1 modelUrl to guarantee 0 external network requests
     modelPromise = cocoSsd
       .load({
         base: 'mobilenet_v1',
+        modelUrl: '/models/coco-ssd/model.json',
       })
       .catch(async () => {
-        // Fallback to mobilenet_v2 if v1 unavailable
-        return await cocoSsd.load({ base: 'mobilenet_v2' });
+        // Fallback to default if local asset not present
+        return await cocoSsd.load({ base: 'mobilenet_v1' });
       });
     return await modelPromise;
   } catch (err: any) {

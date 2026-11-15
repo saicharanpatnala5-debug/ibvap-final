@@ -103,7 +103,7 @@ export const CameraFeed: React.FC<CameraFeedProps> = ({
   const lastDetectionTimeRef = useRef<number>(0);
 
   // VMS Quality & Overlay State
-  const [qualityMode, setQualityMode] = useState<'fast' | 'balanced' | 'high'>('balanced');
+  const [qualityMode, setQualityMode] = useState<'fast' | 'balanced' | 'high'>('fast');
   const [showDetectionsOverlay, setShowDetectionsOverlay] = useState<boolean>(true);
   const [showEventsDrawer, setShowEventsDrawer] = useState<boolean>(false);
 
@@ -1429,7 +1429,7 @@ export const CameraFeed: React.FC<CameraFeedProps> = ({
             <div className="flex items-center justify-between text-xs font-mono text-cyan-300">
               <span className="flex items-center gap-2">
                 <span className="h-2 w-2 rounded-full bg-cyan-400 animate-ping" />
-                Analyzing footage for smooth 30 FPS playback...
+                Analyzing footage for smooth 30 FPS playback... Video will start automatically once ready.
               </span>
               <span className="font-bold">{analysisProgress}%</span>
             </div>

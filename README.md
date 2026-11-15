@@ -10,7 +10,7 @@
 [![YOLO](https://img.shields.io/badge/YOLO-YOLO26%20%2F%20v11-red)](https://github.com/ultralytics/ultralytics)
 [![Fast-ALPR](https://img.shields.io/badge/Fast--ALPR-ONNX%20%7C%20MIT-emerald)](https://github.com/ankits/fast-alpr)
 
-IBVAP is an enterprise-grade polyglot multi-service surveillance platform engineered for tactical border security, perimeter defense, virtual-zone intrusion monitoring, automatic number plate recognition (ANPR), and AI-driven forensic copilot reasoning.
+IBVAP is a polyglot multi-service tactical surveillance platform engineered for tactical border security, perimeter defense, virtual-zone intrusion monitoring, automatic number plate recognition (ANPR), and AI-driven forensic copilot reasoning.
 
 ---
 
@@ -47,7 +47,7 @@ flowchart TD
         CamRepo["Camera & Sensor Registry"]
         ZoneRepo["Virtual Boundary Zones"]
         AlertEngine["Alert Incident State Machine & SSE Stream"]
-        AuditLedger["Immutable Audit Trail Ledger"]
+        AuditLedger["Append-Only Audit Log"]
         RiskScore["Real-Time Threat & Risk Scoring Engine"]
         VehicleDb["National / RTO Vehicle Registry Database"]
     end
@@ -70,7 +70,7 @@ flowchart TD
 
 ### Language & Service Responsibilities
 1. **Python 3.11+ (`ai-service/`)**: FastAPI + Uvicorn + Ultralytics YOLO26 + OpenCV. All computer vision processing: object detection with Indian traffic classification (`pedestrian`, `two-wheeler`, `three-wheeler`, `truck/bus`), ByteTrack kinematics, CLAHE low-light enhancement, virtual zone breaches, and Fast-ALPR ONNX plate localization & OCR.
-2. **Java 21 LTS (`core-service/`)**: Spring Boot 3 + Maven. System of record: auth sessions, cameras, virtual zones, alert lifecycle (Open $\rightarrow$ Acknowledged $\rightarrow$ Resolved), immutable audit logging, risk scoring engine (0–100), vehicle registry integration, and Server-Sent Events (SSE) alert push.
+2. **Java 21 LTS (`core-service/`)**: Spring Boot 3 + Maven. System of record: auth sessions, cameras, virtual zones, alert lifecycle (Open $\rightarrow$ Acknowledged $\rightarrow$ Resolved), append-only audit logging (in-memory deque with no update/delete API), risk scoring engine (0–100), vehicle registry integration, and Server-Sent Events (SSE) alert push.
 3. **TypeScript (`gateway/` & `frontend/`)**:
    - `gateway/`: Express reverse proxy, aggregates `/api/health` across all services, transparently forwards `/api/core/*` and `/api/vision/*`, hosts the Gemini multimodal copilot with grounded fallback reasoning.
    - `frontend/`: React 19 + Tailwind VMS operator workstation with HUD overlay, multi-camera grid, timeline event scrubbing, docked AI copilot, and responsive layout (390px to 1920px).
@@ -115,7 +115,7 @@ Check system requirements before starting:
 ## 🚀 Quick Start (One Command to Setup, Start, and Stop)
 
 ```bash
-# 1. One-time setup: installs dependencies & pre-caches all AI/OCR models for 100% offline use
+# 1. One-time setup: installs dependencies & pre-caches all AI/OCR models for offline capability
 npm run setup
 
 # 2. Start all services (Gateway :3000, AI-Service :8000, Core-Service :8080)
@@ -128,11 +128,11 @@ Open **http://localhost:3000** in your browser. If Node.js (v20+), Python (3.11+
 
 ---
 
-## 🔌 100% Offline Runtime Guarantee
+## 🔌 Verified Offline Runtime Capability
 
-IBVAP is engineered for zero-connectivity border deployments:
-- `npm run setup` automatically downloads and caches all runtime weights (`yolo26s.pt`, `yolo26n.pt`, `yolo11s.pt`, Fast-ALPR ONNX detector `yolo-v9-t-384`, and OCR recognizers `cct-s-v2` / `cct-xs-v2`).
-- During demonstrations or field operations without internet, the vision engine, plate recognizer, and alert state machines run with zero external HTTP requests.
+IBVAP is designed to run in air-gapped environments without external internet connectivity:
+- `npm run setup` downloads and caches all runtime weights (`yolo26s.pt`, `yolo26n.pt`, `yolo11s.pt`, Fast-ALPR ONNX detector `yolo-v9-t-384`, OCR recognizers `cct-s-v2` / `cct-xs-v2`, and in-browser MobileNet COCO-SSD models).
+- During demonstrations or field operations without internet, the vision engine, plate recognizer, and alert state machines run with zero external HTTP requests. Verified via automated Playwright testing (`frontend/tests/offlineVerification.spec.ts`) with all non-localhost requests blocked: 0 external outbound requests occurred.
 - When `GEMINI_API_KEY` is absent or offline, the AI Copilot automatically uses a deterministic grounded local reasoning engine based on live platform telemetry.
 
 ---
@@ -181,7 +181,7 @@ Head-to-head comparison evaluated on the identical 220 perturbed Indian plate cr
   - `fast-alpr`: 4 candidate plate boxes localized; raw characters extracted (`KA037755`, `KA03AHD`). Both failed strict Indian format validation and per-character confidence checks ($<55\%$).
   - `RapidOCR`: 0 plate boxes localized (contour detector fails on real street scenes).
   - `Hybrid`: 4 candidate boxes localized; extracted substrings (`KA03`, `KX034H06`). All failed strict format validation.
-- **Empirical Reality**: **0 of 54 vehicle tracks produced a validated Indian license plate**. All unvalidated candidates are marked with neutral status `"Invalid format - needs review"` and never attach to vehicle dossiers or fabricated RTO owners.
+- **Empirical Reality**: **0 of 54 vehicle tracks produced a validated plate (40 were distance-gated, 14 were large enough to attempt)**. All unvalidated candidates are marked with neutral status `"Invalid format - needs review"` and never attach to vehicle dossiers or fabricated RTO owners.
 
 ### C. Detection Remapping & Diagnostic (`docs/detection_review.html`)
 - **Raw YOLO Detections**: Average **16.02 detections / frame** on 1080p source frames.
@@ -205,7 +205,7 @@ Head-to-head comparison evaluated on the identical 220 perturbed Indian plate cr
 | :--- | :--- | :--- |
 | **Live Monitor** | **Real** | Video playback, detection canvas overlay, HUD stats, multi-stream switcher, timeline scrubber with event ticks, demo data injection/clear. |
 | **Alerts** | **Real** | Client-side `AlertEngine` with rate limiting (10s cooldown, 5/cam/min cap), video-synced timestamps, incident lifecycle (Open $\rightarrow$ Acknowledged $\rightarrow$ Resolved), severity filtering. |
-| **Vehicle Registry** | **Partial (Demo RTO)** | Plate crops, confidence, video timestamps, and manual overrides are real. RTO owner dossier is simulated mock data because government Vahan API access requires agency authorization. Unreadable/distance-gated plates show no dossier. |
+| **Vehicle Registry** | **Simulated / Pluggable** | Plate crops, confidence, video timestamps, and manual overrides are real. Vehicle registry is a simulated service with a pluggable interface boundary and no real external integration (official government Vahan access requires authorized agency credentials). Unreadable/distance-gated plates show no dossier. |
 | **Forensics** | **Real** | Plate, vehicle class, color, time-range, and zone search across captured tracking history. Side-by-side tight crop and scene snapshot drawer. |
 | **AI Copilot** | **Real** | Connects to Google Gemini 2.5 Flash via Gateway (`/api/copilot/chat`). Includes grounded deterministic local reasoning fallback when API key is unset or offline. |
 | **Topology** | **Partial (Labs)** | Marked with `[Labs]` badge. Interactive node canvas maps cameras, gateway, AI service, core service, and zones. Status pulls from real `/api/health`, but node topology is fixed-graph. |
@@ -214,9 +214,9 @@ Head-to-head comparison evaluated on the identical 220 perturbed Indian plate cr
 
 ## ⚠️ Known Limitations & Next Steps
 
-1. **Optical Resolution Bounds**: Real CCTV footage exported from messaging apps ($768 \times 432$) yields vehicle plates with heights of only 10–18 pixels at distances $>15$m. No OCR model can optically resolve characters below the Nyquist limit. 1080p/4K optical zoom cameras are required for operational ANPR.
-2. **Three-Wheeler Classification via Fine-Tuning**: Rather than fragile aspect-ratio heuristics, adding native `auto-rickshaw` classes requires fine-tuning YOLO on Indian traffic datasets (e.g. IDD or Roboflow Indian Traffic). Estimated requirements: 3,000–5,000 annotated images, 6–10 GPU hours on an NVIDIA T4/A10G, costing ~$10–$25.
-3. **Government RTO Integration**: Production vehicle ownership lookups require authenticated access to the Parivahan / Vahan API gateway with authorized agency credentials.
+1. **Optical Resolution Bounds**: Real CCTV footage exported from messaging apps ($768 \times 432$) yields vehicle plates with heights of only 10–18 pixels at distances $>15$m. Characters at this small pixel size lack the resolution needed for OCR engines to distinguish letters and numbers. 1080p/4K cameras or optical zoom lenses are required for reliable operational ANPR.
+2. **Three-Wheeler Classification via Fine-Tuning**: Rather than fragile aspect-ratio heuristics, adding native `auto-rickshaw` classes requires fine-tuning YOLO on Indian traffic datasets (e.g. IDD or Roboflow Indian Traffic). Estimated requirements (to be verified / rough estimate): 3,000–5,000 annotated images, 6–10 GPU hours on an NVIDIA T4/A10G, costing ~$10–$25 compute.
+3. **Government RTO Integration**: Production vehicle ownership lookups require authenticated access to the Parivahan / Vahan API gateway with authorized agency credentials; current implementation provides a pluggable boundary with mock records.
 
 
 ---

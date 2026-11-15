@@ -356,8 +356,8 @@ export default function App() {
         status: 'active',
         fps: 30,
         resolution: { width: 1280, height: 720 },
-        sourceUrl: '',
-        isNightMode: false,
+        sourceUrl: '/samples/whatsapp_video_2026_09_09_842pm.mp4',
+        isNightMode: true,
         createdAt: now,
         zones: [
           {

@@ -19,7 +19,7 @@ All changes adhere strictly to the principle of **zero unverified claims**: ever
    - Upgraded `PlateValidator.validate` in `ai-service/app/services/anpr.py` with strict regex patterns matching the Indian Motor Vehicles Act across all 28 States and 8 Union Territories (`^[A-Z]{2}[0-9]{2}[A-Z]{1,3}[0-9]{4}$`), plus the Bharat Series (`^[0-9]{2}BH[0-9]{4}[A-Z]{1,2}$`).
    - Implemented per-character OCR confidence rejection: any read with `min_char_conf < 55.0%` or `avg_char_conf < 70.0%` is marked invalid (`isValidFormat = False`) with status `"Low character confidence - needs review"`.
    - Re-evaluated the three Round 4 candidate reads: `KA01NV663` (3 final digits instead of 4), `ID1WY5630` (invalid state code 'ID'), and `KA42225` (truncated string). All three are rejected.
-   - **Empirical Reality**: Across all 54 vehicle tracks on real footage, **exactly 0 of 54 vehicle tracks produced a validated Indian license plate**.
+   - **Empirical Reality**: Across all 54 vehicle tracks on real footage, **0 of 54 vehicle tracks produced a validated plate (40 were distance-gated, 14 were large enough to attempt)**.
 2. **Head-to-Head ANPR Comparison (220 Synthetic Plates & Real Crops)**:
    - Evaluated `fast-alpr (cct-s-v2)`, `RapidOCR (raw)`, and `RapidOCR (preprocessed)` on the identical 220 perturbed synthetic plates (`samples/synthetic_plates/`) and real vehicle crops.
    - `fast-alpr` delivers **89.55% exact match**, **2.02% CER** (44 errors / 2,173 chars), and **22.9 ms latency** (43.6 FPS on CPU) with an integrated ONNX plate detector.
@@ -38,7 +38,9 @@ All changes adhere strictly to the principle of **zero unverified claims**: ever
 6. **Honest Feature Audit**:
    - Audited all 6 navigation pages (`Live Monitor`, `Alerts`, `Vehicle Registry`, `Forensics`, `AI Copilot`, `Topology`), clearly distinguishing Real, Partial (Demo RTO), and Mock/Labs features.
 7. **Automated Test Suite Expansion**:
-   - Expanded from 72 to **95 passing tests** across 5 suites (100% pass rate).
+   - Expanded to **96 passing tests** across 5 suites (100% pass rate, including automated offline network isolation verification).
+8. **Measured Analyze Pipeline Timings**:
+   - Empirically measured Analyze execution across both evaluation clips at Fast, Balanced, and High quality (`samples/demo_timing_measurements.json`). Fast mode runs at **11.4–11.55 FPS** on CPU and is configured as default for interactive evaluation.
 
 ---
 
@@ -76,7 +78,7 @@ Evaluated on the 220 synthetic Indian license plates in `samples/synthetic_plate
 - **Extracted Candidate Strings**:
   - Track #100: fast-alpr read `"KA037755"` (conf: 61.2%, min char conf: 41.0%); Hybrid read `"KA03"` $\rightarrow$ **Rejected** (missing series letters, low char confidence).
   - Track #37: fast-alpr read `"KA03AHD"` (conf: 63.8%, min char conf: 38.0%); Hybrid read `"KX034H06"` $\rightarrow$ **Rejected** (missing 4-digit sequence, low char confidence).
-- **Summary**: **0 of 54 vehicle tracks produced a validated Indian license plate**.
+- **Summary**: **0 of 54 vehicle tracks produced a validated plate (40 were distance-gated, 14 were large enough to attempt)**.
 - **Data Integrity**: The system marks all unvalidated candidates as `"Invalid format - needs review"`, isolates them from dossiers, and logs zero fabricated RTO owner data.
 
 ---
@@ -92,13 +94,13 @@ In Round 4, a rule mapped objects with bounding box aspect ratios $0.75 \le w/h 
 ### B. Pretrained Indian Traffic Model Research
 To detect auto-rickshaws natively without brittle heuristics, the recommended path is fine-tuning YOLO on domain-specific Indian road datasets:
 1. **Target Datasets**:
-   - **IDD (Indian Driving Dataset)**: AutoNue / IIIT Hyderabad. Over 10,000 dense traffic images containing classes for `auto-rickshaw`, `motorcycle`, `rider`, `car`, `bus`, `truck`. License: CC BY-NC-SA 4.0.
-   - **Roboflow Indian Traffic Datasets**: Public datasets with 2,500–5,000 annotated images of three-wheelers, auto-rickshaws, and e-rickshaws under CC BY 4.0.
-2. **Resource & Compute Estimates**:
-   - Dataset size needed: 3,000–5,000 annotated images.
+   - **IDD (Indian Driving Dataset)**: AutoNue / IIIT Hyderabad. Over 10,000 dense traffic images containing classes for `auto-rickshaw`, `motorcycle`, `rider`, `car`, `bus`, `truck`. License: CC BY-NC-SA 4.0 (research license, commercial permissions to be verified).
+   - **Roboflow Indian Traffic Datasets**: Public datasets with 2,500–5,000 annotated images of three-wheelers, auto-rickshaws, and e-rickshaws under CC BY 4.0 (licenses and quality vary across datasets).
+2. **Resource & Compute Estimates (To be verified / rough estimate)**:
+   - Dataset size needed: 3,000–5,000 annotated images (rough estimate).
    - Model: Fine-tuning `yolo11s.pt` or `yolo26s.pt` for 50–100 epochs at $960\times 960$ resolution.
    - Compute requirement: 6 to 10 GPU hours on a single NVIDIA A10G (24GB VRAM) or RTX 4090.
-   - Estimated cost: **$10 to $25** on cloud compute providers (e.g., RunPod, Lambda Labs, or AWS `g5.xlarge`).
+   - Estimated cost: **$10 to $25** rough estimate on cloud compute providers (e.g., RunPod, Lambda Labs, or AWS `g5.xlarge`).
 
 ---
 
@@ -137,16 +139,16 @@ By scanning `whatsapp_video_2026_09_09_842pm.mp4` via `find_pedestrian_dwell.py`
 | :--- | :--- | :--- |
 | **Live Monitor** | **Real** | Video playback via HTML5, detection canvas overlay synced to frame timing, HUD performance stats, camera stream selector, timeline scrubber with incident ticks, and interactive demo controls. |
 | **Alerts** | **Real** | `AlertEngine` evaluates client-side and receives server incidents. Includes 10s cooldown per track/rule, 5 alerts/cam/min cap, video timestamps, severity filtering, and state transitions (Open $\rightarrow$ Acknowledged $\rightarrow$ Resolved). |
-| **Vehicle Registry** | **Partial (Demo RTO)** | Plate crops, confidence, video timestamps, and manual overrides are real. Vehicle owner dossiers use simulated Indian RTO registration records because official government Vahan API access requires authenticated agency credentials. Unreadable/distance-gated plates show no dossier. |
+| **Vehicle Registry** | **Simulated / Pluggable** | Plate crops, confidence, video timestamps, and manual overrides are real. Vehicle registry is a simulated service with a pluggable interface boundary and no real external integration (official government Vahan API access requires authenticated agency credentials). Unreadable/distance-gated plates show no dossier. |
 | **Forensics** | **Real** | Search and filter by plate, vehicle class, color, time range, and virtual zone across captured tracking history. Includes side-by-side tight crop and scene snapshot drawer. |
 | **AI Copilot** | **Real** | Reverse proxy endpoint `/api/copilot/chat` routes to Google Gemini 2.5 Flash when `GEMINI_API_KEY` is set. Includes a deterministic grounded fallback engine for offline or unconfigured deployments. |
 | **Topology** | **Partial (Labs)** | Labeled with `[Labs]` badge. Interactive node-graph canvas visualizes cameras, gateway proxy, AI service, core service, and zones. Status reflects live `/api/health`, but node topology graph is fixed. |
 
 ---
 
-## 7. Comprehensive Automated Test Suite (95 / 95 Passing)
+## 7. Comprehensive Automated Test Suite (96 / 96 Passing)
 
-All 5 test suites pass with a 100% success rate:
+All 5 test suites pass with a 100% success rate (including offline network isolation test):
 
 ```
 ================================================================================
@@ -156,9 +158,9 @@ Python AI-Service              | Pytest 9.2.0      |   33   |    0   |   6.59s
 Frontend Unit & State Tests    | Vitest 5.1.0      |   26   |    0   |   0.61s
 API Gateway Tests              | Vitest 5.1.0      |   11   |    0   |   1.56s
 Java Core-Service Tests        | JUnit 5 / Maven   |   13   |    0   |   9.81s
-Playwright E2E & Visual Proof  | Playwright 1.65   |   12   |    0   |  12.30s
+Playwright E2E & Offline Proof | Playwright 1.65   |   13   |    0   |  13.40s
 ================================================================================
-TOTAL                          |                   |   95   |    0   |  30.87s
+TOTAL                          |                   |   96   |    0   |  31.97s
 ================================================================================
 ```
 
@@ -169,12 +171,13 @@ TOTAL                          |                   |   95   |    0   |  30.87s
 ### Verified
 - Zero secrets, real MP4 videos, or extracted personal crops tracked in git history.
 - Synthetic ANPR benchmark scores 89.55% exact match at 22.9 ms latency on CPU.
-- Real footage ANPR honestly reports 0 validated reads out of 54 vehicle tracks due to low video resolution.
+- Real footage ANPR honestly reports 0 of 54 vehicle tracks produced a validated plate (40 were distance-gated, 14 were large enough to attempt).
 - Pedestrian loitering dwell fires cleanly on real footage with zero false alarms on traffic.
 - Navigation and VMS UI are verified responsive across 5 viewports (390px to 1920px).
-- All 95 tests pass across the entire polyglot stack.
+- Offline UI operation verified with 0 external network requests via Playwright.
+- All 96 tests pass across the entire polyglot stack.
 
 ### Known Limitations
 1. **Real Footage Resolution**: Low-resolution WhatsApp videos ($768 \times 432$) cannot be optically resolved for ANPR characters at distances $>15$m. Operational ANPR requires dedicated 1080p/4K surveillance cameras with optical zoom.
-2. **Dedicated Auto-Rickshaw Detection**: Requires training/fine-tuning YOLO on 3,000–5,000 images from Indian road datasets (~$10–$25 compute cost).
-3. **Official Vahan RTO Integration**: Production vehicle ownership lookups require authenticated access to the official Parivahan government gateway.
+2. **Dedicated Auto-Rickshaw Detection**: Requires training/fine-tuning YOLO on 3,000–5,000 images from Indian road datasets (~$10–$25 compute cost rough estimate to be verified).
+3. **Official Vahan RTO Integration**: Production vehicle ownership lookups require authenticated access to the official Parivahan government gateway; current implementation provides a simulated service with a pluggable boundary.
