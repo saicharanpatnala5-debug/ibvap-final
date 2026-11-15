@@ -51,6 +51,13 @@ export const AlertsPanel: React.FC<AlertsPanelProps> = ({
     });
   };
 
+  const formatVideoTimestamp = (sec?: number) => {
+    if (sec === undefined || sec === null) return null;
+    const m = Math.floor(sec / 60);
+    const s = (sec % 60).toFixed(1);
+    return `${m.toString().padStart(2, '0')}:${s.padStart(4, '0')}s`;
+  };
+
   // Sort alerts by severity precedence (critical > high > medium > low > normal), then newest first
   const severityRank: Record<AlertSeverity, number> = {
     critical: 5,
@@ -235,13 +242,15 @@ export const AlertsPanel: React.FC<AlertsPanelProps> = ({
                     <div className="flex items-center gap-2 text-xs text-neutral-400">
                       <span className="font-medium text-neutral-300">{alert.cameraName}</span>
                       <span>•</span>
-                      <span className="flex items-center gap-1">
-                        <Clock className="h-3 w-3" />
-                        {new Date(alert.timestamp).toLocaleTimeString([], {
-                          hour: '2-digit',
-                          minute: '2-digit',
-                          second: '2-digit',
-                        })}
+                      <span className="flex items-center gap-1 font-mono text-[11px] text-neutral-300">
+                        <Clock className="h-3 w-3 text-neutral-400" />
+                        {alert.videoTime !== undefined
+                          ? `Video: ${formatVideoTimestamp(alert.videoTime)}`
+                          : new Date(alert.timestamp).toLocaleTimeString([], {
+                              hour: '2-digit',
+                              minute: '2-digit',
+                              second: '2-digit',
+                            })}
                       </span>
                       <span>•</span>
                       <span className="font-mono text-[11px] text-amber-400">
@@ -259,14 +268,27 @@ export const AlertsPanel: React.FC<AlertsPanelProps> = ({
                   </div>
                 </div>
 
-                {/* Evidence Thumbnail & Object Details */}
+                {/* Evidence Thumbnails: Tight Entity Crop + Context Scene Snapshot */}
                 <div className="mt-3 flex items-center gap-3">
+                  {alert.entityCropUrl && (
+                    <div className="relative rounded border border-neutral-700 bg-black overflow-hidden h-14 w-16 flex items-center justify-center shrink-0" title="Target Entity Crop">
+                      <img
+                        src={alert.entityCropUrl}
+                        alt="Target entity crop"
+                        className="max-h-full max-w-full object-contain"
+                      />
+                      <span className="absolute bottom-0 inset-x-0 bg-black/75 text-[8px] font-mono text-center text-neutral-300 py-0.2">CROP</span>
+                    </div>
+                  )}
                   {alert.snapshotUrl && (
-                    <img
-                      src={alert.snapshotUrl}
-                      alt="Incident evidence snapshot"
-                      className="h-14 w-24 rounded border border-neutral-800 object-cover bg-black shrink-0"
-                    />
+                    <div className="relative rounded border border-neutral-800 bg-black overflow-hidden h-14 w-24 shrink-0" title="Scene Snapshot">
+                      <img
+                        src={alert.snapshotUrl}
+                        alt="Incident scene snapshot"
+                        className="h-full w-full object-cover"
+                      />
+                      <span className="absolute bottom-0 inset-x-0 bg-black/75 text-[8px] font-mono text-center text-neutral-300 py-0.2">SCENE</span>
+                    </div>
                   )}
                   <div className="flex-1 text-xs space-y-1">
                     <div className="flex items-center gap-2">

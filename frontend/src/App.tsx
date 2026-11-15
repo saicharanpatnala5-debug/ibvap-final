@@ -176,13 +176,67 @@ export default function App() {
           timestamp: newAlert.timestamp,
           videoTime: newAlert.videoTime !== undefined ? newAlert.videoTime : 0,
           dossier,
-          cropUrl: newAlert.snapshotUrl,
-          vehicleThumbnailUrl: newAlert.snapshotUrl,
+          cropUrl: newAlert.entityCropUrl || newAlert.snapshotUrl,
+          vehicleThumbnailUrl: newAlert.entityCropUrl || newAlert.snapshotUrl,
           trackId: newAlert.objectId,
         };
         return [newRecord, ...prev];
       });
     }
+  };
+
+  // Continuous ANPR detection handler for vehicles seen in playback
+  const handlePlateDetected = (plateInfo: {
+    plate: string;
+    confidence: number;
+    cropUrl?: string;
+    cameraId: string;
+    cameraName?: string;
+    videoTime: number;
+    trackId?: number;
+    formatType?: 'standard' | 'bharat' | 'invalid' | 'distance_gated';
+    validationStatus?: string;
+  }) => {
+    const rawPlate = plateInfo.plate;
+    const cleanPlate = rawPlate.toUpperCase().replace(/[^A-Z0-9]/g, '');
+    const isDistanceGated =
+      plateInfo.formatType === 'distance_gated' ||
+      plateInfo.validationStatus === 'Plate not legible at this distance';
+    const statusInfo = isDistanceGated
+      ? { status: 'Plate not legible at this distance' as const, isValid: false, formatType: 'distance_gated' as const }
+      : determinePlateStatus(cleanPlate, plateInfo.confidence);
+    const status = statusInfo.status;
+    const dossier = status === 'Valid format' ? lookupVehicleDossier(cleanPlate) : null;
+    const cam = cameras.find((c) => c.id === plateInfo.cameraId);
+
+    setPlateRecords((prev) => {
+      // De-duplicate same track within 8 seconds video time
+      const existing = prev.find(
+        (r) =>
+          (r.trackId === plateInfo.trackId && Math.abs((r.videoTime || 0) - plateInfo.videoTime) < 8) ||
+          (!isDistanceGated && r.plateNumber === cleanPlate && Math.abs((r.videoTime || 0) - plateInfo.videoTime) < 8)
+      );
+      if (existing) return prev;
+
+      const newRecord: PlateRegistryRecord = {
+        id: `rec-${cleanPlate || 'plate'}-${Date.now()}-${Math.random().toString(36).slice(2, 6)}`,
+        plateNumber: isDistanceGated ? 'UNRESOLVED' : cleanPlate,
+        status,
+        formatValidationStatus: plateInfo.validationStatus || status,
+        isValidFormat: status === 'Valid format',
+        formatType: (plateInfo.formatType || statusInfo.formatType || 'invalid') as any,
+        confidence: plateInfo.confidence,
+        cameraId: plateInfo.cameraId,
+        cameraName: plateInfo.cameraName || cam?.name || 'Surveillance Node',
+        timestamp: Date.now(),
+        videoTime: plateInfo.videoTime,
+        trackId: plateInfo.trackId,
+        cropUrl: plateInfo.cropUrl,
+        vehicleThumbnailUrl: plateInfo.cropUrl,
+        dossier,
+      };
+      return [newRecord, ...prev];
+    });
   };
 
   // Alert actions with audit trail
@@ -291,147 +345,61 @@ export default function App() {
     );
   };
 
-  // Load explicit demo data
+  // Load explicit demo camera preset
   const handleLoadDemoData = () => {
     const now = Date.now();
     const demoCams: CameraFeedItem[] = [
       {
         id: 'cam-demo-gate',
-        name: 'Sector 4 Vehicle Checkpoint (Demo)',
-        sourceType: 'stream',
+        name: 'Sector 4 Vehicle Checkpoint',
+        sourceType: 'file',
         status: 'active',
-        fps: 25,
-        resolution: { width: 1920, height: 1080 },
+        fps: 30,
+        resolution: { width: 1280, height: 720 },
         sourceUrl: '',
         isNightMode: false,
         createdAt: now,
         zones: [
           {
-            id: 'zone-demo-gate',
+            id: 'zone-demo-perimeter',
             cameraId: 'cam-demo-gate',
-            name: 'Restricted Vehicle Portal',
+            name: 'Restricted Perimeter Shoulder',
             points: [
-              { x: 0.1, y: 0.4 },
-              { x: 0.9, y: 0.4 },
-              { x: 0.9, y: 0.95 },
-              { x: 0.1, y: 0.95 },
+              { x: 0.02, y: 0.10 },
+              { x: 0.22, y: 0.10 },
+              { x: 0.22, y: 0.40 },
+              { x: 0.02, y: 0.40 },
             ],
             type: 'polygon',
             color: '#ef4444',
             enabled: true,
-            alertOnClasses: ['person', 'car', 'truck'],
+            alertOnClasses: ['pedestrian', 'person', 'car', 'two-wheeler'],
             createdAt: now,
           },
         ],
       },
     ];
 
-    const demoAlerts: AlertIncident[] = [
-      {
-        id: `alert-demo-${now}-1`,
-        title: 'Virtual Fence Breach [Demo]',
-        severity: 'critical',
-        timestamp: now - 120000,
-        videoTime: 12.0,
-        cameraName: 'Sector 4 Vehicle Checkpoint (Demo)',
-        cameraId: 'cam-demo-gate',
-        riskScore: 89,
-        riskFactors: [],
-        status: 'active',
-        objectClass: 'person',
-        objectId: 101,
-        confidence: 94,
-        anprPlate: undefined,
-        auditTrail: [],
-      },
-      {
-        id: `alert-demo-${now}-2`,
-        title: 'Watchlist Vehicle Detected [Demo]',
-        severity: 'high',
-        timestamp: now - 360000,
-        videoTime: 24.0,
-        cameraName: 'Sector 4 Vehicle Checkpoint (Demo)',
-        cameraId: 'cam-demo-gate',
-        riskScore: 92,
-        riskFactors: [],
-        status: 'active',
-        objectClass: 'car',
-        objectId: 102,
-        confidence: 91,
-        anprPlate: 'UP16BC9999',
-        auditTrail: [],
-      },
-    ];
-
     const demoPlates: PlateRegistryRecord[] = [
       {
-        id: `demo-rec-1-${now}`,
-        plateNumber: 'DL01AB1234',
-        status: 'Valid format',
-        formatValidationStatus: 'Valid format',
-        isValidFormat: true,
-        formatType: 'standard',
-        confidence: 96,
-        cameraId: 'cam-demo-gate',
-        cameraName: 'Sector 4 Vehicle Checkpoint (Demo)',
-        timestamp: now - 3600000,
-        videoTime: 12.4,
-        dossier: lookupVehicleDossier('DL01AB1234'),
-        trackId: 104,
-        isDemo: true,
-      },
-      {
-        id: `demo-rec-2-${now}`,
-        plateNumber: 'HR26?X89',
-        status: 'Low confidence - needs review',
-        formatValidationStatus: 'Low confidence - needs review',
-        isValidFormat: false,
-        formatType: 'invalid',
-        confidence: 52,
-        cameraId: 'cam-demo-gate',
-        cameraName: 'Sector 4 Vehicle Checkpoint (Demo)',
-        timestamp: now - 7200000,
-        videoTime: 24.8,
-        dossier: null,
-        trackId: 105,
-        isDemo: true,
-      },
-      {
-        id: `demo-rec-3-${now}`,
+        id: 'rec-demo-unreadable',
         plateNumber: 'UNREADABLE',
         status: 'Unreadable',
         formatValidationStatus: 'Unreadable',
         isValidFormat: false,
         formatType: 'invalid',
-        confidence: 27,
+        confidence: 45,
         cameraId: 'cam-demo-gate',
-        cameraName: 'Sector 4 Vehicle Checkpoint (Demo)',
-        timestamp: now - 10800000,
-        videoTime: 45.2,
-        dossier: null,
-        trackId: 106,
-        isDemo: true,
-      },
-      {
-        id: `demo-rec-4-${now}`,
-        plateNumber: 'UP16BC9999',
-        status: 'Valid format',
-        formatValidationStatus: 'Valid format',
-        isValidFormat: true,
-        formatType: 'standard',
-        confidence: 91,
-        cameraId: 'cam-demo-gate',
-        cameraName: 'Sector 4 Vehicle Checkpoint (Demo)',
-        timestamp: now - 14400000,
-        videoTime: 62.1,
-        dossier: lookupVehicleDossier('UP16BC9999'),
-        trackId: 102,
+        cameraName: 'Sector 4 Vehicle Checkpoint',
+        timestamp: now - 3600000,
+        videoTime: 12.4,
+        trackId: 101,
         isDemo: true,
       },
     ];
 
     setCameras(demoCams);
-    setAlerts(demoAlerts);
+    setAlerts([]);
     setPlateRecords(demoPlates);
   };
 
@@ -503,10 +471,12 @@ export default function App() {
           <div className="pb-28">
             <CameraGrid
               cameras={cameras}
+              alerts={alerts}
               onUpdateCamera={handleUpdateCamera}
               onRemoveCamera={handleRemoveCamera}
               onAlertGenerated={handleAlertGenerated}
               onSelectPlate={(plate, cropUrl) => setDossierPlate({ plate, cropUrl })}
+              onPlateDetected={handlePlateDetected}
               onOpenAddCamera={() => setIsAddCameraOpen(true)}
               onAskAI={(prompt) => {
                 setPendingCommandQuery(prompt);

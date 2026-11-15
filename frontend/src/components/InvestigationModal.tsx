@@ -66,6 +66,13 @@ export const InvestigationModal: React.FC<InvestigationModalProps> = ({
       : []),
   ];
 
+  const formatVideoTimestamp = (sec?: number) => {
+    if (sec === undefined || sec === null) return '00:00.0s';
+    const m = Math.floor(sec / 60);
+    const s = (sec % 60).toFixed(1);
+    return `${m.toString().padStart(2, '0')}:${s.padStart(4, '0')}s`;
+  };
+
   const handleExportJson = () => {
     const dataStr =
       'data:text/json;charset=utf-8,' +
@@ -136,23 +143,37 @@ export const InvestigationModal: React.FC<InvestigationModalProps> = ({
         <div className="flex-1 overflow-y-auto p-6 space-y-6">
           {/* Top Row: Snapshot + Summary Card */}
           <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
-            {/* Snapshot Evidence Container */}
+            {/* Snapshot & Crop Evidence Container */}
             <div className="space-y-2">
               <span className="text-xs font-medium uppercase tracking-wider text-neutral-400 block">
-                Forensic Frame Evidence
+                Forensic Optical Evidence
               </span>
-              <div className="relative rounded-xl border border-neutral-800 bg-black aspect-video flex items-center justify-center overflow-hidden">
-                {incident.snapshotUrl ? (
-                  <img
-                    src={incident.snapshotUrl}
-                    alt="Forensic Frame Snapshot"
-                    className="h-full w-full object-contain"
-                  />
-                ) : (
-                  <div className="text-xs text-neutral-500">Live Frame Ingestion Snapshot</div>
+              <div className="grid grid-cols-1 sm:grid-cols-3 gap-2">
+                {incident.entityCropUrl && (
+                  <div className="relative rounded-xl border border-neutral-700 bg-black h-48 flex items-center justify-center overflow-hidden">
+                    <img
+                      src={incident.entityCropUrl}
+                      alt="Target Entity Crop"
+                      className="max-h-full max-w-full object-contain"
+                    />
+                    <div className="absolute bottom-2 left-2 rounded bg-neutral-950/85 border border-neutral-800 px-2 py-0.5 text-[10px] font-mono text-neutral-300">
+                      TIGHT CROP
+                    </div>
+                  </div>
                 )}
-                <div className="absolute bottom-2 left-2 rounded bg-neutral-950/80 px-2 py-1 text-[11px] font-mono text-neutral-300">
-                  Time: {incident.videoTime ? incident.videoTime.toFixed(2) + 's' : '0.00s'}
+                <div className={`relative rounded-xl border border-neutral-800 bg-black h-48 flex items-center justify-center overflow-hidden ${incident.entityCropUrl ? 'sm:col-span-2' : 'sm:col-span-3'}`}>
+                  {incident.snapshotUrl ? (
+                    <img
+                      src={incident.snapshotUrl}
+                      alt="Forensic Frame Snapshot"
+                      className="h-full w-full object-contain"
+                    />
+                  ) : (
+                    <div className="text-xs text-neutral-500">Live Frame Ingestion Snapshot</div>
+                  )}
+                  <div className="absolute bottom-2 left-2 rounded bg-neutral-950/85 border border-neutral-800 px-2 py-0.5 text-[10px] font-mono text-neutral-300">
+                    Video: {formatVideoTimestamp(incident.videoTime)}
+                  </div>
                 </div>
               </div>
             </div>

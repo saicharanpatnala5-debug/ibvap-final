@@ -23,13 +23,16 @@ class ANPRResult(BaseModel):
     confidence: float
     isReadable: bool
     isValidFormat: bool = False
-    formatType: Optional[Literal["standard", "bharat", "invalid"]] = "invalid"
+    formatType: Optional[Literal["standard", "bharat", "invalid", "distance_gated"]] = "invalid"
     validationStatus: Optional[str] = "Unreadable / invalid format"
     stateCode: Optional[str] = None
     rtoCode: Optional[str] = None
     series: Optional[str] = None
     plateNumber: Optional[str] = None
     cropDataUrl: Optional[str] = None
+    plateCropDataUrl: Optional[str] = None
+    vehicleCropDataUrl: Optional[str] = None
+    isDistanceGated: bool = False
     processedAt: int = 0
 
 

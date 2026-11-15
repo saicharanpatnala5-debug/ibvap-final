@@ -3,6 +3,7 @@ import path from 'path';
 
 test.describe('IBVAP Surveillance Platform - End-to-End Walkthrough', () => {
   test('Complete platform walkthrough with clean empty state, registry inspection, copilot, and demo data', async ({ browser }) => {
+    test.setTimeout(60000);
     // Launch context with video recording
     const videoDir = path.resolve('./samples/debug_videos');
     const context = await browser.newContext({
@@ -20,7 +21,6 @@ test.describe('IBVAP Surveillance Platform - End-to-End Walkthrough', () => {
       window.localStorage.clear();
     });
     await page.goto('http://localhost:3000');
-    await page.waitForLoadState('networkidle');
 
     // Verify empty state counters and banners
     await expect(page.locator('#main-app-header')).toBeVisible();

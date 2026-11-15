@@ -1,10 +1,14 @@
 export type ObjectClass =
   | 'person'
+  | 'pedestrian'
   | 'car'
   | 'truck'
   | 'bus'
+  | 'truck/bus'
   | 'motorcycle'
   | 'bicycle'
+  | 'two-wheeler'
+  | 'three-wheeler'
   | 'suitcase'
   | 'backpack'
   | 'handbag'
@@ -52,13 +56,16 @@ export interface ANPRResult {
   confidence: number;
   isReadable: boolean;
   isValidFormat?: boolean;
-  formatType?: 'standard' | 'bharat' | 'invalid';
-  validationStatus?: 'Valid format' | 'Unreadable / invalid format';
+  formatType?: 'standard' | 'bharat' | 'invalid' | 'distance_gated';
+  validationStatus?: string;
   stateCode?: string;
   rtoCode?: string;
   series?: string;
   plateNumber?: string;
   cropDataUrl?: string;
+  plateCropDataUrl?: string;
+  vehicleCropDataUrl?: string;
+  isDistanceGated?: boolean;
   processedAt: number;
 }
 
@@ -134,8 +141,10 @@ export interface AlertIncident {
   objectId: number;
   confidence: number;
   snapshotUrl?: string;
+  entityCropUrl?: string;
   anprPlate?: string;
   anprConfidence?: number;
+  ruleType?: 'zone_entry' | 'zone_loitering' | 'wrong_direction' | 'watchlist_plate';
   zoneId?: string;
   zoneName?: string;
   status: 'active' | 'acknowledged' | 'escalated' | 'closed';
@@ -161,7 +170,7 @@ export interface CameraFeedItem {
   aiSourceId?: string;
 }
 
-export type PlateStatus = 'Valid format' | 'Low confidence - needs review' | 'Unreadable';
+export type PlateStatus = 'Valid format' | 'Low confidence - needs review' | 'Unreadable' | 'Plate not legible at this distance';
 
 export interface VehicleDossier {
   plateNumber: string;
@@ -180,7 +189,7 @@ export interface VehicleDossier {
   isSimulatedDemo: true;
   isSimulated?: boolean;
   validationStatus?: string;
-  formatType?: 'standard' | 'bharat' | 'invalid';
+  formatType?: 'standard' | 'bharat' | 'invalid' | 'distance_gated';
   stateName?: string;
   rtoOffice?: string;
   hasRecord?: boolean;
@@ -192,7 +201,7 @@ export interface PlateRegistryRecord {
   status: PlateStatus;
   formatValidationStatus?: string;
   isValidFormat: boolean;
-  formatType?: 'standard' | 'bharat' | 'invalid';
+  formatType?: 'standard' | 'bharat' | 'invalid' | 'distance_gated';
   confidence: number;
   cameraId: string;
   cameraName: string;

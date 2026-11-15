@@ -86,6 +86,19 @@ class SurveillanceDetector:
             settings.IMGSZ = imgsz
         self.reset()
 
+    def set_quality(self, quality: str):
+        """Switches pipeline profile: fast (yolo26n@640), balanced (yolo26s@960), high (yolo26m/s@1280)."""
+        q = quality.lower().strip()
+        if q == "fast":
+            self.set_model("yolo26n.pt", imgsz=640)
+        elif q == "high":
+            try:
+                self.set_model("yolo26m.pt", imgsz=1280)
+            except Exception:
+                self.set_model("yolo26s.pt", imgsz=1280)
+        else:
+            self.set_model("yolo26s.pt", imgsz=960)
+
     def _resolve_tracker_config(self) -> str:
         """
         Resolves the path to the custom tracker config (bytetrack.yaml or botsort.yaml)
@@ -174,6 +187,106 @@ class SurveillanceDetector:
                 kept_vehicles.append(v)
 
         return non_vehicles + kept_vehicles
+
+    def _map_indian_traffic_classes(
+        self,
+        detections: list[dict],
+        frame_w: int,
+        frame_h: int,
+    ) -> list[dict]:
+        """
+        Maps raw YOLO classes to Indian traffic categories:
+        - Two-Wheeler: Fuses overlapping motorcycle/bicycle and rider (person) into a single entity.
+        - Pedestrian: Remaining persons become 'pedestrian'.
+        - Three-Wheeler / Auto-Rickshaw: Detections labeled as 'car' or 'truck' with aspect ratio 0.75-1.28
+          (distinctive boxy/upright profile) are remapped to 'three-wheeler'.
+        - Heavy Vehicles: 'truck' and 'bus' are unified to 'truck/bus'.
+        - Passenger Cars: Retain 'car'.
+        """
+        if not detections:
+            return []
+
+        persons = [d for d in detections if d["class"] == "person"]
+        bikes = [d for d in detections if d["class"] in ["motorcycle", "bicycle"]]
+        vehicles = [d for d in detections if d["class"] in ["car", "truck", "bus"]]
+        accessories = [d for d in detections if d["class"] in ["backpack", "handbag", "suitcase"]]
+
+        fused_person_ids = set()
+        mapped_two_wheelers = []
+
+        for bike in bikes:
+            bb = bike["bbox"]
+            bx1, by1 = bb.x, bb.y
+            bx2, by2 = bb.x + bb.width, bb.y + bb.height
+            bcx = bb.x + bb.width * 0.5
+
+            matched_person = None
+            max_iou = 0.0
+
+            for p in persons:
+                if p["id"] in fused_person_ids:
+                    continue
+                pb = p["bbox"]
+                px1, py1 = pb.x, pb.y
+                px2, py2 = pb.x + pb.width, pb.y + pb.height
+                pcx = pb.x + pb.width * 0.5
+
+                x_dist = abs(pcx - bcx)
+                if x_dist < max(bb.width * 0.6, pb.width * 0.6):
+                    ix1 = max(bx1, px1)
+                    iy1 = max(by1, py1)
+                    ix2 = min(bx2, px2)
+                    iy2 = min(by2, py2)
+                    if ix2 > ix1 and iy2 > iy1:
+                        inter_area = (ix2 - ix1) * (iy2 - iy1)
+                        p_area = max(1e-5, pb.width * pb.height)
+                        overlap_ratio = inter_area / p_area
+                        if overlap_ratio > 0.25 and overlap_ratio > max_iou:
+                            max_iou = overlap_ratio
+                            matched_person = p
+
+            if matched_person is not None:
+                fused_person_ids.add(matched_person["id"])
+                pb = matched_person["bbox"]
+                ux1 = min(bb.x, pb.x)
+                uy1 = min(bb.y, pb.y)
+                ux2 = max(bb.x + bb.width, pb.x + pb.width)
+                uy2 = max(bb.y + bb.height, pb.y + pb.height)
+                bike["bbox"] = BoundingBox(
+                    x=ux1,
+                    y=uy1,
+                    width=ux2 - ux1,
+                    height=uy2 - uy1,
+                )
+                bike["conf"] = max(bike["conf"], matched_person["conf"])
+                bike["class"] = "two-wheeler"
+            else:
+                bike["class"] = "two-wheeler"
+            mapped_two_wheelers.append(bike)
+
+        mapped_pedestrians = []
+        for p in persons:
+            if p["id"] not in fused_person_ids:
+                p["class"] = "pedestrian"
+                mapped_pedestrians.append(p)
+
+        mapped_vehicles = []
+        for v in vehicles:
+            vb = v["bbox"]
+            v_w_px = vb.width * frame_w
+            v_h_px = vb.height * frame_h
+            aspect = float(v_w_px) / max(1.0, float(v_h_px))
+
+            # Auto-rickshaw heuristic: aspect ratio 0.75 - 1.28
+            if 0.75 <= aspect <= 1.28 and v["class"] in ["car", "truck"]:
+                v["class"] = "three-wheeler"
+            elif v["class"] in ["truck", "bus"]:
+                v["class"] = "truck/bus"
+            else:
+                v["class"] = "car"
+            mapped_vehicles.append(v)
+
+        return mapped_two_wheelers + mapped_pedestrians + mapped_vehicles + accessories
 
     def process_frame(
         self,
@@ -266,7 +379,7 @@ class SurveillanceDetector:
                         appearance = extract_entity_appearance(obj_crop, cls_name)
 
                         # Store candidate crop for confirmed vehicles
-                        if cls_name in ["car", "truck", "bus"]:
+                        if cls_name in ["car", "truck", "bus", "motorcycle", "bicycle"]:
                             veh_crops_to_queue[track_id] = obj_crop
 
                         # Attach previously confirmed plate reading if available
@@ -287,6 +400,9 @@ class SurveillanceDetector:
         # Suppress duplicate overlapping vehicle detections before tracking manager
         raw_detections = self._filter_duplicate_vehicles(raw_detections, settings.VEHICLE_NMS_IOU)
 
+        # Map Indian traffic classes and fuse rider + two-wheeler
+        raw_detections = self._map_indian_traffic_classes(raw_detections, w, h)
+
         # Pass through tracking lifecycle manager:
         # Enforces tentative -> confirmed -> lost -> removed
         # Eliminates 1-frame ghosts, applies EMA smoothing & footpoint kinematics
@@ -299,9 +415,10 @@ class SurveillanceDetector:
 
         # Trigger ON-DEMAND ASYNC ANPR ONLY FOR CONFIRMED VEHICLES
         # Ceases immediately once a plate is confirmed via multi-frame voting
+        veh_classes = {"car", "truck/bus", "two-wheeler", "three-wheeler", "truck", "bus", "motorcycle"}
         queued_count = 0
         for ent in entities:
-            if ent.class_name in ["car", "truck", "bus"]:
+            if ent.class_name in veh_classes:
                 confirmed = self.plate_voter.get_confirmed(ent.id)
                 if confirmed:
                     ent.anpr = confirmed

@@ -47,15 +47,28 @@ import {
   registerCameraFrameProvider,
   unregisterCameraFrameProvider,
 } from '../services/cameraFrameRegistry';
+import { AlertEngine } from '../services/alertEngine';
 import { ZoneDrawer } from './ZoneDrawer';
 import { videoAnalysisService } from '../services/videoAnalysisService';
 
 interface CameraFeedProps {
   camera: CameraFeedItem;
+  alerts?: AlertIncident[];
   onUpdateCamera: (updated: CameraFeedItem) => void;
   onRemoveCamera: (id: string) => void;
   onAlertGenerated: (alert: AlertIncident) => void;
   onSelectPlate: (plate: string, cropUrl?: string) => void;
+  onPlateDetected?: (info: {
+    plate: string;
+    confidence: number;
+    cropUrl?: string;
+    cameraId: string;
+    cameraName?: string;
+    videoTime: number;
+    trackId?: number;
+    formatType?: 'standard' | 'bharat' | 'invalid' | 'distance_gated';
+    validationStatus?: string;
+  }) => void;
   onInspectObject?: (object: TrackedObject) => void;
   onAskAI?: (prompt: string) => void;
   reducedMotion?: boolean;
@@ -64,10 +77,12 @@ interface CameraFeedProps {
 
 export const CameraFeed: React.FC<CameraFeedProps> = ({
   camera,
+  alerts = [],
   onUpdateCamera,
   onRemoveCamera,
   onAlertGenerated,
   onSelectPlate,
+  onPlateDetected,
   onAskAI,
   reducedMotion = false,
   seekToTime,
@@ -80,11 +95,42 @@ export const CameraFeed: React.FC<CameraFeedProps> = ({
   const offscreenLumRef = useRef<HTMLCanvasElement | null>(null);
   const offscreenSnapRef = useRef<HTMLCanvasElement | null>(null);
 
+  const alertEngineRef = useRef<AlertEngine>(new AlertEngine());
   const trackerRef = useRef<ObjectTracker>(new ObjectTracker());
   const motionTrackerRef = useRef<LightweightMotionTracker>(new LightweightMotionTracker());
   const lastMotionCheckRef = useRef<number>(0);
   const isDetectingRef = useRef<boolean>(false);
   const lastDetectionTimeRef = useRef<number>(0);
+
+  // VMS Quality & Overlay State
+  const [qualityMode, setQualityMode] = useState<'fast' | 'balanced' | 'high'>('balanced');
+  const [showDetectionsOverlay, setShowDetectionsOverlay] = useState<boolean>(true);
+  const [showEventsDrawer, setShowEventsDrawer] = useState<boolean>(false);
+
+  // Keyboard shortcut: 'D' to toggle detection overlay
+  useEffect(() => {
+    const handleKeyDown = (e: KeyboardEvent) => {
+      if (e.target instanceof HTMLInputElement || e.target instanceof HTMLTextAreaElement) return;
+      if (e.key === 'd' || e.key === 'D') {
+        setShowDetectionsOverlay((prev) => !prev);
+      }
+    };
+    window.addEventListener('keydown', handleKeyDown);
+    return () => window.removeEventListener('keydown', handleKeyDown);
+  }, []);
+
+  const handleQualityChange = async (mode: 'fast' | 'balanced' | 'high') => {
+    setQualityMode(mode);
+    try {
+      await fetch('/api/v1/model/quality', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ quality: mode }),
+      });
+    } catch {
+      // Offline fallback
+    }
+  };
 
   // Playback state
   const [isPlaying, setIsPlaying] = useState<boolean>(true);
@@ -473,81 +519,92 @@ export const CameraFeed: React.FC<CameraFeedProps> = ({
 
       // 4. Automatic ANPR on vehicles in the same background detection pass
       for (const track of updatedTracks) {
-        const isVehicle = ['car', 'truck', 'bus', 'motorcycle'].includes(track.class);
+        const isVehicle = [
+          'car',
+          'truck',
+          'bus',
+          'two-wheeler',
+          'three-wheeler',
+          'truck/bus',
+          'motorcycle',
+        ].includes(track.class);
         if (isVehicle && !track.anpr) {
-          // Perform automatic ANPR on vehicle crop
           extractAndReadLicensePlate(video, track.bbox).then((anprResult) => {
             track.anpr = anprResult;
-            if (anprResult.isReadable && anprResult.plateText !== 'Unreadable') {
+            if (anprResult.isReadable && anprResult.plateText && anprResult.plateText !== 'Unreadable') {
+              const bestCrop = anprResult.plateCropDataUrl || anprResult.cropDataUrl;
               setLatestReadPlate({
                 plate: anprResult.plateText,
                 confidence: anprResult.confidence,
-                cropUrl: anprResult.cropDataUrl,
+                cropUrl: bestCrop,
                 timestamp: Date.now(),
+                isValidFormat: anprResult.isValidFormat,
+                formatType: anprResult.formatType,
+                validationStatus: anprResult.validationStatus,
               });
+              if (onPlateDetected) {
+                onPlateDetected({
+                  plate: anprResult.plateText,
+                  confidence: anprResult.confidence,
+                  cropUrl: bestCrop,
+                  cameraId: camera.id,
+                  cameraName: camera.name,
+                  videoTime: video.currentTime,
+                  trackId: track.id,
+                  formatType: anprResult.formatType,
+                  validationStatus: anprResult.validationStatus,
+                });
+              }
               if (!autoOpenedPlatesRef.current.has(anprResult.plateText)) {
                 autoOpenedPlatesRef.current.add(anprResult.plateText);
-                onSelectPlate(anprResult.plateText, anprResult.cropDataUrl);
+                onSelectPlate(anprResult.plateText, bestCrop);
+              }
+            } else if (anprResult.formatType === 'distance_gated') {
+              if (onPlateDetected && !autoOpenedPlatesRef.current.has(`dist-${track.id}`)) {
+                autoOpenedPlatesRef.current.add(`dist-${track.id}`);
+                const bestCrop = anprResult.cropDataUrl;
+                onPlateDetected({
+                  plate: 'DISTANCE_GATED',
+                  confidence: anprResult.confidence,
+                  cropUrl: bestCrop,
+                  cameraId: camera.id,
+                  cameraName: camera.name,
+                  videoTime: video.currentTime,
+                  trackId: track.id,
+                  formatType: 'distance_gated',
+                  validationStatus: 'Plate not legible at this distance',
+                });
               }
             }
           });
         }
       }
 
-      // 5. Virtual fence & restricted zone violation checks
-      for (const track of updatedTracks) {
-        const violation = checkZoneViolations(track, camera.zones);
-        if (violation) {
-          track.hasCrossedZoneIds.push(violation.crossedZone.id);
+      // 5. Explicit VMS Alert Evaluation with Hysteresis & Rate Capping
+      // Pre-capture frame snapshot for evidence
+      if (!offscreenSnapRef.current) {
+        offscreenSnapRef.current = document.createElement('canvas');
+        offscreenSnapRef.current.width = 480;
+        offscreenSnapRef.current.height = 270;
+      }
+      const snapCanvas = offscreenSnapRef.current;
+      const sCtx = snapCanvas.getContext('2d');
+      if (sCtx) {
+        sCtx.drawImage(video, 0, 0, snapCanvas.width, snapCanvas.height);
+      }
+      const snapshotUrl = snapCanvas.toDataURL('image/jpeg', 0.82);
 
-          // Capture evidence snapshot using reusable offscreen canvas
-          if (!offscreenSnapRef.current) {
-            offscreenSnapRef.current = document.createElement('canvas');
-            offscreenSnapRef.current.width = 480;
-            offscreenSnapRef.current.height = 270;
-          }
-          const snapCanvas = offscreenSnapRef.current;
-          const sCtx = snapCanvas.getContext('2d');
-          if (sCtx) {
-            sCtx.drawImage(video, 0, 0, snapCanvas.width, snapCanvas.height);
-          }
-          const snapshotUrl = snapCanvas.toDataURL('image/jpeg', 0.85);
+      const evaluatedAlerts = alertEngineRef.current.evaluate({
+        camera,
+        tracks: updatedTracks,
+        videoTime: video.currentTime,
+        isNightMode,
+        canvasSnapshotUrl: snapshotUrl,
+        videoElement: video,
+      });
 
-          // Generate explainable alert
-          const alert = createAlertIncident({
-            camera,
-            object: track,
-            videoTime: video.currentTime,
-            crossedZone: violation.crossedZone,
-            crossingType: violation.crossingType,
-            isNightMode,
-            snapshotUrl,
-            isWatchlist:
-              track.anpr?.plateText === '7XYZ892' || track.anpr?.plateText === 'MH12-AB-4029',
-          });
-
-          onAlertGenerated(alert);
-        } else if (track.isLoitering && !track.hasCrossedZoneIds.includes('loitering-alert')) {
-          track.hasCrossedZoneIds.push('loitering-alert');
-          if (!offscreenSnapRef.current) {
-            offscreenSnapRef.current = document.createElement('canvas');
-            offscreenSnapRef.current.width = 480;
-            offscreenSnapRef.current.height = 270;
-          }
-          const snapCanvas = offscreenSnapRef.current;
-          const sCtx = snapCanvas.getContext('2d');
-          if (sCtx) sCtx.drawImage(video, 0, 0, 480, 270);
-          const snapshotUrl = snapCanvas.toDataURL('image/jpeg', 0.85);
-
-          const alert = createAlertIncident({
-            camera,
-            object: track,
-            videoTime: video.currentTime,
-            isNightMode,
-            snapshotUrl,
-          });
-          onAlertGenerated(alert);
-        }
+      for (const alert of evaluatedAlerts) {
+        onAlertGenerated(alert);
       }
 
       // Store in ref for smooth 60fps interpolation rendering without waiting for React re-render
@@ -786,34 +843,39 @@ export const CameraFeed: React.FC<CameraFeedProps> = ({
             }
           }
 
-          // 4. Render Tracked Objects with Compact IDs & High Precision
-          for (const disp of displayMap.values()) {
-            const obj = disp.track;
-            const bbox = disp.bbox;
-            const isProvisional = !!obj.isProvisional;
-            const isPerson = obj.class === 'person';
-            const isLuggage = ['suitcase', 'backpack', 'handbag'].includes(obj.class);
-            const isVehicle = ['car', 'truck', 'bus', 'motorcycle'].includes(obj.class);
+          // 4. Render Tracked Objects with Thin Bounding Boxes & High Precision
+          if (showDetectionsOverlay) {
+            for (const disp of displayMap.values()) {
+              const obj = disp.track;
+              const bbox = disp.bbox;
+              const isProvisional = !!obj.isProvisional;
+              const isPedestrian = obj.class === 'pedestrian' || obj.class === 'person';
+              const isTwoWheeler = obj.class === 'two-wheeler' || obj.class === 'motorcycle' || obj.class === 'bicycle';
+              const isThreeWheeler = obj.class === 'three-wheeler';
+              const isHeavy = obj.class === 'truck/bus' || obj.class === 'truck' || obj.class === 'bus';
+              const isLuggage = ['suitcase', 'backpack', 'handbag'].includes(obj.class);
+              const isPerson = isPedestrian;
+              const isVehicle = ['car', 'two-wheeler', 'three-wheeler', 'truck/bus', 'truck', 'bus', 'motorcycle'].includes(obj.class);
 
-            const bx = Math.max(1, Math.min(cW - 4, Math.round(bbox.x * cW)));
-            const by = Math.max(1, Math.min(cH - 4, Math.round(bbox.y * cH)));
-            const bw = Math.max(4, Math.min(cW - bx - 1, Math.round(bbox.width * cW)));
-            const bh = Math.max(4, Math.min(cH - by - 1, Math.round(bbox.height * cH)));
+              const bx = Math.max(1, Math.min(cW - 4, Math.round(bbox.x * cW)));
+              const by = Math.max(1, Math.min(cH - 4, Math.round(bbox.y * cH)));
+              const bw = Math.max(4, Math.min(cW - bx - 1, Math.round(bbox.width * cW)));
+              const bh = Math.max(4, Math.min(cH - by - 1, Math.round(bbox.height * cH)));
 
-            const color = isProvisional
-              ? '#f59e0b'
-              : isPerson
-              ? '#06b6d4'
-              : isLuggage
-              ? '#ef4444'
-              : '#10b981';
-            const badgeBg = isProvisional
-              ? 'rgba(217, 119, 6, 0.95)'
-              : isPerson
-              ? 'rgba(8, 145, 178, 0.95)'
-              : isLuggage
-              ? 'rgba(220, 38, 38, 0.95)'
-              : 'rgba(5, 150, 105, 0.95)';
+              const color = isProvisional
+                ? '#f59e0b'
+                : isPedestrian
+                ? '#38bdf8'
+                : isTwoWheeler
+                ? '#c084fc'
+                : isThreeWheeler
+                ? '#fbbf24'
+                : isHeavy
+                ? '#fb923c'
+                : isLuggage
+                ? '#94a3b8'
+                : '#34d399';
+              const badgeBg = 'rgba(15, 23, 42, 0.92)';
 
             ctx.save();
             ctx.globalAlpha = Math.max(0.05, Math.min(1, disp.alpha));
@@ -953,6 +1015,7 @@ export const CameraFeed: React.FC<CameraFeedProps> = ({
 
             ctx.restore();
           }
+        }
 
           // 5. In-Canvas Debug Telemetry HUD when ?debug=1 is enabled
           if (isDebugMode) {
@@ -1232,6 +1295,76 @@ export const CameraFeed: React.FC<CameraFeedProps> = ({
             </button>
           )}
 
+          {/* Quality Selector: Fast / Balanced / High */}
+          <div className="flex items-center rounded-lg border border-neutral-800 bg-neutral-950 p-0.5 text-xs">
+            <button
+              type="button"
+              onClick={() => handleQualityChange('fast')}
+              className={`rounded px-2 py-0.5 font-medium transition-colors ${
+                qualityMode === 'fast'
+                  ? 'bg-sky-500 text-neutral-950 font-bold'
+                  : 'text-neutral-400 hover:text-white'
+              }`}
+              title="Fast Mode: yolo26n @ 640 for real-time low-latency preview"
+            >
+              Fast
+            </button>
+            <button
+              type="button"
+              onClick={() => handleQualityChange('balanced')}
+              className={`rounded px-2 py-0.5 font-medium transition-colors ${
+                qualityMode === 'balanced'
+                  ? 'bg-sky-500 text-neutral-950 font-bold'
+                  : 'text-neutral-400 hover:text-white'
+              }`}
+              title="Balanced Mode: yolo26s @ 960 (recommended default surveillance)"
+            >
+              Balanced
+            </button>
+            <button
+              type="button"
+              onClick={() => handleQualityChange('high')}
+              className={`rounded px-2 py-0.5 font-medium transition-colors ${
+                qualityMode === 'high'
+                  ? 'bg-sky-500 text-neutral-950 font-bold'
+                  : 'text-neutral-400 hover:text-white'
+              }`}
+              title="High Quality Mode: yolo26m @ 1280 for dense traffic analysis"
+            >
+              High
+            </button>
+          </div>
+
+          {/* Overlay Toggle */}
+          <button
+            type="button"
+            onClick={() => setShowDetectionsOverlay(!showDetectionsOverlay)}
+            className={`flex items-center gap-1 rounded-lg px-2.5 py-1 text-xs font-medium border transition-colors ${
+              showDetectionsOverlay
+                ? 'border-emerald-500/50 bg-emerald-950/40 text-emerald-300'
+                : 'border-neutral-800 bg-neutral-900 text-neutral-400 hover:text-neutral-200'
+            }`}
+            title="Toggle detection bounding boxes (or press 'D')"
+          >
+            <Layers className="h-3.5 w-3.5" />
+            <span>Overlay {showDetectionsOverlay ? 'ON' : 'OFF'}</span>
+          </button>
+
+          {/* Events Drawer Toggle */}
+          <button
+            type="button"
+            onClick={() => setShowEventsDrawer(!showEventsDrawer)}
+            className={`flex items-center gap-1.5 rounded-lg px-2.5 py-1 text-xs font-medium border transition-colors ${
+              showEventsDrawer
+                ? 'border-rose-500 bg-rose-500/20 text-rose-300'
+                : 'border-neutral-800 bg-neutral-900 text-neutral-300 hover:bg-neutral-800'
+            }`}
+            title="Toggle camera event feed"
+          >
+            <Shield className="h-3 w-3" />
+            <span>Events ({alerts.length})</span>
+          </button>
+
           {/* Zones drawer toggle */}
           <button
             id={`toggle-zones-btn-${camera.id}`}
@@ -1370,6 +1503,72 @@ export const CameraFeed: React.FC<CameraFeedProps> = ({
             />
           </div>
         )}
+
+        {/* Right-Hand Collapsible Real-Time Events Feed */}
+        {showEventsDrawer && (
+          <div className="absolute top-0 right-0 bottom-0 w-80 bg-neutral-950/95 border-l border-neutral-800 z-30 flex flex-col p-3 shadow-2xl backdrop-blur-md overflow-hidden">
+            <div className="flex items-center justify-between pb-2 mb-2 border-b border-neutral-800">
+              <span className="text-xs font-bold tracking-wider uppercase text-neutral-200">
+                Camera Events ({alerts.length})
+              </span>
+              <button
+                type="button"
+                onClick={() => setShowEventsDrawer(false)}
+                className="text-neutral-400 hover:text-white text-xs px-1.5 py-0.5 rounded bg-neutral-900 border border-neutral-800"
+              >
+                ✕ Close
+              </button>
+            </div>
+            <div className="flex-1 overflow-y-auto space-y-2 pr-1">
+              {alerts.length === 0 ? (
+                <div className="p-6 text-center text-xs text-neutral-500">
+                  No events recorded on this feed.
+                </div>
+              ) : (
+                alerts.map((a) => {
+                  const badgeColor =
+                    a.severity === 'critical'
+                      ? 'border-red-500/50 bg-red-950/50 text-red-300'
+                      : a.severity === 'high'
+                      ? 'border-amber-500/50 bg-amber-950/50 text-amber-300'
+                      : 'border-sky-500/50 bg-sky-950/50 text-sky-300';
+                  return (
+                    <div
+                      key={a.id}
+                      onClick={() => {
+                        if (videoRef.current) {
+                          videoRef.current.currentTime = a.videoTime;
+                          setCurrentTime(a.videoTime);
+                          videoRef.current.pause();
+                          setIsPlaying(false);
+                        }
+                      }}
+                      className="cursor-pointer rounded-lg border border-neutral-800 bg-neutral-900/80 p-2.5 hover:border-neutral-700 hover:bg-neutral-850 transition-all text-left"
+                    >
+                      <div className="flex items-center justify-between gap-1 mb-1.5">
+                        <span className={`text-[10px] font-bold uppercase px-1.5 py-0.5 rounded border ${badgeColor}`}>
+                          {a.severity}
+                        </span>
+                        <span className="font-mono text-[11px] text-sky-400 font-semibold">
+                          {formatTime(a.videoTime)}
+                        </span>
+                      </div>
+                      <p className="text-xs font-semibold text-neutral-100 line-clamp-1">{a.title}</p>
+                      <p className="text-[11px] text-neutral-400 mt-1 line-clamp-2">
+                        {a.riskFactors[0]?.description || `Object #${a.objectId} (${a.objectClass})`}
+                      </p>
+                      {a.entityCropUrl && (
+                        <div className="mt-2 h-14 w-full bg-black rounded overflow-hidden flex items-center justify-center border border-neutral-800">
+                          <img src={a.entityCropUrl} alt="Target crop" className="h-full object-contain" />
+                        </div>
+                      )}
+                    </div>
+                  );
+                })
+              )}
+            </div>
+          </div>
+        )}
       </div>
 
       {/* Real-time ANPR Match Notification Banner with Indian Format Validation Status */}
@@ -1413,21 +1612,55 @@ export const CameraFeed: React.FC<CameraFeedProps> = ({
 
       {/* Video Playback Controls (Standard controls per requirement 1) */}
       <div className="border-t border-neutral-800 bg-neutral-950 p-3">
-        {/* Scrubber Time Slider */}
-        <div className="flex items-center gap-3">
+        {/* Scrubber Time Slider with Timeline Event Markers */}
+        <div className="relative flex items-center gap-3">
           <span className="font-mono text-xs text-neutral-400 w-16">
             {formatTime(currentTime)}
           </span>
-          <input
-            id={`scrubber-input-${camera.id}`}
-            type="range"
-            min={0}
-            max={duration || 100}
-            step={0.05}
-            value={currentTime}
-            onChange={handleSeek}
-            className="h-1.5 flex-1 cursor-pointer appearance-none rounded-lg bg-neutral-800 accent-amber-500 focus:outline-none"
-          />
+          <div className="relative flex-1 flex items-center">
+            {/* Event Markers Track */}
+            {alerts && alerts.length > 0 && duration > 0 && (
+              <div className="absolute inset-x-0 -top-2.5 h-3 pointer-events-none z-10">
+                {alerts.map((a) => {
+                  const pct = Math.max(0, Math.min(100, (a.videoTime / duration) * 100));
+                  const dotColor =
+                    a.severity === 'critical'
+                      ? 'bg-rose-500'
+                      : a.severity === 'high'
+                      ? 'bg-amber-500'
+                      : 'bg-sky-500';
+                  return (
+                    <button
+                      key={a.id}
+                      type="button"
+                      onClick={(e) => {
+                        e.stopPropagation();
+                        if (videoRef.current) {
+                          videoRef.current.currentTime = a.videoTime;
+                          setCurrentTime(a.videoTime);
+                          videoRef.current.pause();
+                          setIsPlaying(false);
+                        }
+                      }}
+                      title={`[${formatTime(a.videoTime)}] ${a.title} (${a.severity.toUpperCase()})`}
+                      className={`pointer-events-auto absolute -top-0.5 h-2.5 w-2.5 -translate-x-1/2 rounded-full ${dotColor} border border-neutral-950 shadow-sm transition-transform hover:scale-175 cursor-pointer`}
+                      style={{ left: `${pct}%` }}
+                    />
+                  );
+                })}
+              </div>
+            )}
+            <input
+              id={`scrubber-input-${camera.id}`}
+              type="range"
+              min={0}
+              max={duration || 100}
+              step={0.05}
+              value={currentTime}
+              onChange={handleSeek}
+              className="h-1.5 w-full cursor-pointer appearance-none rounded-lg bg-neutral-800 accent-sky-500 focus:outline-none"
+            />
+          </div>
           <span className="font-mono text-xs text-neutral-400 w-16 text-right">
             {formatTime(duration)}
           </span>

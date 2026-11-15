@@ -46,12 +46,16 @@ class TrackRecord:
         self.lost_frames = 0
         self.last_seen_time = timestamp
 
-        # Unify vehicle classes (car/truck/bus) to prevent class-flip fragmentation
+        # Unify vehicle classes (car/truck/bus/three-wheeler) to prevent class-flip fragmentation
         self.raw_class = initial_class
-        if initial_class in ["car", "truck", "bus"]:
+        if initial_class in ["car", "truck", "bus", "truck/bus", "three-wheeler"]:
             self.tracking_class = "vehicle"
             self.subclass_history: list[str] = [initial_class]
             self.class_history: list[str] = ["vehicle"]
+        elif initial_class in ["two-wheeler", "motorcycle", "bicycle"]:
+            self.tracking_class = "two_wheeler"
+            self.subclass_history: list[str] = [initial_class]
+            self.class_history: list[str] = ["two_wheeler"]
         else:
             self.tracking_class = initial_class
             self.subclass_history: list[str] = [initial_class]
@@ -142,11 +146,16 @@ class TrackRecord:
         elif self.state == "lost":
             self.state = "confirmed"
 
-        if detected_class in ["car", "truck", "bus"]:
+        if detected_class in ["car", "truck", "bus", "truck/bus", "three-wheeler"]:
             self.subclass_history.append(detected_class)
             if len(self.subclass_history) > 24:
                 self.subclass_history.pop(0)
             self.class_history.append("vehicle")
+        elif detected_class in ["two-wheeler", "motorcycle", "bicycle"]:
+            self.subclass_history.append(detected_class)
+            if len(self.subclass_history) > 24:
+                self.subclass_history.pop(0)
+            self.class_history.append("two_wheeler")
         else:
             self.class_history.append(detected_class)
         if len(self.class_history) > 24:

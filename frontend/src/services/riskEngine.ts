@@ -72,23 +72,13 @@ export function calculateRiskScore(params: {
 
   // 5. Watchlist match
   if (isWatchlist) {
-    const watchScore = 25;
+    const watchScore = 40;
     totalScore += watchScore;
     factors.push({
       id: 'watchlist_match',
       label: 'Security Watchlist Match',
       score: watchScore,
       description: `Detected plate '${object.anpr?.plateText}' matches security alert list`,
-    });
-  } else if (isVehicle && object.anpr && !object.anpr.isReadable) {
-    // Unreadable / concealed plate
-    const unreadScore = 10;
-    totalScore += unreadScore;
-    factors.push({
-      id: 'unreadable_plate',
-      label: 'Unverified / Obscured Plate',
-      score: unreadScore,
-      description: 'Vehicle plate could not be verified by optical recognition',
     });
   }
 
@@ -152,6 +142,7 @@ export function createAlertIncident(params: {
   });
 
   const now = Date.now();
+  const sourceTimestamp = videoTime > 0 ? Math.round(videoTime * 1000) : now;
   let title = `${object.class.toUpperCase()} #${object.id} Detection`;
   if (crossedZone) {
     title = `${crossedZone.name}: ${crossedZone.type === 'polygon' ? 'Intrusion' : 'Line Crossing'}`;
@@ -165,7 +156,7 @@ export function createAlertIncident(params: {
     id: `audit-${now}-${Math.random().toString(36).substring(2, 6)}`,
     action: 'generated',
     actor: 'IBVAP Detection Engine',
-    timestamp: now,
+    timestamp: sourceTimestamp,
     note: `Triggered with ${severity.toUpperCase()} severity (Score: ${score}/100)`,
   };
 
@@ -173,7 +164,7 @@ export function createAlertIncident(params: {
     id: `alert-${now}-${object.id}-${Math.random().toString(36).substring(2, 7)}`,
     cameraId: camera.id,
     cameraName: camera.name,
-    timestamp: now,
+    timestamp: sourceTimestamp,
     videoTime,
     title,
     severity,

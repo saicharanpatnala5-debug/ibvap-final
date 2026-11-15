@@ -1,52 +1,59 @@
 {
   "dataset": "synthetic_plates_220",
   "is_synthetic": true,
-  "timestamp": 1794681733,
+  "engine": "fast-alpr (cct-s-v2-global-model)",
+  "timestamp": 1794720638,
   "total_samples": 220,
-  "overall_exact_match_pct": 96.82,
-  "overall_cer_pct": 0.32,
-  "overall_format_valid_pct": 98.18,
-  "avg_latency_ms": 905.94,
+  "overall_exact_match_pct": 89.55,
+  "overall_one_char_error_pct": 95.45,
+  "overall_cer_pct": 2.02,
+  "overall_format_valid_pct": 96.82,
+  "avg_latency_ms": 22.39,
   "category_breakdown": {
     "blur": {
       "samples": 44,
-      "exact_matches": 38,
-      "exact_match_pct": 86.36,
-      "cer_pct": 1.38,
-      "format_valid_pct": 93.18,
-      "avg_latency_ms": 952.71
+      "exact_matches": 35,
+      "exact_match_pct": 79.55,
+      "one_char_pct": 93.18,
+      "cer_pct": 3.68,
+      "format_valid_pct": 90.91,
+      "avg_latency_ms": 22.26
     },
     "clean": {
       "samples": 44,
       "exact_matches": 43,
       "exact_match_pct": 97.73,
-      "cer_pct": 0.23,
+      "one_char_pct": 97.73,
+      "cer_pct": 1.38,
       "format_valid_pct": 97.73,
-      "avg_latency_ms": 922.02
+      "avg_latency_ms": 22.47
     },
     "low_light": {
       "samples": 44,
-      "exact_matches": 44,
-      "exact_match_pct": 100.0,
-      "cer_pct": 0.0,
+      "exact_matches": 43,
+      "exact_match_pct": 97.73,
+      "one_char_pct": 100.0,
+      "cer_pct": 0.23,
       "format_valid_pct": 100.0,
-      "avg_latency_ms": 877.39
+      "avg_latency_ms": 22.01
     },
     "noise": {
       "samples": 44,
-      "exact_matches": 44,
-      "exact_match_pct": 100.0,
-      "cer_pct": 0.0,
-      "format_valid_pct": 100.0,
-      "avg_latency_ms": 914.91
+      "exact_matches": 42,
+      "exact_match_pct": 95.45,
+      "one_char_pct": 97.73,
+      "cer_pct": 1.38,
+      "format_valid_pct": 97.73,
+      "avg_latency_ms": 22.66
     },
     "perspective": {
       "samples": 44,
-      "exact_matches": 44,
-      "exact_match_pct": 100.0,
-      "cer_pct": 0.0,
-      "format_valid_pct": 100.0,
-      "avg_latency_ms": 862.65
+      "exact_matches": 34,
+      "exact_match_pct": 77.27,
+      "one_char_pct": 88.64,
+      "cer_pct": 3.46,
+      "format_valid_pct": 97.73,
+      "avg_latency_ms": 22.56
     }
   }
 }

@@ -5,10 +5,12 @@ import { CameraFeed } from './CameraFeed';
 
 interface CameraGridProps {
   cameras: CameraFeedItem[];
+  alerts?: AlertIncident[];
   onUpdateCamera: (updated: CameraFeedItem) => void;
   onRemoveCamera: (id: string) => void;
   onAlertGenerated: (alert: AlertIncident) => void;
   onSelectPlate: (plate: string, cropUrl?: string) => void;
+  onPlateDetected?: (info: any) => void;
   onOpenAddCamera: () => void;
   onAskAI?: (prompt: string) => void;
   reducedMotion?: boolean;
@@ -17,10 +19,12 @@ interface CameraGridProps {
 
 export const CameraGrid: React.FC<CameraGridProps> = ({
   cameras,
+  alerts = [],
   onUpdateCamera,
   onRemoveCamera,
   onAlertGenerated,
   onSelectPlate,
+  onPlateDetected,
   onOpenAddCamera,
   onAskAI,
   reducedMotion = false,
@@ -172,10 +176,12 @@ export const CameraGrid: React.FC<CameraGridProps> = ({
           <CameraFeed
             key={camera.id}
             camera={camera}
+            alerts={alerts.filter((a) => a.cameraId === camera.id)}
             onUpdateCamera={onUpdateCamera}
             onRemoveCamera={onRemoveCamera}
             onAlertGenerated={onAlertGenerated}
             onSelectPlate={onSelectPlate}
+            onPlateDetected={onPlateDetected}
             onAskAI={onAskAI}
             reducedMotion={reducedMotion}
             seekToTime={seekTarget?.cameraId === camera.id ? seekTarget.time : undefined}

@@ -18,7 +18,11 @@ samples/*.webm
 *.webm
 samples/debug_detections/
 samples/debug_videos/
+samples/debug_crops/
+samples/debug_crops_round4/
 docs/anpr_review.html
+docs/detection_review.html
+docs/*review*.html
 *.debug.mp4
 
 # Java / Spring Boot Artifacts

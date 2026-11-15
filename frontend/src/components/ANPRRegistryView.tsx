@@ -16,6 +16,7 @@ import {
   Edit3,
   Plus,
   Trash2,
+  EyeOff,
 } from 'lucide-react';
 import { PlateRegistryRecord, CameraFeedItem, PlateStatus } from '../types';
 
@@ -41,12 +42,19 @@ export const ANPRRegistryView: React.FC<ANPRRegistryViewProps> = ({
   onOpenAddCamera,
 }) => {
   const [searchQuery, setSearchQuery] = useState('');
-  const [statusFilter, setStatusFilter] = useState<'all' | 'valid' | 'review' | 'unreadable' | 'watchlist'>('all');
+  const [statusFilter, setStatusFilter] = useState<'all' | 'valid' | 'review' | 'unreadable' | 'distant' | 'watchlist'>('all');
   const [selectedRecordId, setSelectedRecordId] = useState<string | null>(null);
 
   // Operator manual correction inline state
   const [isEditingPlate, setIsEditingPlate] = useState(false);
   const [correctionInput, setCorrectionInput] = useState('');
+
+  const formatVideoTimestamp = (sec?: number) => {
+    if (sec === undefined || sec === null) return '00:00.0s';
+    const m = Math.floor(sec / 60);
+    const s = (sec % 60).toFixed(1);
+    return `${m.toString().padStart(2, '0')}:${s.padStart(4, '0')}s`;
+  };
 
   // Filtering
   const filteredRecords = useMemo(() => {
@@ -71,6 +79,9 @@ export const ANPRRegistryView: React.FC<ANPRRegistryViewProps> = ({
       if (statusFilter === 'unreadable') {
         return rec.status === 'Unreadable';
       }
+      if (statusFilter === 'distant') {
+        return rec.status === 'Plate not legible at this distance' || rec.formatType === 'distance_gated';
+      }
       if (statusFilter === 'watchlist') {
         return rec.dossier?.registrationStatus === 'Watchlist Flagged';
       }
@@ -90,9 +101,10 @@ export const ANPRRegistryView: React.FC<ANPRRegistryViewProps> = ({
     const formatValid = records.filter((r) => r.status === 'Valid format').length;
     const needsReview = records.filter((r) => r.status === 'Low confidence - needs review').length;
     const unreadable = records.filter((r) => r.status === 'Unreadable').length;
+    const distant = records.filter((r) => r.status === 'Plate not legible at this distance' || r.formatType === 'distance_gated').length;
     const watchlist = records.filter((r) => r.dossier?.registrationStatus === 'Watchlist Flagged').length;
     const ev = records.filter((r) => r.dossier?.fuelType?.includes('Electric')).length;
-    return { total, formatValid, needsReview, unreadable, watchlist, ev };
+    return { total, formatValid, needsReview, unreadable, distant, watchlist, ev };
   }, [records]);
 
   const handleApplyCorrection = (e: React.FormEvent) => {
@@ -106,7 +118,15 @@ export const ANPRRegistryView: React.FC<ANPRRegistryViewProps> = ({
     }
   };
 
-  const getStatusBadge = (status: PlateStatus) => {
+  const getStatusBadge = (status: PlateStatus, formatType?: string) => {
+    if (status === 'Plate not legible at this distance' || formatType === 'distance_gated') {
+      return (
+        <span className="inline-flex items-center gap-1 rounded bg-neutral-800/90 border border-neutral-700/80 px-2 py-0.5 text-[11px] font-medium text-neutral-300" title="Physical resolution limit: vehicle is distant">
+          <EyeOff className="h-3 w-3 text-neutral-400" />
+          Distant Target
+        </span>
+      );
+    }
     if (status === 'Valid format') {
       return (
         <span className="inline-flex items-center gap-1 rounded bg-emerald-950/80 border border-emerald-700/60 px-2 py-0.5 text-[11px] font-semibold text-emerald-300">
@@ -159,6 +179,7 @@ export const ANPRRegistryView: React.FC<ANPRRegistryViewProps> = ({
             {records.length > 0 && onClearAllData && (
               <button
                 type="button"
+                id="clear-demo-anpr-btn"
                 onClick={onClearAllData}
                 className="inline-flex items-center gap-1.5 rounded-lg border border-neutral-800 bg-neutral-900 px-3 py-1.5 text-xs font-medium text-neutral-400 hover:text-red-400 hover:border-red-900/60 transition-colors"
                 title="Clear all recorded plates from storage"
@@ -322,6 +343,17 @@ export const ANPRRegistryView: React.FC<ANPRRegistryViewProps> = ({
                 >
                   Unreadable ({metrics.unreadable})
                 </button>
+                <button
+                  type="button"
+                  onClick={() => setStatusFilter('distant')}
+                  className={`rounded-lg px-2.5 py-1.5 text-xs font-medium transition-colors whitespace-nowrap ${
+                    statusFilter === 'distant'
+                      ? 'bg-neutral-850 border border-neutral-600 text-neutral-200 font-semibold'
+                      : 'text-neutral-400 hover:bg-neutral-900 hover:text-neutral-200'
+                  }`}
+                >
+                  Distant ({metrics.distant})
+                </button>
                 {metrics.watchlist > 0 && (
                   <button
                     type="button"
@@ -374,13 +406,15 @@ export const ANPRRegistryView: React.FC<ANPRRegistryViewProps> = ({
                         <div className="flex items-center gap-3">
                           {/* Plate optical crop thumbnail if available */}
                           {record.cropUrl ? (
-                            <img
-                              src={record.cropUrl}
-                              alt={`Crop of ${record.plateNumber}`}
-                              className="h-10 w-24 rounded border border-neutral-700 object-cover bg-black"
-                            />
+                            <div className="h-10 w-24 rounded border border-neutral-750 bg-black overflow-hidden flex items-center justify-center shrink-0">
+                              <img
+                                src={record.cropUrl}
+                                alt={`Crop of ${record.plateNumber}`}
+                                className="max-h-full max-w-full object-contain"
+                              />
+                            </div>
                           ) : (
-                            <div className="flex items-center rounded-md border border-neutral-700 bg-white px-2 py-1 font-mono font-bold tracking-wider text-xs text-neutral-950">
+                            <div className="flex items-center rounded-md border border-neutral-700 bg-white px-2 py-1 font-mono font-bold tracking-wider text-xs text-neutral-950 shrink-0">
                               <span className="text-[8px] text-blue-800 font-extrabold mr-1 border-r border-neutral-300 pr-1">IND</span>
                               <span>{record.plateNumber}</span>
                             </div>
@@ -413,7 +447,7 @@ export const ANPRRegistryView: React.FC<ANPRRegistryViewProps> = ({
                         {/* Right: Validation & Confidence */}
                         <div className="flex flex-col items-end gap-1">
                           <div className="flex items-center gap-1.5">
-                            {getStatusBadge(record.status)}
+                            {getStatusBadge(record.status, record.formatType)}
                             <span className="font-mono text-xs text-neutral-400">
                               {record.confidence}% OCR
                             </span>
@@ -429,15 +463,16 @@ export const ANPRRegistryView: React.FC<ANPRRegistryViewProps> = ({
                       <div className="mt-3 flex items-center justify-between border-t border-neutral-800/60 pt-2.5 text-xs text-neutral-400">
                         <span className="font-mono text-[11px] text-neutral-500">
                           {record.trackId ? `Track #${record.trackId} • ` : ''}
-                          Seen at {record.videoTime !== undefined ? `${record.videoTime.toFixed(1)}s` : '0.0s'}
+                          Seen at {formatVideoTimestamp(record.videoTime)}
                         </span>
 
-                        {cameraExists && record.videoTime !== undefined ? (
+                        {(cameraExists || cameras.length > 0) && record.videoTime !== undefined ? (
                           <button
                             type="button"
                             onClick={(e) => {
                               e.stopPropagation();
-                              onJumpToFootage(record.cameraId, record.videoTime || 0, record.plateNumber);
+                              const targetCamId = cameraExists ? record.cameraId : cameras[0]?.id;
+                              onJumpToFootage(targetCamId, record.videoTime || 0, record.plateNumber);
                             }}
                             className="inline-flex items-center gap-1.5 rounded-lg bg-neutral-800 hover:bg-neutral-700 px-2.5 py-1 text-xs font-medium text-amber-400 transition-colors"
                           >
@@ -483,7 +518,7 @@ export const ANPRRegistryView: React.FC<ANPRRegistryViewProps> = ({
                     </h2>
                   </div>
 
-                  <div>{getStatusBadge(activeRecord.status)}</div>
+                  <div>{getStatusBadge(activeRecord.status, activeRecord.formatType)}</div>
                 </div>
 
                 {/* Plate Display + Crop */}
@@ -498,11 +533,13 @@ export const ANPRRegistryView: React.FC<ANPRRegistryViewProps> = ({
                       <span className="text-[10px] uppercase tracking-wider text-neutral-500 mb-1">
                         Isolated Crop
                       </span>
-                      <img
-                        src={activeRecord.cropUrl}
-                        alt="Plate crop"
-                        className="h-10 rounded border border-neutral-700 object-contain bg-black"
-                      />
+                      <div className="h-12 max-w-[180px] rounded border border-neutral-700 bg-black overflow-hidden flex items-center justify-center">
+                        <img
+                          src={activeRecord.cropUrl}
+                          alt="Plate crop"
+                          className="max-h-full max-w-full object-contain"
+                        />
+                      </div>
                     </div>
                   )}
                 </div>

@@ -29,7 +29,7 @@ export const CommandBar: React.FC<CommandBarProps> = ({
 }) => {
   const [query, setQuery] = useState('');
   const [isListening, setIsListening] = useState(false);
-  const [isCollapsed, setIsCollapsed] = useState(false);
+  const [isCollapsed, setIsCollapsed] = useState(true);
   const speechRef = useRef<any>(null);
 
   const criticalCount = alerts.filter(
@@ -41,12 +41,11 @@ export const CommandBar: React.FC<CommandBarProps> = ({
     const handleKeyDown = (e: KeyboardEvent) => {
       if ((e.metaKey || e.ctrlKey) && e.key.toLowerCase() === 'k') {
         e.preventDefault();
-        const input = document.getElementById('persistent-command-input');
-        if (input) {
-          input.focus();
-        } else {
-          onOpenCommandCenter();
-        }
+        setIsCollapsed(false);
+        setTimeout(() => {
+          const input = document.getElementById('persistent-command-input');
+          input?.focus();
+        }, 50);
       }
     };
     window.addEventListener('keydown', handleKeyDown);
@@ -97,15 +96,15 @@ export const CommandBar: React.FC<CommandBarProps> = ({
     return (
       <div
         id="persistent-command-bar"
-        className="fixed bottom-3 left-1/2 -translate-x-1/2 z-30"
+        className="fixed bottom-4 right-4 z-30"
       >
         <button
           type="button"
           onClick={() => setIsCollapsed(false)}
-          className="flex items-center gap-2 rounded-full border border-neutral-700 bg-neutral-900/95 px-4 py-2 text-xs font-semibold text-neutral-200 shadow-2xl backdrop-blur-md hover:bg-neutral-800 hover:border-amber-500/60 transition-all"
+          className="flex items-center gap-2 rounded-xl border border-neutral-700 bg-neutral-900/95 px-3.5 py-2 text-xs font-semibold text-neutral-200 shadow-2xl backdrop-blur-md hover:bg-neutral-800 hover:border-amber-500/60 transition-all"
         >
           <Sparkles className="h-4 w-4 text-amber-400" />
-          <span>Ask AI Copilot (Cmd+K)</span>
+          <span>AI Copilot (Ctrl+K)</span>
           {criticalCount > 0 && (
             <span className="rounded-full bg-red-950 border border-red-800 px-1.5 py-0.2 text-[10px] font-mono text-red-300">
               {criticalCount}
@@ -120,9 +119,9 @@ export const CommandBar: React.FC<CommandBarProps> = ({
   return (
     <div
       id="persistent-command-bar"
-      className="fixed bottom-3 left-1/2 -translate-x-1/2 z-30 w-full max-w-2xl px-4"
+      className="fixed bottom-4 right-4 z-40 w-[calc(100vw-2rem)] sm:w-full max-w-xl"
     >
-      <div className="flex items-center gap-2 rounded-xl border border-neutral-800 bg-neutral-950/90 p-1.5 shadow-2xl backdrop-blur-md">
+      <div className="flex items-center gap-2 rounded-xl border border-neutral-800 bg-neutral-950/95 p-2 shadow-2xl backdrop-blur-md">
         {/* Left AI Icon & Badge */}
         <button
           type="button"

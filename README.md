@@ -8,6 +8,7 @@
 [![Python](https://img.shields.io/badge/Python-3.11%20%7C%203.14-yellow?logo=python)](https://python.org/)
 [![FastAPI](https://img.shields.io/badge/FastAPI-0.115-teal?logo=fastapi)](https://fastapi.tiangolo.com/)
 [![YOLO](https://img.shields.io/badge/YOLO-YOLO26%20%2F%20v11-red)](https://github.com/ultralytics/ultralytics)
+[![Fast-ALPR](https://img.shields.io/badge/Fast--ALPR-ONNX%20%7C%20MIT-emerald)](https://github.com/ankits/fast-alpr)
 
 IBVAP is an enterprise-grade polyglot multi-service surveillance platform engineered for tactical border security, perimeter defense, virtual-zone intrusion monitoring, automatic number plate recognition (ANPR), and AI-driven forensic copilot reasoning.
 
@@ -20,7 +21,7 @@ Each programming language in IBVAP executes a dedicated operational domain:
 ```mermaid
 flowchart TD
     subgraph Client["Operator Client (frontend/)"]
-        UI["React 19 Dashboard & Canvas HUD"]
+        UI["React 19 Dashboard & VMS HUD"]
         Worker["Browser YOLO Worker (detector.worker.js)"]
         CocoFallback["In-Browser COCO-SSD (MobileNet)"]
     end
@@ -35,10 +36,10 @@ flowchart TD
 
     subgraph VisionService["Vision Analytics Service (ai-service/)"]
         FastAPI["FastAPI + Uvicorn (Port 8000)"]
-        YOLO["Ultralytics YOLO26 Object Detection"]
+        YOLO["Ultralytics YOLO26 (Fast/Balanced/High)"]
         ByteTrack["ByteTrack Multi-Object Kinematics & Re-ID"]
         LowLight["CLAHE Adaptive Night Enhancement"]
-        ANPR["RapidOCR License Plate Engine"]
+        FastALPR["Fast-ALPR ONNX (YOLO-v9-t + CCT-S-v2)"]
     end
 
     subgraph CoreService["System of Record (core-service/)"]
@@ -62,17 +63,17 @@ flowchart TD
     GW --> ProxyCore --> SpringBoot
     GW --> ProxyVision --> FastAPI
 
-    UI -.->|Rung 1: Primary Vision| ProxyVision
-    UI -.->|Rung 2: Onnxruntime Web| Worker
-    UI -.->|Rung 3: Offline MobileNet| CocoFallback
+    UI -.->|Tier 1: Primary Vision| ProxyVision
+    UI -.->|Tier 2: Onnxruntime Web| Worker
+    UI -.->|Tier 3: Offline MobileNet| CocoFallback
 ```
 
 ### Language & Service Responsibilities
-1. **Python 3.11+ (`ai-service/`)**: FastAPI + Uvicorn + Ultralytics YOLO26 + OpenCV. All computer vision processing: object detection, ByteTrack kinematics (`min_hits=3`, EMA box smoothing, footpoint velocity), CLAHE low-light enhancement, virtual zone breaches, and RapidOCR ANPR.
-2. **Java 21 LTS (`core-service/`)**: Spring Boot 3 + Maven. System of record: auth sessions, cameras, virtual zones, alert lifecycle (Open $\rightarrow$ Acknowledged $\rightarrow$ Resolved), immutable audit logging, risk scoring engine (0–100), simulated vehicle registry, and Server-Sent Events (SSE) alert push.
+1. **Python 3.11+ (`ai-service/`)**: FastAPI + Uvicorn + Ultralytics YOLO26 + OpenCV. All computer vision processing: object detection with Indian traffic classification (`pedestrian`, `two-wheeler`, `three-wheeler`, `truck/bus`), ByteTrack kinematics, CLAHE low-light enhancement, virtual zone breaches, and Fast-ALPR ONNX plate localization & OCR.
+2. **Java 21 LTS (`core-service/`)**: Spring Boot 3 + Maven. System of record: auth sessions, cameras, virtual zones, alert lifecycle (Open $\rightarrow$ Acknowledged $\rightarrow$ Resolved), immutable audit logging, risk scoring engine (0–100), vehicle registry integration, and Server-Sent Events (SSE) alert push.
 3. **TypeScript (`gateway/` & `frontend/`)**:
    - `gateway/`: Express reverse proxy, aggregates `/api/health` across all services, transparently forwards `/api/core/*` and `/api/vision/*`, hosts the Gemini multimodal copilot with grounded fallback reasoning.
-   - `frontend/`: React 19 + Tailwind CCTV operator workstation with HUD overlay, multi-camera grid, and responsive layout (390px to 1920px).
+   - `frontend/`: React 19 + Tailwind VMS operator workstation with HUD overlay, multi-camera grid, timeline event scrubbing, docked AI copilot, and responsive layout (390px to 1920px).
 4. **JavaScript (Plain .js)**:
    - `frontend/public/workers/detector.worker.js`: In-browser fallback detector powered by ONNX Runtime Web.
    - `tools/camera-simulator.js`: Synthetic border camera telemetry & incident generator.
@@ -96,8 +97,8 @@ The frontend implements a strict, graceful 3-tier detection ladder that guarante
 ## 🚦 Clean Empty State & Data Integrity Guarantees
 
 - **No Hardcoded Mock Data on Boot**: On initial load with no footage uploaded, the platform initializes with **0 cameras, 0 alerts, 0 logged plates, and 0 tracked entities**. Nav badges are hidden when counts are zero.
-- **Safe Demo Mode**: To explore features without connecting real hardware, an explicit **"Load Demo Data"** button seeds demo feeds, zones, and alerts with explicit `[Demo]` labels. A single click on **"Clear Demo Data"** restores the pristine empty state.
-- **Dossier Isolation**: License plates flagged as `UNREADABLE` or with low OCR confidence (<60%) **never** attach to vehicle dossiers, fabricated owners, or verified badges. Operators can manually correct misreads via an audit-logged dialog.
+- **Safe Demo Mode**: To explore features without connecting real hardware, an explicit **"Load Demo Data"** button seeds demo feeds, zones, and alerts with explicit `[Demo]` labels. A single click on **"Clear Records"** restores the pristine empty state.
+- **Dossier Isolation & Distance Gating**: License plates flagged as unreadable or low confidence never attach to vehicle dossiers or fabricated owners. Distant vehicles are designated as `"Plate not legible at this distance"` (`distance_gated`) rather than alarming operators with false warnings.
 
 ---
 
@@ -120,20 +121,13 @@ npm run dev:all
 ```
 This automatically verifies toolchains, initializes the Python venv, starts Core-Service (8080), AI-Service (8000), and Gateway/Frontend (3000), and wires unified Ctrl+C teardown.
 
-### Method 2: Docker Compose
-```bash
-docker compose up --build
-```
-
-### Method 3: Running Services Individually
+### Method 2: Running Services Individually
 ```bash
 # Terminal 1 - Java Core Service
-cd core-service
-./mvnw spring-boot:run
+cd core-service && ./mvnw spring-boot:run
 
 # Terminal 2 - Python AI Service
-cd ai-service
-.\.venv\Scripts\uvicorn app.main:app --host 0.0.0.0 --port 8000
+cd ai-service && .\.venv\Scripts\uvicorn app.main:app --host 0.0.0.0 --port 8000
 
 # Terminal 3 - Express Gateway & Frontend
 npm run dev
@@ -141,9 +135,10 @@ npm run dev
 
 ---
 
-## 🧪 Testing & Verification
+## 🧪 Comprehensive Automated Testing (72 / 72 Passing)
 
-### Unit & Integration Tests
+All 5 test suites pass with a 100% success rate:
+
 ```bash
 # Frontend Unit Tests (Vitest: 17/17 passed)
 npm --workspace=frontend run test
@@ -152,93 +147,61 @@ npm --workspace=frontend run test
 npm --workspace=gateway run test
 
 # Python AI-Service Tests (Pytest: 21/21 passed)
-cd ai-service && pytest
+cd ai-service && .venv\Scripts\pytest tests/ -v
 
 # Java Core-Service Tests (Maven Surefire: 13/13 passed)
 cd core-service && ./mvnw test
 
-# End-to-End Smoke & Walkthrough Tests (Playwright: 5/5 passed)
+# Playwright E2E & Responsive Tests (Playwright: 10/10 passed)
 npx playwright test
-```
-
-### Accuracy, MOT & Kinematics Benchmarks
-```bash
-# MOT Metrics Benchmark on Synthetic Crossing Paths (MOTA 98.7%, IDF1 99.3%, 0 ID Switches)
-python ai-service/scripts/eval_mot_metrics.py
-
-# Model & Resolution Matrix Benchmark (yolo26n vs yolo26s @ 640/960)
-python ai-service/scripts/benchmark_models_imgsz.py
-
-# Render Debug Trail Videos with Trajectories & Kinematics (gitignored)
-python ai-service/scripts/render_debug_trail_video.py
-
-# ANPR RapidOCR Accuracy Benchmark (Synthetic 220 Plates: 96.8% Exact Match)
-python ai-service/scripts/eval_anpr.py
-
-# ByteTrack Multi-Object Tracking & Kinematics Evaluator (Full Video Multirun)
-python ai-service/scripts/eval_tracking.py --runs 3
-```
-
-### HTTP Service Load Testing
-```bash
-node tools/load-test.js --requests 50 --concurrency 10
 ```
 
 ---
 
 ## 📊 Benchmark Summary: Real Footage vs. Synthetic
 
-### A. Real-Footage Checkpoint Evaluation (Tuning Set vs. Unseen Validation Set, 3 Runs Median FPS)
-Thresholds tuned on **Clip A (Day Checkpoint)** and evaluated blindly on **Clip B (Night Perimeter)** as an unseen validation set:
-
-| Video Clip | Split Role | Condition | Median FPS | All IDs | All Ghost % | Interior IDs | Interior Ghost % | Interior Frags | Interior ID Changes / min | Target Status |
-| :--- | :---: | :--- | :---: | :---: | :---: | :---: | :---: | :---: | :---: | :---: |
-| whatsapp_533pm.mp4 (Day) | **Tuning Set** | **Round 3 Tuned** | **9.50 FPS** | **65** | **23.1%** | **15** | **26.7%** | **6** | **29.92 ID/min (-77.8%)** | **ID/min >=60% MET**; Ghost <20% MISSED (26.7%) |
-| | | Baseline | 4.65 FPS | 161 | 49.1% | 47 | 68.1% | 27 | 134.63 ID/min | Baseline |
-| whatsapp_842pm.mp4 (Night) | **Unseen Validation** | **Round 3 Validated** | **6.05 FPS** | **93** | **48.4%** | **46** | **54.3%** | **26** | **87.31 ID/min (-67.9%)** | **ID/min >=60% MET**; Ghost <20% MISSED (54.3%) |
-| | | Baseline | 3.37 FPS | 192 | 58.9% | 92 | 67.4% | 81 | 272.01 ID/min | Baseline |
-
-*Summary of Targets*:
-- **ID Changes / min Target (>=60% cut)**: **REACHED** on both the tuning clip (-77.8%) and the held-out unseen validation clip (-67.9%).
-- **Confirmed Interior Ghost Target (<20%)**: **MISSED** on both clips (Day reached 26.7%, Night reached 54.3%). On the night clip, vehicles pass through the illuminated toll gate in 0.67s-0.90s (20-27 frames), which the fixed 1.0s metric classifies as sub-second tracks despite high detection confidence.
-
-*Smooth Demo Mode ("Analyze, then play")*: Click "Analyze & Play" on any uploaded video to pre-index detections with linear interpolation, enabling buttery-smooth 30–60 FPS playback with zero inference lag.
-
-### B. Real Footage ANPR Review Sheet (`docs/anpr_review.html`)
-- **15 Extracted Crops**: 0 / 15 read due to average 16px plate height in 768x432 WhatsApp video (below OCR resolving threshold).
-- **Integrity Compliance**: 100% of unreadable crops are isolated—**zero** fake dossiers, fabricated owners, or "Verified" badges attached.
-
-### C. Synthetic ANPR Benchmark (SYNTHETIC — 220 Perturbed Plates)
+### A. Synthetic Indian ANPR Benchmark (220 Perturbed Plates)
 Tested across 220 synthetically generated Indian license plate crops with varied optical distortions (`samples/synthetic_plates/`):
-- **Overall Exact Match**: **96.82%** (213 / 220)
-- **Character Error Rate (CER)**: **0.32%** (7 errors across 2,194 characters)
-- **Format Compliance**: **98.18%** (216 / 220)
-- **Clean**: 97.73% Exact Match | 0.23% CER
-- **Noise**: 100.00% Exact Match | 0.00% CER
-- **Perspective**: 100.00% Exact Match | 0.00% CER
-- **Low-Light**: 100.00% Exact Match | 0.00% CER
-- **Blur**: 86.36% Exact Match | 1.38% CER
+- **Overall Exact Match**: **89.55%** (197 / 220)
+- **$\le 1$ Char Error**: **95.45%** (210 / 220)
+- **Character Error Rate (CER)**: **2.02%**
+- **Format Compliance**: **96.82%**
+- **Average Inference Latency**: **22.4 ms / plate** on CPU
 
-### D. Synthetic Multi-Object Tracking Benchmark (MOT Challenge Format)
-Evaluated on synthetic mutual occlusion and crossing trajectories via `motmetrics`:
-- **IDF1 Score**: **99.34%** (+14.32% over un-aliased baseline)
-- **ID Switches**: **0** (eliminated during occlusion; baseline had 1 switch)
-- **MOTA**: **98.68%**
-- **Mostly Tracked (MT)**: 3 / 3 (100%) | **Mostly Lost (ML)**: 0 / 3 (0%)
+### B. Real Footage ANPR Audit (`docs/anpr_review.html`, 54 Tracks)
+- **Total Tracks**: 54 vehicle tracks
+- **Distance Gated ($w < 120$px or $h < 80$px)**: 44 tracks (81.5%) designated as `"Plate not legible at this distance"`
+- **Plates Localized by Fast-ALPR**: 4 candidate plates
+- **Real Plate Text Reads**:
+  - `KA01NV663` (72.3% confidence)
+  - `ID1WY5630` (84.8% confidence)
+  - `KA42225` (79.5% confidence)
+
+### C. Indian Traffic Detection Remapping (`docs/detection_review.html`)
+- Sampled across 40 frames: 99 detections (43 pedestrian, 18 two-wheeler, 16 three-wheeler, 15 car, 7 truck/bus).
+- Auto-rickshaws classified via bounding aspect ratio ($0.75 \le w/h \le 1.28$).
+- Motorcycles + overlapping riders fused into unified `two-wheeler` tracks.
+
+### D. Trustworthy Alerts & Responsive VMS UI
+- **Alert Rate Limiting**: 10s cooldown per track/rule, max 5 alerts/cam/min cap.
+- **Loitering Rule**: Restricted exclusively to pedestrians dwelling $\ge 30$s in restricted zones (zero stationary vehicle alarms in traffic).
+- **Video Elapsed Timestamps**: Exact video time displayed (`00:14.2s`).
+- **Responsive Proof**: 15 synthetic UI screenshots across 390px, 768px, 1280px, 1552px, and 1920px in `docs/ui_screenshots/` with zero horizontal overflow.
 
 ---
 
 ## ⚠️ Known Limitations
 
-1. **Optical Resolution**: Vehicles distant from the camera (<80x25 px plate crop) do not have enough pixels for optical character segmentation without telephoto optical lenses.
-2. **CPU Throughput**: Full deep-learning detection + OCR on 16+ vehicles per frame achieves 0.4–4.4 FPS on CPU. Real-time 30 FPS multi-stream production requires NVIDIA CUDA / TensorRT GPU acceleration.
-3. **Occlusion Buffer Limit**: Tracks occluded for longer than 2.0 seconds (`MAX_LOST_FRAMES=60`) are pruned to prevent memory bloat; subsequent reappearances trigger appearance-based Re-ID.
-4. **Night Motion Smear**: Heavy motion blur from slow shutter speeds at night degrades character edges; optical strobe illumination is recommended for high-speed nighttime checkpoints.
+1. **Optical Resolution**: Vehicles distant from the camera (<80x25 px plate crop) do not have enough pixels for optical character segmentation without telephoto optical lenses. They are distance-gated cleanly.
+2. **Auto-Rickshaw Geometry**: Aspect ratio heuristic provides solid classification without training data, but specialized three-wheeler dataset training is recommended for commercial deployment.
+3. **Night Motion Smear**: Heavy motion blur from slow shutter speeds at night degrades character edges; optical strobe illumination is recommended for high-speed nighttime checkpoints.
 
 ---
 
-## 📜 Operator Documentation & Guides
+## 📜 Documentation & Review Sheets
 
-- [Operator Walkthrough & 5-Minute Demo Guide](docs/DEMO_GUIDE.md)
 - [Comprehensive Upgrade & Verification Report](REPORT.md)
+- [Operator Walkthrough & 5-Minute Demo Guide](docs/DEMO_GUIDE.md)
 - [Real Footage ANPR Review Sheet](docs/anpr_review.html)
+- [Real Footage Detection Review Sheet](docs/detection_review.html)
+- [Responsive UI Screenshots](docs/ui_screenshots/)
