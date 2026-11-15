@@ -3,7 +3,10 @@ import fs from 'fs';
 import path from 'path';
 
 test.describe('Responsive VMS UI Verification & Visual Proof', () => {
-  const screenshotsDir = path.resolve('./docs/ui_screenshots');
+  // Ensure screenshots write to the repo root docs/ui_screenshots
+  const screenshotsDir = fs.existsSync(path.resolve('../docs/ui_screenshots'))
+    ? path.resolve('../docs/ui_screenshots')
+    : path.resolve('./docs/ui_screenshots');
 
   test.beforeAll(() => {
     if (!fs.existsSync(screenshotsDir)) {

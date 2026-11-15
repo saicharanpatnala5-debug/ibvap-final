@@ -374,6 +374,7 @@ export default function App() {
             color: '#ef4444',
             enabled: true,
             alertOnClasses: ['pedestrian', 'person', 'car', 'two-wheeler'],
+            dwellThresholdSec: 5.0,
             createdAt: now,
           },
         ],

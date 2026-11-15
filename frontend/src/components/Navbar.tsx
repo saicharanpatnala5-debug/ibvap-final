@@ -70,6 +70,7 @@ export const Navbar: React.FC<NavbarProps> = ({
       id: 'topology' as ActiveTab,
       label: 'Topology',
       icon: Radio,
+      badge: 'Labs',
     },
   ];
 
@@ -116,6 +117,11 @@ export const Navbar: React.FC<NavbarProps> = ({
                 >
                   <Icon className={`h-4 w-4 shrink-0 ${item.iconClass || ''}`} />
                   <span>{item.label}</span>
+                  {'badge' in item && item.badge && (
+                    <span className="ml-0.5 rounded bg-amber-500/10 border border-amber-500/30 px-1 py-0.2 text-[9px] font-mono font-medium text-amber-400">
+                      {item.badge}
+                    </span>
+                  )}
                   {item.count !== undefined && item.count > 0 && (
                     <span className={`ml-0.5 rounded-full border px-1.5 py-0.2 font-mono text-[10px] ${item.countClass}`}>
                       {item.count}
@@ -171,6 +177,11 @@ export const Navbar: React.FC<NavbarProps> = ({
             >
               <Icon className="h-3.5 w-3.5 shrink-0" />
               <span>{item.label}</span>
+              {'badge' in item && item.badge && (
+                <span className="ml-0.5 rounded bg-amber-500/10 border border-amber-500/30 px-1 py-0.2 text-[9px] font-mono font-medium text-amber-400">
+                  {item.badge}
+                </span>
+              )}
               {item.count !== undefined && item.count > 0 && (
                 <span className="rounded-full bg-neutral-800 px-1 font-mono text-[10px] text-neutral-300">
                   {item.count}

@@ -22,11 +22,16 @@ export const TopologyView: React.FC<TopologyViewProps> = ({
             <Radio className="h-5 w-5" />
           </div>
           <div>
-            <h2 className="text-base font-semibold tracking-tight">
-              Camera Network Topology & Spatial Coverage
-            </h2>
+            <div className="flex items-center gap-2">
+              <h2 className="text-base font-semibold tracking-tight">
+                Camera Network Topology & Spatial Coverage
+              </h2>
+              <span className="rounded bg-amber-500/10 border border-amber-500/30 px-1.5 py-0.5 text-[10px] font-mono font-medium text-amber-400">
+                LABS
+              </span>
+            </div>
             <p className="text-xs text-neutral-400">
-              Inter-camera handoff vectors, active perimeter coverage, and video sensor health
+              Inter-camera spatial coverage, edge routing, and node health (Architectural Preview)
             </p>
           </div>
         </div>

@@ -35,6 +35,7 @@ export interface VirtualZone {
   color: string;
   direction?: CrossingDirection;
   alertOnClasses: ObjectClass[];
+  dwellThresholdSec?: number; // Configurable loitering dwell threshold (default: 30s, demo profile: 5s)
   createdAt: number;
 }
 

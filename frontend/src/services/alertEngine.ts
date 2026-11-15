@@ -42,6 +42,21 @@ export class AlertEngine {
   private lastAlertTimes: Map<string, number> = new Map();
   private recentAlertsInWindow: { cameraId: string; time: number }[] = [];
   private personZoneDwellTracker: Map<string, number> = new Map(); // "trackId:zoneId" -> firstSeenTime
+  private defaultLoiterDwellSec: number = 30.0;
+
+  constructor(config?: { loiterDwellThresholdSec?: number }) {
+    if (config?.loiterDwellThresholdSec !== undefined) {
+      this.defaultLoiterDwellSec = config.loiterDwellThresholdSec;
+    }
+  }
+
+  public setLoiterDwellThreshold(sec: number) {
+    this.defaultLoiterDwellSec = sec;
+  }
+
+  public getLoiterDwellThreshold(): number {
+    return this.defaultLoiterDwellSec;
+  }
 
   /**
    * Evaluates active tracks against explicit VMS surveillance rules.
@@ -161,7 +176,8 @@ export class AlertEngine {
             this.personZoneDwellTracker.set(dwellKey, videoTime);
           } else {
             const dwellDuration = videoTime - firstSeen;
-            if (dwellDuration >= 30.0) {
+            const thresholdSec = zone.dwellThresholdSec ?? this.defaultLoiterDwellSec;
+            if (dwellDuration >= thresholdSec) {
               const cooldownKey = `track:${track.id}:loiter:${zone.id}`;
               if (this.checkCooldown(cooldownKey, videoTime, 15.0)) {
                 const alert = this.createIncident({
@@ -173,7 +189,7 @@ export class AlertEngine {
                   title: `Zone Dwell Alert: Person #${track.id} (${Math.round(dwellDuration)}s in ${zone.name})`,
                   ruleWeight: 60,
                   severity: 'medium',
-                  description: `Pedestrian #${track.id} lingering inside restricted zone ${zone.name} for ${Math.round(dwellDuration)}s (threshold: >= 30s)`,
+                  description: `Pedestrian #${track.id} lingering inside restricted zone ${zone.name} for ${Math.round(dwellDuration)}s (threshold: >= ${thresholdSec}s)`,
                   isNightMode,
                   canvasSnapshotUrl,
                   videoElement,

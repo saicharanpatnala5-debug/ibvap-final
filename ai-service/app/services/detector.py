@@ -198,10 +198,8 @@ class SurveillanceDetector:
         Maps raw YOLO classes to Indian traffic categories:
         - Two-Wheeler: Fuses overlapping motorcycle/bicycle and rider (person) into a single entity.
         - Pedestrian: Remaining persons become 'pedestrian'.
-        - Three-Wheeler / Auto-Rickshaw: Detections labeled as 'car' or 'truck' with aspect ratio 0.75-1.28
-          (distinctive boxy/upright profile) are remapped to 'three-wheeler'.
         - Heavy Vehicles: 'truck' and 'bus' are unified to 'truck/bus'.
-        - Passenger Cars: Retain 'car'.
+        - Passenger Cars: Retain 'car' (aspect-ratio three-wheeler heuristic removed to avoid misclassifying frontal cars).
         """
         if not detections:
             return []
@@ -272,15 +270,9 @@ class SurveillanceDetector:
 
         mapped_vehicles = []
         for v in vehicles:
-            vb = v["bbox"]
-            v_w_px = vb.width * frame_w
-            v_h_px = vb.height * frame_h
-            aspect = float(v_w_px) / max(1.0, float(v_h_px))
-
-            # Auto-rickshaw heuristic: aspect ratio 0.75 - 1.28
-            if 0.75 <= aspect <= 1.28 and v["class"] in ["car", "truck"]:
-                v["class"] = "three-wheeler"
-            elif v["class"] in ["truck", "bus"]:
+            # Aspect-ratio heuristic removed (fragile on frontal cars).
+            # Heavy commercial vehicles are unified to 'truck/bus', passenger vehicles retain 'car'.
+            if v["class"] in ["truck", "bus"]:
                 v["class"] = "truck/bus"
             else:
                 v["class"] = "car"

@@ -1,0 +1,204 @@
+{
+  "timestamp": 1794725741,
+  "synthetic_220_benchmark": {
+    "fast-alpr (cct-s-v2)": {
+      "total_samples": 220,
+      "exact_matches": 197,
+      "exact_match_pct": 89.55,
+      "one_char_pct": 95.45,
+      "total_char_errors": 44,
+      "total_gt_characters": 2173,
+      "cer_pct": 2.02,
+      "format_valid_pct": 96.82,
+      "avg_latency_ms": 22.93,
+      "categories": {
+        "clean": {
+          "samples": 44,
+          "exact_match_pct": 97.73,
+          "cer_pct": 1.38,
+          "avg_latency_ms": 22.85
+        },
+        "blur": {
+          "samples": 44,
+          "exact_match_pct": 79.55,
+          "cer_pct": 3.68,
+          "avg_latency_ms": 22.87
+        },
+        "noise": {
+          "samples": 44,
+          "exact_match_pct": 95.45,
+          "cer_pct": 1.38,
+          "avg_latency_ms": 22.64
+        },
+        "perspective": {
+          "samples": 44,
+          "exact_match_pct": 77.27,
+          "cer_pct": 3.46,
+          "avg_latency_ms": 22.64
+        },
+        "low_light": {
+          "samples": 44,
+          "exact_match_pct": 97.73,
+          "cer_pct": 0.23,
+          "avg_latency_ms": 23.64
+        }
+      }
+    },
+    "RapidOCR (raw)": {
+      "total_samples": 220,
+      "exact_matches": 165,
+      "exact_match_pct": 75.0,
+      "one_char_pct": 89.55,
+      "total_char_errors": 119,
+      "total_gt_characters": 2173,
+      "cer_pct": 5.48,
+      "format_valid_pct": 78.18,
+      "avg_latency_ms": 590.38,
+      "categories": {
+        "clean": {
+          "samples": 44,
+          "exact_match_pct": 56.82,
+          "cer_pct": 8.76,
+          "avg_latency_ms": 611.72
+        },
+        "blur": {
+          "samples": 44,
+          "exact_match_pct": 72.73,
+          "cer_pct": 2.99,
+          "avg_latency_ms": 560.01
+        },
+        "noise": {
+          "samples": 44,
+          "exact_match_pct": 63.64,
+          "cer_pct": 13.13,
+          "avg_latency_ms": 630.95
+        },
+        "perspective": {
+          "samples": 44,
+          "exact_match_pct": 84.09,
+          "cer_pct": 2.31,
+          "avg_latency_ms": 572.97
+        },
+        "low_light": {
+          "samples": 44,
+          "exact_match_pct": 97.73,
+          "cer_pct": 0.23,
+          "avg_latency_ms": 576.26
+        }
+      }
+    },
+    "RapidOCR (preprocessed)": {
+      "total_samples": 220,
+      "exact_matches": 213,
+      "exact_match_pct": 96.82,
+      "one_char_pct": 100.0,
+      "total_char_errors": 7,
+      "total_gt_characters": 2173,
+      "cer_pct": 0.32,
+      "format_valid_pct": 98.18,
+      "avg_latency_ms": 556.34,
+      "categories": {
+        "clean": {
+          "samples": 44,
+          "exact_match_pct": 97.73,
+          "cer_pct": 0.23,
+          "avg_latency_ms": 524.8
+        },
+        "blur": {
+          "samples": 44,
+          "exact_match_pct": 86.36,
+          "cer_pct": 1.38,
+          "avg_latency_ms": 542.49
+        },
+        "noise": {
+          "samples": 44,
+          "exact_match_pct": 100.0,
+          "cer_pct": 0.0,
+          "avg_latency_ms": 547.11
+        },
+        "perspective": {
+          "samples": 44,
+          "exact_match_pct": 100.0,
+          "cer_pct": 0.0,
+          "avg_latency_ms": 563.74
+        },
+        "low_light": {
+          "samples": 44,
+          "exact_match_pct": 100.0,
+          "cer_pct": 0.0,
+          "avg_latency_ms": 603.56
+        }
+      }
+    }
+  },
+  "real_footage_comparison": {
+    "eligible_vehicle_tracks": 14,
+    "results": {
+      "fast_alpr": {
+        "detected_plates": 4,
+        "reads": [
+          {
+            "track_id": 1,
+            "raw": "",
+            "corrected": "",
+            "valid": false
+          },
+          {
+            "track_id": 100,
+            "raw": "KA037755",
+            "corrected": "KA037755",
+            "valid": false
+          },
+          {
+            "track_id": 37,
+            "raw": "KA03AHD",
+            "corrected": "KA03AHD",
+            "valid": false
+          },
+          {
+            "track_id": 63,
+            "raw": "",
+            "corrected": "",
+            "valid": false
+          }
+        ],
+        "valid_format": 0
+      },
+      "rapid_ocr": {
+        "detected_plates": 0,
+        "reads": [],
+        "valid_format": 0
+      },
+      "hybrid": {
+        "detected_plates": 4,
+        "reads": [
+          {
+            "track_id": 1,
+            "raw": "",
+            "corrected": "",
+            "valid": false
+          },
+          {
+            "track_id": 100,
+            "raw": "KA03",
+            "corrected": "KA03",
+            "valid": false
+          },
+          {
+            "track_id": 37,
+            "raw": "KX03AHOG",
+            "corrected": "KX034H06",
+            "valid": false
+          },
+          {
+            "track_id": 63,
+            "raw": "",
+            "corrected": "",
+            "valid": false
+          }
+        ],
+        "valid_format": 0
+      }
+    }
+  }
+}

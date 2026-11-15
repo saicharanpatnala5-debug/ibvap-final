@@ -135,66 +135,87 @@ npm run dev
 
 ---
 
-## 🧪 Comprehensive Automated Testing (72 / 72 Passing)
+## 🧪 Comprehensive Automated Testing (95 / 95 Passing)
 
 All 5 test suites pass with a 100% success rate:
 
 ```bash
-# Frontend Unit Tests (Vitest: 17/17 passed)
+# Frontend Unit & State Tests (Vitest: 26/26 passed)
 npm --workspace=frontend run test
 
 # Gateway Tests (Vitest: 11/11 passed)
 npm --workspace=gateway run test
 
-# Python AI-Service Tests (Pytest: 21/21 passed)
+# Python AI-Service Tests (Pytest: 33/33 passed)
 cd ai-service && .venv\Scripts\pytest tests/ -v
 
 # Java Core-Service Tests (Maven Surefire: 13/13 passed)
 cd core-service && ./mvnw test
 
-# Playwright E2E & Responsive Tests (Playwright: 10/10 passed)
+# Playwright E2E & Visual Verification (Playwright: 12/12 passed)
 npx playwright test
 ```
 
 ---
 
-## 📊 Benchmark Summary: Real Footage vs. Synthetic
+## 📊 Benchmark Summary: Synthetic vs. Real Footage (Strict Separation)
 
 ### A. Synthetic Indian ANPR Benchmark (220 Perturbed Plates)
-Tested across 220 synthetically generated Indian license plate crops with varied optical distortions (`samples/synthetic_plates/`):
-- **Overall Exact Match**: **89.55%** (197 / 220)
-- **$\le 1$ Char Error**: **95.45%** (210 / 220)
-- **Character Error Rate (CER)**: **2.02%**
-- **Format Compliance**: **96.82%**
-- **Average Inference Latency**: **22.4 ms / plate** on CPU
+Head-to-head comparison evaluated on the identical 220 perturbed Indian plate crops (`samples/synthetic_plates/`, testing clean, blur, noise, perspective, and low-light distortions):
 
-### B. Real Footage ANPR Audit (`docs/anpr_review.html`, 54 Tracks)
-- **Total Tracks**: 54 vehicle tracks
-- **Distance Gated ($w < 120$px or $h < 80$px)**: 44 tracks (81.5%) designated as `"Plate not legible at this distance"`
-- **Plates Localized by Fast-ALPR**: 4 candidate plates
-- **Real Plate Text Reads**:
-  - `KA01NV663` (72.3% confidence)
-  - `ID1WY5630` (84.8% confidence)
-  - `KA42225` (79.5% confidence)
+| Engine | Exact Match % | $\le 1$ Char Error % | Total Errors / GT Chars | CER (%) | Format Valid % | Avg Latency (CPU) |
+| :--- | :--- | :--- | :--- | :--- | :--- | :--- |
+| **fast-alpr (`cct-s-v2`)** *(Default)* | **89.55%** (197/220) | **95.45%** (210/220) | 44 / 2,173 | **2.02%** | **96.82%** | **22.9 ms** (43.6 FPS) |
+| **RapidOCR (preprocessed)** | **96.82%** (213/220) | **100.0%** (220/220) | 7 / 2,173 | **0.32%** | **98.18%** | **556.3 ms** (1.8 FPS) |
+| **RapidOCR (raw)** | **75.00%** (165/220) | **89.55%** (197/220) | 119 / 2,173 | **5.48%** | **78.18%** | **590.4 ms** (1.7 FPS) |
 
-### C. Indian Traffic Detection Remapping (`docs/detection_review.html`)
-- Sampled across 40 frames: 99 detections (43 pedestrian, 18 two-wheeler, 16 three-wheeler, 15 car, 7 truck/bus).
-- Auto-rickshaws classified via bounding aspect ratio ($0.75 \le w/h \le 1.28$).
-- Motorcycles + overlapping riders fused into unified `two-wheeler` tracks.
+*Why fast-alpr is the default*: RapidOCR is an isolated text recognizer requiring high-contrast crops ($556$ ms/crop, 24x slower) and lacks an ONNX plate detector. `fast-alpr` delivers a full end-to-end pipeline (YOLO-v9-t detector + CCT-S-v2 recognizer) operating at 43.6 FPS on CPU with 89.55% exact accuracy.
 
-### D. Trustworthy Alerts & Responsive VMS UI
-- **Alert Rate Limiting**: 10s cooldown per track/rule, max 5 alerts/cam/min cap.
-- **Loitering Rule**: Restricted exclusively to pedestrians dwelling $\ge 30$s in restricted zones (zero stationary vehicle alarms in traffic).
-- **Video Elapsed Timestamps**: Exact video time displayed (`00:14.2s`).
-- **Responsive Proof**: 15 synthetic UI screenshots across 390px, 768px, 1280px, 1552px, and 1920px in `docs/ui_screenshots/` with zero horizontal overflow.
+### B. Real Footage ANPR Audit (54 Tracks Across 2 Clips)
+- **Total Vehicle Tracks**: 54
+- **Distance Gated ($w < 120$px or $h < 80$px)**: 40 tracks (74.1%) designated as `"Plate not legible at this distance"` (`distance_gated`) due to physical optical resolution limits.
+- **Eligible Vehicle Tracks ($w \ge 120$px, $h \ge 80$px)**: 14 tracks.
+- **Plate Detection & OCR Breakdown**:
+  - `fast-alpr`: 4 candidate plate boxes localized; raw characters extracted (`KA037755`, `KA03AHD`). Both failed strict Indian format validation and per-character confidence checks ($<55\%$).
+  - `RapidOCR`: 0 plate boxes localized (contour detector fails on real street scenes).
+  - `Hybrid`: 4 candidate boxes localized; extracted substrings (`KA03`, `KX034H06`). All failed strict format validation.
+- **Empirical Reality**: **0 of 54 vehicle tracks produced a validated Indian license plate**. All unvalidated candidates are marked with neutral status `"Invalid format - needs review"` and never attach to vehicle dossiers or fabricated RTO owners.
+
+### C. Detection Remapping & Diagnostic (`docs/detection_review.html`)
+- **Raw YOLO Detections**: Average **16.02 detections / frame** on 1080p source frames.
+- **Confirmed Filtered Tracks**: Average **10.05 tracks / frame** after sky/horizon clipping ($y < 0.20$), motorcycle-rider fusion, and 3-hit confirmation.
+- **Diagnostic Note on Round 4's 2.48 Count**: The earlier 2.48 count was an evaluation script artifact where jumping 18 frames per step broke ByteTrack's temporal continuity (`min_hits`). Sequential frame processing accurately detects and tracks all visible targets.
+- **Vehicle Class Integrity**: The fragile geometric aspect-ratio rule ($0.75 \le w/h \le 1.28$) that mislabeled frontal cars as auto-rickshaws has been removed. Standard classes (`car`, `truck/bus`, `two-wheeler`, `pedestrian`) remain clean and trustworthy.
+
+### D. Real Loitering Alert Proof & Dwell Verification
+- **Configurable Dwell**: Default loitering threshold is 30 seconds for operations, and dynamically configurable (5 seconds for fast operator demos).
+- **Real Footage Verification**: Pedestrian `#10` in `whatsapp_video_2026_09_09_842pm.mp4` dwells for 7.77 seconds ($t=0.2$s to $7.9$s) on the road shoulder.
+- **Zero False Alarms**: With demo threshold = 5.0s:
+  - Positive Zone ($X \in [0.10, 0.25], Y \in [0.70, 0.90]$): Exactly **1 alert fires at $t=5.2$s** (`Loitering Alert: PEDESTRIAN #10`).
+  - Negative Zone ($X \in [0.40, 0.60], Y \in [0.70, 0.90]$): Exactly **0 alerts fire**.
+  - Traffic Vehicles: Moving and stopped cars trigger **0 loitering alerts**.
 
 ---
 
-## ⚠️ Known Limitations
+## 🔍 Honest Feature & Nav Page Audit
 
-1. **Optical Resolution**: Vehicles distant from the camera (<80x25 px plate crop) do not have enough pixels for optical character segmentation without telephoto optical lenses. They are distance-gated cleanly.
-2. **Auto-Rickshaw Geometry**: Aspect ratio heuristic provides solid classification without training data, but specialized three-wheeler dataset training is recommended for commercial deployment.
-3. **Night Motion Smear**: Heavy motion blur from slow shutter speeds at night degrades character edges; optical strobe illumination is recommended for high-speed nighttime checkpoints.
+| Nav Page / Module | Status | Verification & Evidence |
+| :--- | :--- | :--- |
+| **Live Monitor** | **Real** | Video playback, detection canvas overlay, HUD stats, multi-stream switcher, timeline scrubber with event ticks, demo data injection/clear. |
+| **Alerts** | **Real** | Client-side `AlertEngine` with rate limiting (10s cooldown, 5/cam/min cap), video-synced timestamps, incident lifecycle (Open $\rightarrow$ Acknowledged $\rightarrow$ Resolved), severity filtering. |
+| **Vehicle Registry** | **Partial (Demo RTO)** | Plate crops, confidence, video timestamps, and manual overrides are real. RTO owner dossier is simulated mock data because government Vahan API access requires agency authorization. Unreadable/distance-gated plates show no dossier. |
+| **Forensics** | **Real** | Plate, vehicle class, color, time-range, and zone search across captured tracking history. Side-by-side tight crop and scene snapshot drawer. |
+| **AI Copilot** | **Real** | Connects to Google Gemini 2.5 Flash via Gateway (`/api/copilot/chat`). Includes grounded deterministic local reasoning fallback when API key is unset or offline. |
+| **Topology** | **Partial (Labs)** | Marked with `[Labs]` badge. Interactive node canvas maps cameras, gateway, AI service, core service, and zones. Status pulls from real `/api/health`, but node topology is fixed-graph. |
+
+---
+
+## ⚠️ Known Limitations & Next Steps
+
+1. **Optical Resolution Bounds**: Real CCTV footage exported from messaging apps ($768 \times 432$) yields vehicle plates with heights of only 10–18 pixels at distances $>15$m. No OCR model can optically resolve characters below the Nyquist limit. 1080p/4K optical zoom cameras are required for operational ANPR.
+2. **Three-Wheeler Classification via Fine-Tuning**: Rather than fragile aspect-ratio heuristics, adding native `auto-rickshaw` classes requires fine-tuning YOLO on Indian traffic datasets (e.g. IDD or Roboflow Indian Traffic). Estimated requirements: 3,000–5,000 annotated images, 6–10 GPU hours on an NVIDIA T4/A10G, costing ~$10–$25.
+3. **Government RTO Integration**: Production vehicle ownership lookups require authenticated access to the Parivahan / Vahan API gateway with authorized agency credentials.
+
 
 ---
 

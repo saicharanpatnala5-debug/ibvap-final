@@ -118,7 +118,12 @@ class PlateValidator:
 
     @staticmethod
     def validate(cleaned: str) -> tuple[bool, str, str]:
-        """Returns (is_valid, format_type, status_string)."""
+        """
+        Validates license plate against Indian statutory formats:
+        1. Bharat (BH) Series: YY BH NNNN LL (e.g. 22BH1234AA)
+        2. Standard State Series: SS DD LLL NNNN (e.g. DL01AB1234, KA04E9999)
+        Returns (is_valid, format_type, status_string).
+        """
         if not cleaned or len(cleaned) < 8 or len(cleaned) > 11:
             return False, "invalid", "Unreadable"
 
@@ -131,9 +136,9 @@ class PlateValidator:
             state_code = cleaned[:2]
             if state_code in VALID_STATE_CODES:
                 return True, "standard", "Valid format"
-            return False, "invalid", "Low confidence - needs review"
+            return False, "invalid", "Invalid format - needs review"
 
-        return False, "invalid", "Low confidence - needs review"
+        return False, "invalid", "Invalid format - needs review"
 
 
 def locate_plate_contour_fallback(vehicle_crop_bgr: np.ndarray) -> np.ndarray:
@@ -378,7 +383,21 @@ class FastALPREngine:
                     corrected = PlateValidator.position_aware_correction(cleaned)
                     is_valid, ftype, vstatus = PlateValidator.validate(corrected)
 
-                    is_readable = bool(corrected and len(corrected) >= 4)
+                    # Per-character confidence check:
+                    # Enforce that all recognized characters meet minimum confidence threshold.
+                    if best.ocr and best.ocr.confidence:
+                        raw_char_confs = [
+                            float(c) * 100.0 if float(c) <= 1.0 else float(c)
+                            for c in best.ocr.confidence
+                        ]
+                        if raw_char_confs:
+                            min_char_conf = min(raw_char_confs)
+                            avg_char_conf = float(np.mean(raw_char_confs))
+                            if is_valid and (min_char_conf < 55.0 or avg_char_conf < 70.0):
+                                is_valid = False
+                                vstatus = "Low character confidence - needs review"
+
+                    is_readable = bool(corrected and len(corrected) >= 6)
                     if not is_readable:
                         vstatus = "Unreadable"
 
@@ -498,8 +517,9 @@ class PlateVotingTracker:
                 isDistanceGated=False,
                 processedAt=int(time.time() * 1000),
             )
-            self.confirmed_plates[track_id] = final_result
-            return final_result
+            if is_valid:
+                self.confirmed_plates[track_id] = final_result
+                return final_result
 
         # Immediate confirmation for high-confidence already-valid plate
         if reading.isValidFormat and reading.confidence >= 80.0:
