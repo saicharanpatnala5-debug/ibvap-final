@@ -7,16 +7,16 @@
 tracker_type: bytetrack # ['bytetrack', 'botsort']
 
 # Detection confidence thresholds for ByteTrack 2-stage association
-track_high_thresh: 0.25 # Threshold for 1st-stage association (clear, high-confidence detections)
-track_low_thresh: 0.10  # Threshold for 2nd-stage association (partially occluded, motion-blurred, distant targets)
-new_track_thresh: 0.25  # Minimum detector confidence required to spawn a new tentative tracklet
+track_high_thresh: 0.28 # Threshold for 1st-stage association (clear, high-confidence detections)
+track_low_thresh: 0.12  # Threshold for 2nd-stage association (partially occluded, motion-blurred, distant targets)
+new_track_thresh: 0.32  # Minimum detector confidence required to spawn a new tentative tracklet
 
 # Track buffer: frame count to retain lost tracks in memory before deletion
-# At 30 fps, 60 frames = 2.0 seconds. Preserves track continuity through occlusion behind pillars/vehicles.
-track_buffer: 60
+# At 30 fps, 75 frames = 2.5 seconds. Preserves track continuity through occlusion behind pillars/vehicles.
+track_buffer: 75
 
 # Matching threshold for association cost matrix (IoU / spatial distance)
-match_thresh: 0.80
+match_thresh: 0.75
 
 # Whether to fuse detection confidence score with spatial motion similarity
 fuse_score: True

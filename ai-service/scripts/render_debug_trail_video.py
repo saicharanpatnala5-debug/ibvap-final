@@ -168,6 +168,21 @@ def render_debug_video(
 
 
 if __name__ == "__main__":
+    import argparse
+    parser = argparse.ArgumentParser(description="Render tracking trails debug videos")
+    parser.add_argument("--frames", type=int, default=150, help="Frames to render per video")
+    args = parser.parse_args()
+
     day_clip = os.path.join(SAMPLES_DIR, "whatsapp_video_2026_09_09_533pm.mp4")
-    out_clip = os.path.join(DEBUG_VIDEOS_DIR, "tracking_trails_debug.mp4")
-    render_debug_video(day_clip, out_clip, max_frames=90)
+    night_clip = os.path.join(SAMPLES_DIR, "whatsapp_video_2026_09_09_842pm.mp4")
+
+    out_day = os.path.join(DEBUG_VIDEOS_DIR, "tracking_trails_day_debug.mp4")
+    out_night = os.path.join(DEBUG_VIDEOS_DIR, "tracking_trails_night_debug.mp4")
+
+    if os.path.exists(day_clip):
+        print(f"\n--- Rendering Day Tracking Trails ({args.frames} frames) ---")
+        render_debug_video(day_clip, out_day, max_frames=args.frames)
+
+    if os.path.exists(night_clip):
+        print(f"\n--- Rendering Night Tracking Trails ({args.frames} frames) ---")
+        render_debug_video(night_clip, out_night, max_frames=args.frames)

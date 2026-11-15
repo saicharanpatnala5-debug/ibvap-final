@@ -42,6 +42,8 @@ class SurveillanceDetector:
             min_hits=settings.MIN_HITS,
             max_lost_frames=settings.MAX_LOST_FRAMES,
             enable_relink=settings.RELINK,
+            track_buffer_sec=float(settings.MAX_LOST_FRAMES) / 30.0,
+            adaptive_min_hits=settings.ADAPTIVE_MIN_HITS,
         )
         self.plate_voter = PlateVotingTracker(required_votes=2)
         self.async_anpr = AsyncANPRWorker(
@@ -55,6 +57,7 @@ class SurveillanceDetector:
             max_queue_per_frame=2,
         )
         self._ocr = None
+        self.target_class_ids: list[int] = []
         self._init_model()
 
     def _on_plate_confirmed(self, track_id: int, plate: ANPRResult):
@@ -77,6 +80,8 @@ class SurveillanceDetector:
         print(f"[IBVAP AI-Service] Switching model to: {model_name} on {self.device}")
         self.model = YOLO(model_name)
         self.active_model_name = model_name
+        if hasattr(self.model, "names") and self.model.names:
+            self.target_class_ids = [k for k, v in self.model.names.items() if v in ALLOWED_CLASSES]
         if imgsz is not None:
             settings.IMGSZ = imgsz
         self.reset()
@@ -135,13 +140,48 @@ class SurveillanceDetector:
             self.model = None
             self.active_model_name = "mock-detector"
 
+        if self.model and hasattr(self.model, "names") and self.model.names:
+            self.target_class_ids = [k for k, v in self.model.names.items() if v in ALLOWED_CLASSES]
+
+    def _filter_duplicate_vehicles(self, detections: list[dict], iou_thresh: float = 0.50) -> list[dict]:
+        """
+        Suppresses duplicate boxes across overlapping vehicle classes (e.g. car vs truck).
+        Keeps the detection with highest confidence.
+        """
+        veh_classes = {"car", "truck", "bus", "motorcycle"}
+        vehicles = [d for d in detections if d["class"] in veh_classes]
+        non_vehicles = [d for d in detections if d["class"] not in veh_classes]
+        if len(vehicles) <= 1:
+            return detections
+
+        vehicles.sort(key=lambda x: x["conf"], reverse=True)
+        kept_vehicles = []
+        for v in vehicles:
+            b1 = v["bbox"]
+            suppress = False
+            for kv in kept_vehicles:
+                b2 = kv["bbox"]
+                xA = max(b1.x, b2.x)
+                yA = max(b1.y, b2.y)
+                xB = min(b1.x + b1.width, b2.x + b2.width)
+                yB = min(b1.y + b1.height, b2.y + b2.height)
+                inter = max(0.0, xB - xA) * max(0.0, yB - yA)
+                union = (b1.width * b1.height) + (b2.width * b2.height) - inter
+                if union > 0 and (inter / union) > iou_thresh:
+                    suppress = True
+                    break
+            if not suppress:
+                kept_vehicles.append(v)
+
+        return non_vehicles + kept_vehicles
+
     def process_frame(
         self,
         frame_bgr: np.ndarray,
         timestamp_sec: float,
     ) -> tuple[list[TrackedEntity], list[ANPRResult]]:
         """
-        Runs object detection with low initial confidence (0.15) for ByteTrack 2nd-stage association,
+        Runs object detection with ByteTrack 2nd-stage association,
         followed by lifecycle track filtering, EMA box smoothing, and footpoint kinematics.
         """
         if frame_bgr is None or frame_bgr.size == 0:
@@ -154,17 +194,21 @@ class SurveillanceDetector:
 
         if self.model is not None:
             try:
-                # Run tracker with custom tracker config and imgsz
-                results = self.model.track(
-                    source=frame_bgr,
-                    persist=True,
-                    tracker=self.tracker_config_path,
-                    conf=settings.CONF_THRESHOLD,  # Low conf (0.15) feeds 2nd-stage association
-                    iou=settings.IOU_THRESHOLD,
-                    imgsz=settings.IMGSZ,
-                    device=self.device,
-                    verbose=False,
-                )
+                track_kwargs = {
+                    "source": frame_bgr,
+                    "persist": True,
+                    "tracker": self.tracker_config_path,
+                    "conf": settings.CONF_THRESHOLD,
+                    "iou": settings.IOU_THRESHOLD,
+                    "imgsz": settings.IMGSZ,
+                    "device": self.device,
+                    "verbose": False,
+                    "agnostic_nms": True,
+                }
+                if self.target_class_ids:
+                    track_kwargs["classes"] = self.target_class_ids
+
+                results = self.model.track(**track_kwargs)
 
                 if results and len(results) > 0 and results[0].boxes is not None:
                     boxes = results[0].boxes
@@ -174,18 +218,44 @@ class SurveillanceDetector:
                         if cls_name not in ALLOWED_CLASSES:
                             continue
 
+                        raw_conf = float(box.conf[0].item())
+                        # Class-specific confidence thresholds to suppress transient noise
+                        if cls_name in ["backpack", "handbag", "suitcase"] and raw_conf < 0.48:
+                            continue
+                        if cls_name in ["person", "bicycle"] and raw_conf < 0.38:
+                            continue
+
                         # Coordinates in pixels
                         xyxy = box.xyxy[0].cpu().numpy()
                         x1, y1, x2, y2 = xyxy
-                        conf_pct = int(round(float(box.conf[0].item()) * 100))
+                        conf_pct = int(round(raw_conf * 100))
                         track_id = int(box.id[0].item()) if box.id is not None else int(time.time() * 1000) % 9999
 
                         # Normalized bounding box (0 to 1)
+                        norm_w = min(1.0, float((x2 - x1) / w))
+                        norm_h = min(1.0, float((y2 - y1) / h))
+                        norm_x = max(0.0, float(x1 / w))
+                        norm_y = max(0.0, float(y1 / h))
+                        norm_y_center = norm_y + norm_h * 0.5
+                        norm_area = norm_w * norm_h
+
+                        # Filter far background horizon clutter
+                        if norm_y_center < settings.IGNORE_TOP_Y:
+                            continue
+
+                        # Filter tiny noise specks
+                        if (
+                            norm_w < settings.MIN_BOX_WIDTH
+                            or norm_h < settings.MIN_BOX_HEIGHT
+                            or norm_area < settings.MIN_BOX_AREA
+                        ):
+                            continue
+
                         norm_box = BoundingBox(
-                            x=max(0.0, float(x1 / w)),
-                            y=max(0.0, float(y1 / h)),
-                            width=min(1.0, float((x2 - x1) / w)),
-                            height=min(1.0, float((y2 - y1) / h)),
+                            x=norm_x,
+                            y=norm_y,
+                            width=norm_w,
+                            height=norm_h,
                         )
 
                         # Crop object for appearance and vehicle ANPR
@@ -213,6 +283,9 @@ class SurveillanceDetector:
 
             except Exception as infer_err:
                 print(f"[IBVAP AI-Service] Inference exception: {infer_err}")
+
+        # Suppress duplicate overlapping vehicle detections before tracking manager
+        raw_detections = self._filter_duplicate_vehicles(raw_detections, settings.VEHICLE_NMS_IOU)
 
         # Pass through tracking lifecycle manager:
         # Enforces tentative -> confirmed -> lost -> removed

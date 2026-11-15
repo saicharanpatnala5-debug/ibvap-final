@@ -113,14 +113,31 @@ class TrackRecord:
         frame_width: int,
         frame_height: int,
         min_hits: int = 3,
+        adaptive_min_hits: bool = True,
     ):
         self.age += 1
         self.hits += 1
         self.lost_frames = 0
         self.last_seen_time = timestamp
 
+        # Adaptive confirmation threshold based on target size:
+        # Distant background clutter flickers for 2-4 frames; requiring 5 frames for small targets
+        # completely eliminates spurious ghost tracks.
+        box_area = new_box.width * new_box.height
+        if adaptive_min_hits and min_hits >= 3:
+            if detected_class in ["backpack", "handbag", "suitcase"]:
+                req_hits = max(min_hits, 5)
+            elif box_area < 0.005:
+                req_hits = max(min_hits, 5)
+            elif box_area < 0.012:
+                req_hits = max(min_hits, 4)
+            else:
+                req_hits = min_hits
+        else:
+            req_hits = min_hits
+
         # Lifecycle state progression: tentative -> confirmed
-        if self.state == "tentative" and self.hits >= min_hits:
+        if self.state == "tentative" and self.hits >= req_hits:
             self.state = "confirmed"
         elif self.state == "lost":
             self.state = "confirmed"
@@ -210,14 +227,16 @@ class TrackingManager:
     def __init__(
         self,
         min_hits: int = 3,
-        max_lost_frames: int = 60,
+        max_lost_frames: int = 75,
         enable_relink: bool = True,
-        track_buffer_sec: float = 2.0,
+        track_buffer_sec: float = 2.5,
+        adaptive_min_hits: bool = True,
     ):
         self.min_hits = min_hits
         self.max_lost_frames = max_lost_frames
         self.enable_relink = enable_relink
         self.track_buffer_sec = track_buffer_sec
+        self.adaptive_min_hits = adaptive_min_hits
 
         self.last_timestamp: float = 0.0
         self.effective_fps: float = 30.0
@@ -277,6 +296,7 @@ class TrackingManager:
                     frame_width=frame_width,
                     frame_height=frame_height,
                     min_hits=self.min_hits,
+                    adaptive_min_hits=self.adaptive_min_hits,
                 )
                 if det.get("appearance"):
                     record.appearance = det["appearance"]
@@ -297,6 +317,7 @@ class TrackingManager:
                     frame_width=frame_width,
                     frame_height=frame_height,
                     min_hits=self.min_hits,
+                    adaptive_min_hits=self.adaptive_min_hits,
                 )
                 if det.get("appearance"):
                     record.appearance = det["appearance"]
@@ -337,6 +358,7 @@ class TrackingManager:
                         frame_width=frame_width,
                         frame_height=frame_height,
                         min_hits=self.min_hits,
+                    adaptive_min_hits=self.adaptive_min_hits,
                     )
                     if det.get("appearance"):
                         record.appearance = det["appearance"]

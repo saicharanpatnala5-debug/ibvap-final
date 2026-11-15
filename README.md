@@ -157,7 +157,7 @@ cd ai-service && pytest
 # Java Core-Service Tests (Maven Surefire: 13/13 passed)
 cd core-service && ./mvnw test
 
-# End-to-End Smoke Tests (Playwright: 4/4 passed)
+# End-to-End Smoke & Walkthrough Tests (Playwright: 5/5 passed)
 npx playwright test
 ```
 
@@ -169,14 +169,14 @@ python ai-service/scripts/eval_mot_metrics.py
 # Model & Resolution Matrix Benchmark (yolo26n vs yolo26s @ 640/960)
 python ai-service/scripts/benchmark_models_imgsz.py
 
-# Render Debug Trail Video with Trajectories & Kinematics (gitignored)
+# Render Debug Trail Videos with Trajectories & Kinematics (gitignored)
 python ai-service/scripts/render_debug_trail_video.py
 
-# ANPR RapidOCR Accuracy Benchmark
+# ANPR RapidOCR Accuracy Benchmark (Synthetic 220 Plates: 96.8% Exact Match)
 python ai-service/scripts/eval_anpr.py
 
-# ByteTrack Multi-Object Tracking & Kinematics Evaluator
-python ai-service/scripts/eval_tracking.py
+# ByteTrack Multi-Object Tracking & Kinematics Evaluator (Full Video Multirun)
+python ai-service/scripts/eval_tracking.py --runs 3
 ```
 
 ### HTTP Service Load Testing
@@ -186,35 +186,41 @@ node tools/load-test.js --requests 50 --concurrency 10
 
 ---
 
-## 📊 Benchmark Summary & Real-Footage Evaluation
+## 📊 Benchmark Summary: Real Footage vs. Synthetic
 
-### Synthetic ANPR Benchmark (220 Perturbed Plates)
+### A. Real-Footage Checkpoint Evaluation (Full Clips, 3 Runs Median FPS)
+Evaluated across real border surveillance cameras with asynchronous on-demand OCR:
+
+| Video Clip | Condition | Median FPS | All IDs | All Ghost % | Interior IDs | Interior Ghost % | Interior Frags | Interior ID Changes / min |
+| :--- | :--- | :---: | :---: | :---: | :---: | :---: | :---: | :---: |
+| `whatsapp_533pm.mp4` (Day) | **Round 3 Optimized** | **9.50 FPS** | **65** | **23.1%** | **15** | **26.7%** | **6** | **29.92 ID/min (-77.8%)** |
+| | Baseline | 4.65 FPS | 161 | 49.1% | 47 | 68.1% | 27 | 134.63 ID/min |
+| `whatsapp_842pm.mp4` (Night) | **Round 3 Optimized** | **6.05 FPS** | **93** | **48.4%** | **46** | **54.3%** | **26** | **87.31 ID/min (-67.9%)** |
+| | Baseline | 3.37 FPS | 192 | 58.9% | 92 | 67.4% | 81 | 272.01 ID/min |
+
+*Smooth Demo Mode ("Analyze, then play")*: Click "Analyze & Play" on any uploaded video to pre-index detections with linear interpolation, enabling buttery-smooth 30–60 FPS playback with zero inference lag.
+
+### B. Real Footage ANPR Review Sheet (`docs/anpr_review.html`)
+- **15 Extracted Crops**: 0 / 15 read due to average 16px plate height in 768x432 WhatsApp video (below OCR resolving threshold).
+- **Integrity Compliance**: 100% of unreadable crops are isolated—**zero** fake dossiers, fabricated owners, or "Verified" badges attached.
+
+### C. Synthetic ANPR Benchmark (SYNTHETIC — 220 Perturbed Plates)
 Tested across 220 synthetically generated Indian license plate crops with varied optical distortions (`samples/synthetic_plates/`):
 - **Overall Exact Match**: **96.82%** (213 / 220)
 - **Character Error Rate (CER)**: **0.32%** (7 errors across 2,194 characters)
 - **Format Compliance**: **98.18%** (216 / 220)
 - **Clean**: 97.73% Exact Match | 0.23% CER
-- **Blur**: 86.36% Exact Match | 1.38% CER
 - **Noise**: 100.00% Exact Match | 0.00% CER
 - **Perspective**: 100.00% Exact Match | 0.00% CER
 - **Low-Light**: 100.00% Exact Match | 0.00% CER
+- **Blur**: 86.36% Exact Match | 1.38% CER
 
-### Multi-Object Tracking Ground Truth Benchmark (MOT Challenge Format)
+### D. Synthetic Multi-Object Tracking Benchmark (MOT Challenge Format)
 Evaluated on synthetic mutual occlusion and crossing trajectories via `motmetrics`:
 - **IDF1 Score**: **99.34%** (+14.32% over un-aliased baseline)
-- **ID Switches**: **0** (100% elimination of identity switches during occlusion)
+- **ID Switches**: **0** (eliminated during occlusion; baseline had 1 switch)
 - **MOTA**: **98.68%**
 - **Mostly Tracked (MT)**: 3 / 3 (100%) | **Mostly Lost (ML)**: 0 / 3 (0%)
-
-### Real-Footage Checkpoint Evaluation (Active Footage)
-Evaluated across real border surveillance cameras with asynchronous on-demand OCR:
-- **`whatsapp_video_2026_09_09_533pm.mp4` (Daytime)**:
-  - Throughput: **7.42–8.95 FPS** on CPU (`yolo26n.pt` / `yolo26s.pt` @ 640)
-  - Tracking: 1.53s avg lifetime, 26 fragmentations (50-150 frames), scaling to 161 unique track IDs over full 12s video
-- **`whatsapp_video_2026_09_09_842pm.mp4` (Night Perimeter)**:
-  - Speedup: Increased from **0.41 FPS $\to$ 3.26–4.01 FPS** (8x faster) via `AsyncANPRWorker` non-blocking OCR
-  - Tracking: 1.28s avg lifetime, scaling to 192 unique track IDs over full 17.8s video
-- **Smooth Demo Mode ("Analyze, then play")**: Click "Analyze & Play" on any uploaded video to pre-index detections with linear interpolation, enabling buttery-smooth 30–60 FPS playback with zero inference lag.
 
 ---
 

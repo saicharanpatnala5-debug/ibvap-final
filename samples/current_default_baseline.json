@@ -1,0 +1,48 @@
+[
+  {
+    "file": "whatsapp_video_2026_09_09_533pm.mp4",
+    "frames": 361,
+    "duration_sec": 12.03,
+    "median_fps": 4.65,
+    "fps_runs": [
+      4.65
+    ],
+    "all_tracks": {
+      "unique_ids": 161,
+      "avg_lifetime_sec": 1.89,
+      "ghost_share_pct": 49.1,
+      "fragmentations": 91,
+      "id_changes_per_min": 453.74
+    },
+    "confirmed_interior": {
+      "unique_ids": 47,
+      "avg_lifetime_sec": 0.86,
+      "ghost_share_pct": 68.1,
+      "fragmentations": 27,
+      "id_changes_per_min": 134.63
+    }
+  },
+  {
+    "file": "whatsapp_video_2026_09_09_842pm.mp4",
+    "frames": 536,
+    "duration_sec": 17.87,
+    "median_fps": 3.37,
+    "fps_runs": [
+      3.37
+    ],
+    "all_tracks": {
+      "unique_ids": 192,
+      "avg_lifetime_sec": 1.39,
+      "ghost_share_pct": 58.9,
+      "fragmentations": 162,
+      "id_changes_per_min": 544.03
+    },
+    "confirmed_interior": {
+      "unique_ids": 92,
+      "avg_lifetime_sec": 1.07,
+      "ghost_share_pct": 67.4,
+      "fragmentations": 81,
+      "id_changes_per_min": 272.01
+    }
+  }
+]
