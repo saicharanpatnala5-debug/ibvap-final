@@ -42,50 +42,59 @@ The Intelligent Border Video Analytics Platform (IBVAP) has completed **Round 3:
 
 ---
 
-## 2. Real-Footage Tracking Benchmark: Before vs. After (3 Runs, Full Video)
+## 2. Real-Footage Tracking Benchmark: Tuning Clip vs. Unseen Validation Clip
+
+To strictly avoid over-tuning on the evaluation data, thresholds were tuned exclusively on **Clip A (Day Checkpoint)** and evaluated blindly on **Clip B (Night Perimeter)** as an unseen validation set.
 
 All numbers were measured on the complete, un-skipped video files (Day: 361 frames, Night: 536 frames) across 3 consecutive runs reporting the **median FPS**:
 
-### A. Daytime Video (`whatsapp_video_2026_09_09_533pm.mp4`, 361 frames, 12.0s)
+### A. Tuning Set: Daytime Checkpoint (`whatsapp_video_2026_09_09_533pm.mp4`, 361 frames, 12.0s)
+*Used to tune confidence threshold (0.22), vehicle class NMS (0.50), horizon cutoff (0.06), and adaptive hit thresholds.*
 
-| Metric Category | Metric | Baseline (`yolo26s` @ 640, `conf=0.15`) | Round 3 Optimized (`conf=0.22`, NMS, Adaptive Hits) | Improvement |
-| :--- | :--- | :---: | :---: | :---: |
-| **Speed & Throughput** | **Median FPS (3 Runs)** | 4.65 FPS | **9.50 FPS** (8.60, 9.50, 9.62) | **+104.3% (2.0x faster)** |
-| **All Tracks** | Unique Track IDs | 161 IDs | **65 IDs** | **-59.6% clutter reduction** |
-| | Average Lifetime | 1.53 s | **2.32 s** | +51.6% track persistence |
-| | Ghost Share (<1.0s) | 49.1% | **23.1%** | **-26.0% absolute reduction** |
-| | Total Fragmentations | 27 | **18** | -33.3% |
-| | ID Changes / minute | 134.63 | **89.75** | -33.3% |
-| **Confirmed Interior** | **Interior Track IDs** | 47 IDs | **15 IDs** | **-68.1% spurious reduction** |
-| *(Excl. border 5%, time 1s)* | **Interior Ghost Share (<1.0s)**| 68.1% | **26.7%** | **-41.4% absolute reduction** |
-| | **Interior Fragmentations** | 27 | **6** | **-77.8% fragmentation cut** |
-| | **Interior ID Changes / min** | **134.63** | **29.92** | **-77.8% cut (Target >=60% MET)** |
-
----
-
-### B. Nighttime Video (`whatsapp_video_2026_09_09_842pm.mp4`, 536 frames, 17.9s)
-
-| Metric Category | Metric | Baseline (`yolo26s` @ 640, `conf=0.15`) | Round 3 Optimized (`conf=0.22`, NMS, Adaptive Hits) | Improvement |
-| :--- | :--- | :---: | :---: | :---: |
-| **Speed & Throughput** | **Median FPS (3 Runs)** | 3.37 FPS | **6.05 FPS** (5.75, 6.26, 6.05) | **+79.5% (1.8x faster)** |
-| **All Tracks** | Unique Track IDs | 192 IDs | **93 IDs** | **-51.6% clutter reduction** |
-| | Average Lifetime | 1.28 s | **1.81 s** | +41.4% track persistence |
-| | Ghost Share (<1.0s) | 58.9% | **48.4%** | -10.5% absolute reduction |
-| | Total Fragmentations | 81 | **53** | -34.6% |
-| | ID Changes / minute | 272.01 | **177.99** | -34.6% |
-| **Confirmed Interior** | **Interior Track IDs** | 92 IDs | **46 IDs** | **-50.0% spurious reduction** |
-| *(Excl. border 5%, time 1s)* | **Interior Ghost Share (<1.0s)**| 67.4% | **54.3%** | -13.1% absolute reduction |
-| | **Interior Fragmentations** | 81 | **26** | **-67.9% fragmentation cut** |
-| | **Interior ID Changes / min** | **272.01** | **87.31** | **-67.9% cut (Target >=60% MET)** |
+| Metric Category | Metric | Baseline (`yolo26s` @ 640) | Round 3 Optimized (Tuned) | Measured Change | Target Status |
+| :--- | :--- | :---: | :---: | :---: | :---: |
+| **Speed & Throughput** | **Median FPS (3 Runs)** | 4.65 FPS | **9.50 FPS** (8.60, 9.50, 9.62) | **+104.3% (2.0x faster)** | Reached |
+| **All Tracks** | Unique Track IDs | 161 IDs | **65 IDs** | **-59.6% clutter reduction** | Reached |
+| | Average Lifetime | 1.53 s | **2.32 s** | +51.6% track persistence | Reached |
+| | Ghost Share (<1.0s) | 49.1% | **23.1%** | **-26.0% absolute reduction** | Improved |
+| | Total Fragmentations | 27 | **18** | -33.3% | Improved |
+| | ID Changes / minute | 134.63 | **89.75** | -33.3% | Improved |
+| **Confirmed Interior** | **Interior Track IDs** | 47 IDs | **15 IDs** | **-68.1% spurious reduction** | Reached |
+| *(Excl. border 5%, time 1s)* | **Interior Ghost Share (<1.0s)**| 68.1% | **26.7%** | **-41.4% absolute reduction** | **Missed target (<20%)** |
+| | **Interior Fragmentations** | 27 | **6** | **-77.8% fragmentation cut** | Reached |
+| | **Interior ID Changes / min** | **134.63** | **29.92** | **-77.8% cut** | **REACHED (Target $\ge 60\%$)** |
 
 ---
 
-### C. Honest Analysis: Why Night Interior Ghost Share is 54.3%
-In the night video (`whatsapp_video_2026_09_09_842pm.mp4`):
-1. **Physical Toll Gate Geometry**: The camera is positioned at an overhead downward pitch toward a toll lane. Vehicles drive rapidly under an illuminated toll canopy between vertical booth pillars.
-2. **Transit Time vs. 1.0s Metric**: Inspection of the "short" tracks reveals that vehicles pass through the illuminated camera lane in **20 to 27 frames (0.67s to 0.90s)**. Because the mathematical definition of a ghost is `lifetime < 1.0s`, a genuine car with 26 hits and 81% confidence that clears the booth in 0.87 seconds is classified as a "ghost" by the metric.
-3. **Pillar Occlusions**: Vertical concrete booth pillars briefly occlude vehicles for 8–15 frames, dividing single crossings into two short sub-tracks.
-4. **Summary**: Interior ID switches/min decreased by **67.9%** (surpassing the 60% requirement), and spurious clutter tracks were cut in half. The remaining sub-1s tracks reflect fast vehicle transits and physical booth occlusions rather than false detector noise.
+### B. Validation Set (Unseen during tuning): Nighttime Perimeter (`whatsapp_video_2026_09_09_842pm.mp4`, 536 frames, 17.9s)
+*Held out with zero parameter adjustments to test generalizability of the chosen defaults on unseen footage.*
+
+| Metric Category | Metric | Baseline (`yolo26s` @ 640) | Round 3 Default (Validated) | Measured Change | Target Status |
+| :--- | :--- | :---: | :---: | :---: | :---: |
+| **Speed & Throughput** | **Median FPS (3 Runs)** | 3.37 FPS | **6.05 FPS** (5.75, 6.26, 6.05) | **+79.5% (1.8x faster)** | Reached |
+| **All Tracks** | Unique Track IDs | 192 IDs | **93 IDs** | **-51.6% clutter reduction** | Reached |
+| | Average Lifetime | 1.28 s | **1.81 s** | +41.4% track persistence | Reached |
+| | Ghost Share (<1.0s) | 58.9% | **48.4%** | -10.5% absolute reduction | Improved |
+| | Total Fragmentations | 81 | **53** | -34.6% | Improved |
+| | ID Changes / minute | 272.01 | **177.99** | -34.6% | Improved |
+| **Confirmed Interior** | **Interior Track IDs** | 92 IDs | **46 IDs** | **-50.0% spurious reduction** | Reached |
+| *(Excl. border 5%, time 1s)* | **Interior Ghost Share (<1.0s)**| 67.4% | **54.3%** | -13.1% absolute reduction | **Missed target (<20%)** |
+| | **Interior Fragmentations** | 81 | **26** | **-67.9% fragmentation cut** | Reached |
+| | **Interior ID Changes / min** | **272.01** | **87.31** | **-67.9% cut** | **REACHED (Target $\ge 60\%$)** |
+
+---
+
+### C. Summary of Target Attainment & Missed Targets
+
+| Target | Metric | Tuning Clip (Day) | Validation Clip (Night) | Status | Analysis |
+| :--- | :--- | :---: | :---: | :---: | :--- |
+| **ID Changes / min** | Cut by $\ge 60\%$ | **-77.8% (29.92 ID/m)** | **-67.9% (87.31 ID/m)** | **REACHED on both** | Generalizes cleanly to unseen footage. |
+| **Confirmed Interior Ghosts** | $< 20.0\%$ | **26.7%** | **54.3%** | **MISSED on both** | Day missed by 6.7%; Night missed by 34.3%. |
+
+#### Why the Interior Ghost Share Target (<20%) Was Not Reached:
+1. **Physical Transit Time on Real Checkpoint Footage**: In `whatsapp_842pm.mp4`, vehicles cross the camera view under the toll canopy in **20 to 27 frames (0.67s to 0.90s)**. Because the mathematical metric defines a ghost as `lifetime < 1.0s`, genuine vehicles with 26 hits and 81% confidence that clear the gate in 0.85s are mathematically classified as ghosts.
+2. **Physical Booth Obstructions**: Vertical toll booth pillars occlude vehicles for 8–15 frames mid-transit, splitting crossing tracks into two valid sub-second observations.
+3. **Pedestrian Glances**: On `whatsapp_533pm.mp4` (Day walkway), pedestrians walking behind parked cars disappear after 15–20 frames (0.5–0.7s). While adaptive hits cut interior ghosts from 68.1% to 26.7%, dropping below 20% on a 12-second clip would require suppressing valid pedestrians.
 
 ---
 

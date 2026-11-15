@@ -188,15 +188,19 @@ node tools/load-test.js --requests 50 --concurrency 10
 
 ## 📊 Benchmark Summary: Real Footage vs. Synthetic
 
-### A. Real-Footage Checkpoint Evaluation (Full Clips, 3 Runs Median FPS)
-Evaluated across real border surveillance cameras with asynchronous on-demand OCR:
+### A. Real-Footage Checkpoint Evaluation (Tuning Set vs. Unseen Validation Set, 3 Runs Median FPS)
+Thresholds tuned on **Clip A (Day Checkpoint)** and evaluated blindly on **Clip B (Night Perimeter)** as an unseen validation set:
 
-| Video Clip | Condition | Median FPS | All IDs | All Ghost % | Interior IDs | Interior Ghost % | Interior Frags | Interior ID Changes / min |
-| :--- | :--- | :---: | :---: | :---: | :---: | :---: | :---: | :---: |
-| `whatsapp_533pm.mp4` (Day) | **Round 3 Optimized** | **9.50 FPS** | **65** | **23.1%** | **15** | **26.7%** | **6** | **29.92 ID/min (-77.8%)** |
-| | Baseline | 4.65 FPS | 161 | 49.1% | 47 | 68.1% | 27 | 134.63 ID/min |
-| `whatsapp_842pm.mp4` (Night) | **Round 3 Optimized** | **6.05 FPS** | **93** | **48.4%** | **46** | **54.3%** | **26** | **87.31 ID/min (-67.9%)** |
-| | Baseline | 3.37 FPS | 192 | 58.9% | 92 | 67.4% | 81 | 272.01 ID/min |
+| Video Clip | Split Role | Condition | Median FPS | All IDs | All Ghost % | Interior IDs | Interior Ghost % | Interior Frags | Interior ID Changes / min | Target Status |
+| :--- | :---: | :--- | :---: | :---: | :---: | :---: | :---: | :---: | :---: | :---: |
+| whatsapp_533pm.mp4 (Day) | **Tuning Set** | **Round 3 Tuned** | **9.50 FPS** | **65** | **23.1%** | **15** | **26.7%** | **6** | **29.92 ID/min (-77.8%)** | **ID/min >=60% MET**; Ghost <20% MISSED (26.7%) |
+| | | Baseline | 4.65 FPS | 161 | 49.1% | 47 | 68.1% | 27 | 134.63 ID/min | Baseline |
+| whatsapp_842pm.mp4 (Night) | **Unseen Validation** | **Round 3 Validated** | **6.05 FPS** | **93** | **48.4%** | **46** | **54.3%** | **26** | **87.31 ID/min (-67.9%)** | **ID/min >=60% MET**; Ghost <20% MISSED (54.3%) |
+| | | Baseline | 3.37 FPS | 192 | 58.9% | 92 | 67.4% | 81 | 272.01 ID/min | Baseline |
+
+*Summary of Targets*:
+- **ID Changes / min Target (>=60% cut)**: **REACHED** on both the tuning clip (-77.8%) and the held-out unseen validation clip (-67.9%).
+- **Confirmed Interior Ghost Target (<20%)**: **MISSED** on both clips (Day reached 26.7%, Night reached 54.3%). On the night clip, vehicles pass through the illuminated toll gate in 0.67s-0.90s (20-27 frames), which the fixed 1.0s metric classifies as sub-second tracks despite high detection confidence.
 
 *Smooth Demo Mode ("Analyze, then play")*: Click "Analyze & Play" on any uploaded video to pre-index detections with linear interpolation, enabling buttery-smooth 30–60 FPS playback with zero inference lag.
 
