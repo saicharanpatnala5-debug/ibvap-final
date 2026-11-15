@@ -112,30 +112,32 @@ Check system requirements before starting:
 
 ---
 
-## 🚀 One-Command Launch
+## 🚀 Quick Start (One Command to Setup, Start, and Stop)
 
-### Method 1: All-in-One CLI Runner (Recommended)
-From the repository root:
 ```bash
+# 1. One-time setup: installs dependencies & pre-caches all AI/OCR models for 100% offline use
+npm run setup
+
+# 2. Start all services (Gateway :3000, AI-Service :8000, Core-Service :8080)
 npm run dev:all
+
+# 3. Stop all services cleanly
+npm run stop
 ```
-This automatically verifies toolchains, initializes the Python venv, starts Core-Service (8080), AI-Service (8000), and Gateway/Frontend (3000), and wires unified Ctrl+C teardown.
-
-### Method 2: Running Services Individually
-```bash
-# Terminal 1 - Java Core Service
-cd core-service && ./mvnw spring-boot:run
-
-# Terminal 2 - Python AI Service
-cd ai-service && .\.venv\Scripts\uvicorn app.main:app --host 0.0.0.0 --port 8000
-
-# Terminal 3 - Express Gateway & Frontend
-npm run dev
-```
+Open **http://localhost:3000** in your browser. If Node.js (v20+), Python (3.11+), or Java (21 LTS) is missing, `npm run setup` prints an explicit warning with installation instructions.
 
 ---
 
-## 🧪 Comprehensive Automated Testing (95 / 95 Passing)
+## 🔌 100% Offline Runtime Guarantee
+
+IBVAP is engineered for zero-connectivity border deployments:
+- `npm run setup` automatically downloads and caches all runtime weights (`yolo26s.pt`, `yolo26n.pt`, `yolo11s.pt`, Fast-ALPR ONNX detector `yolo-v9-t-384`, and OCR recognizers `cct-s-v2` / `cct-xs-v2`).
+- During demonstrations or field operations without internet, the vision engine, plate recognizer, and alert state machines run with zero external HTTP requests.
+- When `GEMINI_API_KEY` is absent or offline, the AI Copilot automatically uses a deterministic grounded local reasoning engine based on live platform telemetry.
+
+---
+
+## 🧪 Comprehensive Automated Testing (96 / 96 Passing)
 
 All 5 test suites pass with a 100% success rate:
 
@@ -152,7 +154,7 @@ cd ai-service && .venv\Scripts\pytest tests/ -v
 # Java Core-Service Tests (Maven Surefire: 13/13 passed)
 cd core-service && ./mvnw test
 
-# Playwright E2E & Visual Verification (Playwright: 12/12 passed)
+# Playwright E2E & Video Walkthrough (Playwright: 13/13 passed)
 npx playwright test
 ```
 

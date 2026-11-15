@@ -49,6 +49,15 @@ def get_shared_detector() -> SurveillanceDetector:
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):
+    # Security Validation outside dev mode
+    env_mode = os.getenv("ENVIRONMENT", os.getenv("NODE_ENV", "development")).lower()
+    if env_mode == "production":
+        default_tokens = {"ibvap-internal-secret-token-change-in-prod", "default-token", "secret", ""}
+        if not settings.SERVICE_TOKEN or settings.SERVICE_TOKEN in default_tokens:
+            raise RuntimeError(
+                "[FATAL SECURITY ERROR] In production mode, SERVICE_TOKEN must be explicitly configured with a secure secret. Refusing to start."
+            )
+
     # Startup
     print(f"[IBVAP AI-Service] Starting on {settings.HOST}:{settings.PORT}")
     yield

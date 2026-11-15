@@ -9,6 +9,8 @@ import {
   Eye,
   Sparkles,
   Car,
+  RotateCcw,
+  PlaySquare,
 } from 'lucide-react';
 
 export type ActiveTab = 'monitoring' | 'alerts' | 'command' | 'intelligence' | 'anpr' | 'search' | 'topology';
@@ -21,6 +23,8 @@ interface NavbarProps {
   plateCount?: number;
   onOpenAddCamera: () => void;
   onOpenAccessibility: () => void;
+  onLoadDemoScenario?: () => void;
+  onResetPlatform?: () => void;
 }
 
 export const Navbar: React.FC<NavbarProps> = ({
@@ -31,6 +35,8 @@ export const Navbar: React.FC<NavbarProps> = ({
   plateCount = 0,
   onOpenAddCamera,
   onOpenAccessibility,
+  onLoadDemoScenario,
+  onResetPlatform,
 }) => {
   // Exactly 6 primary navigation items - strict <= 6 items requirement
   const navItems = [
@@ -134,17 +140,44 @@ export const Navbar: React.FC<NavbarProps> = ({
         </div>
 
         {/* Right Side Actions: Guaranteed shrink-0 and relative z-10 to prevent clipping or pointer interception */}
-        <div className="flex items-center gap-2 sm:gap-3 shrink-0 relative z-10">
+        <div className="flex items-center gap-1.5 sm:gap-2.5 shrink-0 relative z-10">
+          {/* Demo Scenario & Reset Controls */}
+          {onLoadDemoScenario && (
+            <button
+              id="load-demo-scenario-btn"
+              type="button"
+              onClick={onLoadDemoScenario}
+              className="flex items-center gap-1 rounded-lg border border-amber-500/30 bg-amber-500/10 px-2 py-1.5 text-xs font-medium text-amber-300 hover:bg-amber-500/20 hover:text-amber-200 transition-colors shrink-0"
+              title="Load Prepared Demo Scenario (Sample Zone & Test Telemetry)"
+            >
+              <PlaySquare className="h-3.5 w-3.5 shrink-0 text-amber-400" />
+              <span className="hidden md:inline">Demo Scenario</span>
+            </button>
+          )}
+
+          {onResetPlatform && (
+            <button
+              id="reset-platform-btn"
+              type="button"
+              onClick={onResetPlatform}
+              className="flex items-center gap-1 rounded-lg border border-neutral-800 bg-neutral-900 px-2 py-1.5 text-xs font-medium text-neutral-400 hover:bg-red-950/40 hover:border-red-800 hover:text-red-300 transition-colors shrink-0"
+              title="Reset Platform (Clear All Feeds, Alerts & Registry Records)"
+            >
+              <RotateCcw className="h-3.5 w-3.5 shrink-0" />
+              <span className="hidden md:inline">Reset</span>
+            </button>
+          )}
+
           {/* Accessibility Settings Trigger */}
           <button
             id="open-a11y-settings-btn"
             type="button"
             onClick={onOpenAccessibility}
-            className="flex items-center gap-1.5 rounded-lg border border-neutral-800 bg-neutral-900 px-2.5 py-1.5 text-xs font-medium text-neutral-300 hover:bg-neutral-800 hover:text-white transition-colors shrink-0"
+            className="flex items-center gap-1.5 rounded-lg border border-neutral-800 bg-neutral-900 px-2 py-1.5 text-xs font-medium text-neutral-300 hover:bg-neutral-800 hover:text-white transition-colors shrink-0"
             title="Accessibility Settings (High Contrast, Reduced Motion, Font Scale)"
           >
             <Eye className="h-3.5 w-3.5 shrink-0" />
-            <span className="hidden sm:inline">Accessibility</span>
+            <span className="hidden lg:inline">A11y</span>
           </button>
 
           {/* Primary Action: + Add Camera */}
@@ -152,7 +185,7 @@ export const Navbar: React.FC<NavbarProps> = ({
             id="main-add-camera-btn"
             type="button"
             onClick={onOpenAddCamera}
-            className="flex items-center gap-1.5 rounded-lg bg-amber-500 px-3 py-1.5 text-xs font-semibold text-neutral-950 hover:bg-amber-400 transition-colors shadow-xs focus:outline-none focus:ring-2 focus:ring-amber-400 shrink-0 whitespace-nowrap"
+            className="flex items-center gap-1.5 rounded-lg bg-amber-500 px-2.5 sm:px-3 py-1.5 text-xs font-semibold text-neutral-950 hover:bg-amber-400 transition-colors shadow-xs focus:outline-none focus:ring-2 focus:ring-amber-400 shrink-0 whitespace-nowrap"
           >
             <Plus className="h-4 w-4 shrink-0" />
             <span>Add Camera</span>

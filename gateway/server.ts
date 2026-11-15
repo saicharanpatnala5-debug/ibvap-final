@@ -772,6 +772,16 @@ app.use(
 // -------------------------------------------------------------
 
 async function startServer() {
+  if (process.env.NODE_ENV === 'production') {
+    const serviceToken = process.env.SERVICE_TOKEN?.trim();
+    const defaultTokens = ['ibvap-internal-secret-token-change-in-prod', 'default-token', 'secret', ''];
+    if (!serviceToken || defaultTokens.includes(serviceToken)) {
+      console.error('\n[FATAL SECURITY ERROR] In production mode (NODE_ENV=production), SERVICE_TOKEN must be configured with a secure value and cannot use the development default.');
+      console.error('Startup aborted for security compliance.\n');
+      process.exit(1);
+    }
+  }
+
   const frontendRoot = fs.existsSync(path.resolve(process.cwd(), 'frontend'))
     ? path.resolve(process.cwd(), 'frontend')
     : path.resolve(__dirname, '../frontend');

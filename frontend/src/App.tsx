@@ -464,6 +464,8 @@ export default function App() {
         plateCount={plateRecords.length}
         onOpenAddCamera={() => setIsAddCameraOpen(true)}
         onOpenAccessibility={() => setIsA11yOpen(true)}
+        onLoadDemoScenario={handleLoadDemoData}
+        onResetPlatform={handleClearAllData}
       />
 
       {/* Main Content Area */}
