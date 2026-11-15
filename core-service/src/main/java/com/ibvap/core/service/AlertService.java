@@ -13,6 +13,9 @@ import java.util.stream.Collectors;
 
 @Service
 public class AlertService {
+    public static final String CURRENT_SCHEMA_VERSION = "v8.0.0";
+    public static final String CURRENT_RUN_ID = "r8-release-20261115";
+
     private final Map<String, AlertIncident> alerts = new ConcurrentHashMap<>();
     private final List<SseEmitter> emitters = new CopyOnWriteArrayList<>();
     private final AuditService auditService;
@@ -23,22 +26,33 @@ public class AlertService {
 
     public List<AlertIncident> getAll() {
         return alerts.values().stream()
+                .filter(a -> CURRENT_SCHEMA_VERSION.equals(a.getSchemaVersion()))
                 .sorted(Comparator.comparing(AlertIncident::getTimestamp).reversed())
                 .collect(Collectors.toList());
     }
 
     public List<AlertIncident> getOpenAlerts() {
         return alerts.values().stream()
+                .filter(a -> CURRENT_SCHEMA_VERSION.equals(a.getSchemaVersion()))
                 .filter(a -> "OPEN".equalsIgnoreCase(a.getStatus()))
                 .sorted(Comparator.comparing(AlertIncident::getTimestamp).reversed())
                 .collect(Collectors.toList());
     }
 
     public Optional<AlertIncident> getById(String id) {
-        return Optional.ofNullable(alerts.get(id));
+        return Optional.ofNullable(alerts.get(id))
+                .filter(a -> CURRENT_SCHEMA_VERSION.equals(a.getSchemaVersion()));
     }
 
     public AlertIncident createAlert(AlertIncident alert) {
+        if (alert.getSchemaVersion() != null && !CURRENT_SCHEMA_VERSION.equals(alert.getSchemaVersion())) {
+            // Discard mismatched version to prevent stale data pollution
+            return null;
+        }
+        alert.setSchemaVersion(CURRENT_SCHEMA_VERSION);
+        if (alert.getRunId() == null) {
+            alert.setRunId(CURRENT_RUN_ID);
+        }
         if (alert.getId() == null || alert.getId().trim().isEmpty()) {
             alert.setId(UUID.randomUUID().toString());
         }

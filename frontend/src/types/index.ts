@@ -9,6 +9,7 @@ export type ObjectClass =
   | 'bicycle'
   | 'two-wheeler'
   | 'three-wheeler'
+  | 'auto-rickshaw'
   | 'suitcase'
   | 'backpack'
   | 'handbag'

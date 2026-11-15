@@ -31,13 +31,13 @@ class AsyncANPRWorker:
         plate_voter: PlateVotingTracker,
         on_confirmed_callback: Optional[Callable[[int, ANPRResult], None]] = None,
         max_workers: int = 2,
-        min_veh_height: int = 80,
-        min_veh_width: int = 120,
+        min_veh_height: int = 24,
+        min_veh_width: int = 40,
         min_crop_height: Optional[int] = None,
         min_crop_width: Optional[int] = None,
-        min_sharpness: float = 15.0,
-        max_crops_per_track: int = 4,
-        max_queue_per_frame: int = 2,
+        min_sharpness: float = 10.0,
+        max_crops_per_track: int = 6,
+        max_queue_per_frame: int = 3,
     ):
         if min_crop_height is not None:
             min_veh_height = min_crop_height

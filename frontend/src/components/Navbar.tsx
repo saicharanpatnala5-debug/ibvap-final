@@ -99,13 +99,20 @@ export const Navbar: React.FC<NavbarProps> = ({
                   <span className="h-1.5 w-1.5 rounded-full bg-emerald-400 animate-pulse" />
                   ONLINE
                 </span>
+                <span
+                  id="pipeline-version-badge"
+                  className="hidden xl:inline-flex items-center rounded bg-neutral-900 border border-neutral-800 px-1.5 py-0.5 text-[9px] font-mono text-neutral-400"
+                  title="Pipeline Schema: v8.0.0 | Run: r8-release-20261115"
+                >
+                  v8.0.0
+                </span>
               </div>
-              <p className="hidden 2xl:block text-[11px] text-neutral-400 truncate">VMS Analytics</p>
+              <p className="hidden 2xl:block text-[11px] text-neutral-400 truncate">VMS Analytics · Run r8-release</p>
             </div>
           </div>
 
           {/* Desktop Navigation Links (<= 6 items, strict no-clipping) */}
-          <nav className="hidden lg:flex items-center gap-1 border-l border-neutral-800/80 pl-3 shrink min-w-0" aria-label="Main Navigation">
+          <nav className="hidden lg:flex items-center gap-0.5 xl:gap-1 border-l border-neutral-800/80 pl-2 xl:pl-3 shrink min-w-0" aria-label="Main Navigation">
             {navItems.map((item) => {
               const Icon = item.icon;
               const isActive = activeTab === item.id;
@@ -115,7 +122,7 @@ export const Navbar: React.FC<NavbarProps> = ({
                   id={`nav-${item.id}-tab`}
                   type="button"
                   onClick={() => onSelectTab(item.id)}
-                  className={`flex items-center gap-1.5 rounded-lg px-2.5 py-1.5 text-xs font-medium whitespace-nowrap transition-colors ${
+                  className={`flex items-center gap-1.5 rounded-lg px-2 xl:px-2.5 py-1.5 text-xs font-medium whitespace-nowrap transition-colors ${
                     isActive
                       ? 'bg-neutral-800 text-neutral-100 font-semibold shadow-xs'
                       : 'text-neutral-400 hover:bg-neutral-900 hover:text-neutral-200'
@@ -151,7 +158,7 @@ export const Navbar: React.FC<NavbarProps> = ({
               title="Load Prepared Demo Scenario (Sample Zone & Test Telemetry)"
             >
               <PlaySquare className="h-3.5 w-3.5 shrink-0 text-amber-400" />
-              <span className="hidden md:inline">Demo Scenario</span>
+              <span className="hidden 2xl:inline">Demo Scenario</span>
             </button>
           )}
 
@@ -164,7 +171,7 @@ export const Navbar: React.FC<NavbarProps> = ({
               title="Reset Platform (Clear All Feeds, Alerts & Registry Records)"
             >
               <RotateCcw className="h-3.5 w-3.5 shrink-0" />
-              <span className="hidden md:inline">Reset</span>
+              <span className="hidden 2xl:inline">Reset</span>
             </button>
           )}
 

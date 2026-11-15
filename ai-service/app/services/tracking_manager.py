@@ -46,9 +46,9 @@ class TrackRecord:
         self.lost_frames = 0
         self.last_seen_time = timestamp
 
-        # Unify vehicle classes (car/truck/bus/three-wheeler) to prevent class-flip fragmentation
+        # Unify vehicle classes (car/truck/bus/three-wheeler/auto-rickshaw) to prevent class-flip fragmentation
         self.raw_class = initial_class
-        if initial_class in ["car", "truck", "bus", "truck/bus", "three-wheeler"]:
+        if initial_class in ["car", "truck", "bus", "truck/bus", "three-wheeler", "auto-rickshaw"]:
             self.tracking_class = "vehicle"
             self.subclass_history: list[str] = [initial_class]
             self.class_history: list[str] = ["vehicle"]
@@ -146,7 +146,7 @@ class TrackRecord:
         elif self.state == "lost":
             self.state = "confirmed"
 
-        if detected_class in ["car", "truck", "bus", "truck/bus", "three-wheeler"]:
+        if detected_class in ["car", "truck", "bus", "truck/bus", "three-wheeler", "auto-rickshaw"]:
             self.subclass_history.append(detected_class)
             if len(self.subclass_history) > 24:
                 self.subclass_history.pop(0)
@@ -473,7 +473,7 @@ class TrackingManager:
         new_foot_x = new_box.x + new_box.width / 2.0
         new_foot_y = new_box.y + new_box.height
         new_raw_class = det["class"]
-        new_tracking_class = "vehicle" if new_raw_class in ["car", "truck", "bus"] else new_raw_class
+        new_tracking_class = "vehicle" if new_raw_class in ["car", "truck", "bus", "truck/bus", "three-wheeler", "auto-rickshaw"] else new_raw_class
         new_hist = getattr(det.get("appearance"), "colorHist", None)
 
         best_id = None

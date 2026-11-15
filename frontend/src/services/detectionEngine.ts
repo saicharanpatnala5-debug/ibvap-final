@@ -1114,8 +1114,10 @@ export class ObjectTracker {
         const isCompatible =
           track.isProvisional ||
           track.class === det.class ||
-          (['car', 'truck', 'bus'].includes(track.class) &&
-            ['car', 'truck', 'bus'].includes(det.class));
+          (['car', 'truck', 'bus', 'truck/bus', 'three-wheeler', 'auto-rickshaw'].includes(track.class) &&
+            ['car', 'truck', 'bus', 'truck/bus', 'three-wheeler', 'auto-rickshaw'].includes(det.class)) ||
+          (['motorcycle', 'bicycle', 'two-wheeler'].includes(track.class) &&
+            ['motorcycle', 'bicycle', 'two-wheeler'].includes(det.class));
         if (!isCompatible) continue;
 
         const iou = calculateIoU(track.bbox, det.bbox);
@@ -1124,15 +1126,26 @@ export class ObjectTracker {
 
         // Linear velocity projection to predicted centroid
         const dtSec = Math.min(1.0, Math.max(0.05, (timestamp - track.lastSeenTimestamp) / 1000));
-        const vx = track.velocity > 5 ? (track.direction.includes('East') ? 0.04 : track.direction.includes('West') ? -0.04 : 0) : 0;
-        const vy = track.velocity > 5 ? (track.direction.includes('South') ? 0.04 : track.direction.includes('North') ? -0.04 : 0) : 0;
+        let vx = 0;
+        let vy = 0;
+        if (track.trajectory.length >= 2) {
+          const tLen = track.trajectory.length;
+          const pLast = track.trajectory[tLen - 1];
+          const pPrev = track.trajectory[tLen - 2];
+          const segDt = Math.max(0.03, (pLast.timestamp - pPrev.timestamp) / 1000);
+          vx = (pLast.x - pPrev.x) / segDt;
+          vy = (pLast.y - pPrev.y) / segDt;
+        } else if (track.velocity > 5) {
+          vx = track.direction.includes('East') ? 0.08 : track.direction.includes('West') ? -0.08 : 0;
+          vy = track.direction.includes('South') ? 0.08 : track.direction.includes('North') ? -0.08 : 0;
+        }
         const predCentroid = { x: centA.x + vx * dtSec, y: centA.y + vy * dtSec };
 
         const dist = Math.hypot(predCentroid.x - centB.x, predCentroid.y - centB.y);
         const appSim = calculateAppearanceSimilarity(track.appearance, det.appearance);
 
         // Combined matching score with appearance signature to prevent ID switching
-        const matchScore = iou * 0.45 + (1 - Math.min(1, dist / 0.25)) * 0.35 + appSim * 0.20;
+        const matchScore = iou * 0.45 + (1 - Math.min(1, dist / 0.35)) * 0.35 + appSim * 0.20;
 
         if (matchScore > 0.20 && matchScore > highestScore) {
           highestScore = matchScore;
@@ -1216,8 +1229,10 @@ export class ObjectTracker {
         const inactive = this.inactiveTracks[iIdx];
         const isCompatible =
           inactive.class === det.class ||
-          (['car', 'truck', 'bus'].includes(inactive.class) &&
-            ['car', 'truck', 'bus'].includes(det.class));
+          (['car', 'truck', 'bus', 'truck/bus', 'three-wheeler', 'auto-rickshaw'].includes(inactive.class) &&
+            ['car', 'truck', 'bus', 'truck/bus', 'three-wheeler', 'auto-rickshaw'].includes(det.class)) ||
+          (['motorcycle', 'bicycle', 'two-wheeler'].includes(inactive.class) &&
+            ['motorcycle', 'bicycle', 'two-wheeler'].includes(det.class));
         if (!isCompatible) continue;
 
         const centA = getCentroid(inactive.bbox);

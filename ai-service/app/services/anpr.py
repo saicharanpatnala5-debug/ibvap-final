@@ -280,6 +280,7 @@ class FastALPREngine:
 
     def __init__(self):
         self._alpr = None
+        self._rapid_ocr = None
         self._load_models()
 
     def _load_models(self):
@@ -347,8 +348,8 @@ class FastALPREngine:
                     pw = x2 - x1
                     ph = y2 - y1
 
-                    # Plate box too small / low-res to resolve characters
-                    if pw < 30 or ph < 14:
+                    # Distance gating: Enforced on DETECTED PLATE size
+                    if pw < 35 or ph < 12:
                         return ANPRResult(
                             plateText="",
                             confidence=round(float(best.detection.confidence) * 100, 1),
@@ -362,9 +363,9 @@ class FastALPREngine:
                             processedAt=now_ms,
                         )
 
-                    # Extract tight plate crop with 6% horizontal and 8% vertical padding
-                    pad_x = max(2, int(pw * 0.06))
-                    pad_y = max(2, int(ph * 0.08))
+                    # Extract tight plate crop with 8% horizontal and 10% vertical padding
+                    pad_x = max(2, int(pw * 0.08))
+                    pad_y = max(2, int(ph * 0.10))
                     px1 = max(0, x1 - pad_x)
                     py1 = max(0, y1 - pad_y)
                     px2 = min(vw, x2 + pad_x)
@@ -372,44 +373,92 @@ class FastALPREngine:
                     tight_plate = vehicle_crop_bgr[py1:py2, px1:px2]
                     plate_b64 = bgr_to_base64_jpeg(tight_plate, quality=90)
 
-                    raw_text = best.ocr.text if best.ocr else ""
-                    ocr_conf = (
+                    # Preprocess with 3x upscaling, CLAHE, unsharp mask, and deskewing
+                    prep = preprocess_plate_crop(tight_plate)
+
+                    # 1. Fast-ALPR OCR
+                    fast_raw = best.ocr.text if best.ocr else ""
+                    fast_conf = (
                         float(np.mean(best.ocr.confidence) * 100.0)
                         if best.ocr and best.ocr.confidence
                         else float(best.detection.confidence) * 100.0
                     )
+                    fast_cleaned = PlateValidator.clean_text(fast_raw)
+                    fast_corr = PlateValidator.position_aware_correction(fast_cleaned)
+                    fast_valid, fast_type, fast_status = PlateValidator.validate(fast_corr)
 
-                    cleaned = PlateValidator.clean_text(raw_text)
-                    corrected = PlateValidator.position_aware_correction(cleaned)
-                    is_valid, ftype, vstatus = PlateValidator.validate(corrected)
+                    # 2. RapidOCR on enhanced preprocessed crop
+                    rapid_raw = ""
+                    rapid_conf = 0.0
+                    try:
+                        if self._rapid_ocr is None:
+                            from rapidocr_onnxruntime import RapidOCR
+                            self._rapid_ocr = RapidOCR()
+                        ocr_out, _ = self._rapid_ocr(prep)
+                        if ocr_out and len(ocr_out) > 0:
+                            rapid_raw = ocr_out[0][1]
+                            rapid_conf = float(ocr_out[0][2]) * 100.0
+                    except Exception:
+                        pass
 
-                    # Per-character confidence check:
-                    # Enforce that all recognized characters meet minimum confidence threshold.
-                    if best.ocr and best.ocr.confidence:
-                        raw_char_confs = [
-                            float(c) * 100.0 if float(c) <= 1.0 else float(c)
-                            for c in best.ocr.confidence
-                        ]
-                        if raw_char_confs:
-                            min_char_conf = min(raw_char_confs)
-                            avg_char_conf = float(np.mean(raw_char_confs))
-                            if is_valid and (min_char_conf < 55.0 or avg_char_conf < 70.0):
-                                is_valid = False
-                                vstatus = "Low character confidence - needs review"
+                    rapid_cleaned = PlateValidator.clean_text(rapid_raw)
+                    rapid_corr = PlateValidator.position_aware_correction(rapid_cleaned)
+                    rapid_valid, rapid_type, rapid_status = PlateValidator.validate(rapid_corr)
 
-                    is_readable = bool(corrected and len(corrected) >= 6)
-                    if not is_readable:
-                        vstatus = "Unreadable"
+                    # 3. Decision & Fusion
+                    if rapid_valid and not fast_valid:
+                        chosen_text = rapid_corr
+                        chosen_conf = rapid_conf
+                        is_valid = True
+                        ftype = rapid_type
+                        vstatus = "Valid format"
+                    elif fast_valid and not rapid_valid:
+                        chosen_text = fast_corr
+                        chosen_conf = fast_conf
+                        is_valid = True
+                        ftype = fast_type
+                        vstatus = "Valid format"
+                    elif fast_valid and rapid_valid:
+                        if rapid_conf >= fast_conf:
+                            chosen_text = rapid_corr
+                            chosen_conf = rapid_conf
+                            ftype = rapid_type
+                        else:
+                            chosen_text = fast_corr
+                            chosen_conf = fast_conf
+                            ftype = fast_type
+                        is_valid = True
+                        vstatus = "Valid format"
+                    else:
+                        # Neither passed strict regex: provide best-guess text for human review
+                        if len(rapid_corr) >= len(fast_corr) and len(rapid_corr) >= 4:
+                            chosen_text = rapid_corr
+                            chosen_conf = rapid_conf
+                        elif len(fast_corr) >= 4:
+                            chosen_text = fast_corr
+                            chosen_conf = fast_conf
+                        else:
+                            chosen_text = rapid_corr or fast_corr
+                            chosen_conf = max(rapid_conf, fast_conf)
+
+                        is_valid = False
+                        ftype = "invalid"
+                        if chosen_text and len(chosen_text) >= 4:
+                            vstatus = "Needs review"
+                        else:
+                            vstatus = "Unreadable"
+
+                    is_readable = bool(chosen_text and len(chosen_text) >= 4)
 
                     return ANPRResult(
-                        plateText=corrected if is_readable else "",
-                        confidence=round(ocr_conf, 1),
+                        plateText=chosen_text if is_readable else "",
+                        confidence=round(chosen_conf, 1),
                         isReadable=is_readable,
                         isValidFormat=is_valid,
                         formatType=ftype,
                         validationStatus=vstatus,
-                        stateCode=corrected[:2] if is_valid and ftype == "standard" else None,
-                        plateNumber=corrected if is_readable else "",
+                        stateCode=chosen_text[:2] if is_valid and ftype == "standard" else None,
+                        plateNumber=chosen_text if is_readable else "",
                         cropDataUrl=plate_b64,
                         plateCropDataUrl=plate_b64,
                         vehicleCropDataUrl=veh_crop_b64,
@@ -447,6 +496,7 @@ class PlateVotingTracker:
         self.max_crops_kept = max_crops_kept
         self.readings_history: Dict[int, List[dict]] = {}
         self.confirmed_plates: Dict[int, ANPRResult] = {}
+        self.best_guess_plates: Dict[int, ANPRResult] = {}
         self.gated_statuses: Dict[int, ANPRResult] = {}
 
     def set_distance_gated(self, track_id: int, result: ANPRResult):
@@ -464,6 +514,17 @@ class PlateVotingTracker:
 
         if not reading.plateText:
             return self.get_confirmed(track_id)
+
+        # Retain best-guess reading with highest sharpness/confidence for fallback display
+        if track_id not in self.best_guess_plates:
+            self.best_guess_plates[track_id] = reading
+        else:
+            curr_bg = self.best_guess_plates[track_id]
+            # Prioritize valid format, then higher confidence
+            if reading.isValidFormat and not curr_bg.isValidFormat:
+                self.best_guess_plates[track_id] = reading
+            elif reading.isValidFormat == curr_bg.isValidFormat and reading.confidence > curr_bg.confidence:
+                self.best_guess_plates[track_id] = reading
 
         history = self.readings_history.setdefault(track_id, [])
         history.append({
@@ -520,13 +581,15 @@ class PlateVotingTracker:
             if is_valid:
                 self.confirmed_plates[track_id] = final_result
                 return final_result
+            else:
+                self.best_guess_plates[track_id] = final_result
 
         # Immediate confirmation for high-confidence already-valid plate
         if reading.isValidFormat and reading.confidence >= 80.0:
             self.confirmed_plates[track_id] = reading
             return reading
 
-        return self.get_confirmed(track_id)
+        return self.confirmed_plates.get(track_id)
 
     def is_confirmed(self, track_id: int) -> bool:
         """Checks if plate has reached confirmation or is distance-gated."""
@@ -537,9 +600,17 @@ class PlateVotingTracker:
             return self.confirmed_plates[track_id]
         return self.gated_statuses.get(track_id)
 
+    def get_best_guess(self, track_id: int) -> Optional[ANPRResult]:
+        if track_id in self.confirmed_plates:
+            return self.confirmed_plates[track_id]
+        if track_id in self.best_guess_plates:
+            return self.best_guess_plates[track_id]
+        return self.gated_statuses.get(track_id)
+
     def reset(self):
         self.readings_history.clear()
         self.confirmed_plates.clear()
+        self.best_guess_plates.clear()
         self.gated_statuses.clear()
 
     def prune(self, active_track_ids: set[int]):
@@ -547,6 +618,7 @@ class PlateVotingTracker:
         for t in stale:
             self.readings_history.pop(t, None)
             self.confirmed_plates.pop(t, None)
+            self.best_guess_plates.pop(t, None)
             self.gated_statuses.pop(t, None)
 
 

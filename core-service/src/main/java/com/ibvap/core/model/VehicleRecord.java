@@ -21,11 +21,15 @@ public class VehicleRecord {
     private String vehicleCropBase64;
     private Instant recordedAt;
     private String notes;
+    private String schemaVersion = "v8.0.0";
+    private String runId = "r8-release-20261115";
 
     public VehicleRecord() {
         this.recordedAt = Instant.now();
         this.status = "UNREGISTERED";
         this.confidence = 1.0;
+        this.schemaVersion = "v8.0.0";
+        this.runId = "r8-release-20261115";
     }
 
     public VehicleRecord(String plateNumber, String status, String owner, String state, String vehicleType, String make, String model) {
@@ -98,4 +102,10 @@ public class VehicleRecord {
 
     public String getNotes() { return notes; }
     public void setNotes(String notes) { this.notes = notes; }
+
+    public String getSchemaVersion() { return schemaVersion; }
+    public void setSchemaVersion(String schemaVersion) { this.schemaVersion = schemaVersion; }
+
+    public String getRunId() { return runId; }
+    public void setRunId(String runId) { this.runId = runId; }
 }

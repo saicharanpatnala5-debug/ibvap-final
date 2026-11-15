@@ -13,11 +13,15 @@ public class AlertIncident {
     private Instant timestamp;
     private String status;    // OPEN, ACKNOWLEDGED, RESOLVED
     private Map<String, Object> metadata;
+    private String schemaVersion = "v8.0.0";
+    private String runId = "r8-release-20261115";
 
     public AlertIncident() {
         this.timestamp = Instant.now();
         this.status = "OPEN";
         this.severity = "MEDIUM";
+        this.schemaVersion = "v8.0.0";
+        this.runId = "r8-release-20261115";
     }
 
     public AlertIncident(String id, String cameraId, String cameraName, String severity, String type, String description) {
@@ -56,4 +60,10 @@ public class AlertIncident {
 
     public Map<String, Object> getMetadata() { return metadata; }
     public void setMetadata(Map<String, Object> metadata) { this.metadata = metadata; }
+
+    public String getSchemaVersion() { return schemaVersion; }
+    public void setSchemaVersion(String schemaVersion) { this.schemaVersion = schemaVersion; }
+
+    public String getRunId() { return runId; }
+    public void setRunId(String runId) { this.runId = runId; }
 }

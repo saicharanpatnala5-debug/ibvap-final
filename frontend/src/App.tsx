@@ -4,6 +4,8 @@ import {
   AlertAuditEntry,
   AlertIncident,
   CameraFeedItem,
+  PlateStatus,
+  PlateRegistryRecord,
 } from './types';
 import { Navbar, ActiveTab } from './components/Navbar';
 import { CameraGrid } from './components/CameraGrid';
@@ -18,7 +20,6 @@ import { AICommandCenter } from './components/AICommandCenter';
 import { CommandBar } from './components/CommandBar';
 import { FootageIntelligenceView } from './components/FootageIntelligence/FootageIntelligenceView';
 import { ANPRRegistryView } from './components/ANPRRegistryView';
-import { PlateRegistryRecord } from './types';
 import { lookupVehicleDossier, determinePlateStatus } from './services/anprEngine';
 import {
   loadStoredCameras,
@@ -202,11 +203,28 @@ export default function App() {
     const isDistanceGated =
       plateInfo.formatType === 'distance_gated' ||
       plateInfo.validationStatus === 'Plate not legible at this distance';
-    const statusInfo = isDistanceGated
-      ? { status: 'Plate not legible at this distance' as const, isValid: false, formatType: 'distance_gated' as const }
-      : determinePlateStatus(cleanPlate, plateInfo.confidence);
-    const status = statusInfo.status;
-    const dossier = status === 'Valid format' ? lookupVehicleDossier(cleanPlate) : null;
+
+    let status: PlateStatus = 'Unreadable';
+    let isValid = false;
+    let formatType: any = plateInfo.formatType || 'invalid';
+
+    if (isDistanceGated) {
+      status = 'Plate not legible at this distance';
+      formatType = 'distance_gated';
+    } else if (plateInfo.formatType === 'standard' || plateInfo.formatType === 'bharat') {
+      status = 'Valid format';
+      isValid = true;
+    } else if (plateInfo.validationStatus?.includes('needs review') || cleanPlate.length >= 4) {
+      status = 'Low confidence - needs review';
+      isValid = false;
+    } else {
+      const statusInfo = determinePlateStatus(cleanPlate, plateInfo.confidence);
+      status = statusInfo.status;
+      isValid = statusInfo.isValidFormat;
+      formatType = statusInfo.formatType || 'invalid';
+    }
+
+    const dossier = isValid ? lookupVehicleDossier(cleanPlate) : null;
     const cam = cameras.find((c) => c.id === plateInfo.cameraId);
 
     setPlateRecords((prev) => {
@@ -220,11 +238,11 @@ export default function App() {
 
       const newRecord: PlateRegistryRecord = {
         id: `rec-${cleanPlate || 'plate'}-${Date.now()}-${Math.random().toString(36).slice(2, 6)}`,
-        plateNumber: isDistanceGated ? 'UNRESOLVED' : cleanPlate,
+        plateNumber: isDistanceGated ? 'UNRESOLVED' : (cleanPlate || 'UNREADABLE'),
         status,
         formatValidationStatus: plateInfo.validationStatus || status,
-        isValidFormat: status === 'Valid format',
-        formatType: (plateInfo.formatType || statusInfo.formatType || 'invalid') as any,
+        isValidFormat: isValid,
+        formatType,
         confidence: plateInfo.confidence,
         cameraId: plateInfo.cameraId,
         cameraName: plateInfo.cameraName || cam?.name || 'Surveillance Node',

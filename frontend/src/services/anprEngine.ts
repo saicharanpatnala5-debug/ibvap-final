@@ -298,8 +298,15 @@ export function sanitizePlateText(rawText: string, ocrConf: number): PlateValida
     }
   }
 
-  // If validation fails after all correction attempts, output "Unreadable"
-  return unreadableResult;
+  // If validation fails after all correction attempts, return best-guess text marked for operator review
+  return {
+    plateText: clean,
+    confidence: ocrConf,
+    isReadable: clean.length >= 4,
+    isValidFormat: false,
+    formatType: 'invalid',
+    validationStatus: 'Unreadable / invalid format',
+  };
 }
 
 /**
@@ -676,7 +683,7 @@ export function determinePlateStatus(plateText: string, confidence: number): {
   cleanPlate: string;
 } {
   const clean = (plateText || '').toUpperCase().replace(/[^A-Z0-9]/g, '');
-  if (!clean || clean.length < 5 || clean.includes('UNREADABLE')) {
+  if (!clean || clean.length < 8 || clean.includes('UNREADABLE') || confidence < ANPR_CONF_MIN) {
     return {
       status: 'Unreadable',
       isValidFormat: false,

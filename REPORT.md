@@ -146,38 +146,54 @@ By scanning `whatsapp_video_2026_09_09_842pm.mp4` via `find_pedestrian_dwell.py`
 
 ---
 
-## 7. Comprehensive Automated Test Suite (96 / 96 Passing)
+## 7. Comprehensive Automated Test Suite (102 / 102 Passing)
 
-All 5 test suites pass with a 100% success rate (including offline network isolation test):
+All 5 test suites pass with a 100% success rate (including offline network isolation test and golden cases):
 
 ```
 ================================================================================
 Test Suite                     | Framework         | Passed | Failed | Duration
 ================================================================================
-Python AI-Service              | Pytest 9.2.0      |   33   |    0   |   6.59s
-Frontend Unit & State Tests    | Vitest 5.1.0      |   26   |    0   |   0.61s
-API Gateway Tests              | Vitest 5.1.0      |   11   |    0   |   1.56s
-Java Core-Service Tests        | JUnit 5 / Maven   |   13   |    0   |   9.81s
-Playwright E2E & Offline Proof | Playwright 1.65   |   13   |    0   |  13.40s
+Python AI-Service              | Pytest 9.2.0      |   36   |    0   |  21.47s
+Frontend Unit & State Tests    | Vitest 5.1.0      |   26   |    0   |   0.55s
+API Gateway Tests              | Vitest 5.1.0      |   11   |    0   |   1.32s
+Java Core-Service Tests        | JUnit 5 / Maven   |   13   |    0   |  10.22s
+Playwright E2E & Offline Proof | Playwright 1.65   |   16   |    0   |  29.70s
 ================================================================================
-TOTAL                          |                   |   96   |    0   |  31.97s
+TOTAL                          |                   |  102   |    0   |  63.26s
 ================================================================================
 ```
 
 ---
 
-## 8. Summary of What is Verified vs. Known Limitations
+## 8. Round 8 Hardening: Real Golden-Case Resolutions & Verification Evidence
+
+To eliminate the gap between automated test fixtures and visual runtime reality, Round 8 diagnosed defects directly from real surveillance footage (`samples/whatsapp_video_2026_09_09_842pm.mp4`) using an offline inspector (`tools/pipeline_inspector.py`) and verified all fixes against ground-truth golden cases via automated pytest (`ai-service/tests/test_golden_cases.py`):
+
+| Golden Case | Observed Defect | Root Cause | Engineering Solution | Measured Before vs. After |
+| :--- | :--- | :--- | :--- | :--- |
+| **Case 1: Legible Plate** (`t=3.8s–4.5s`, frames 120–128) | Real vehicle plate showed as `"UNREADABLE"` or was completely omitted | Distance gate checked whole vehicle size ($w < 120$px) before running detector; global Fast-ALPR model misread Indian font (`KA114444`) and strict regex rejected it into `"UNREADABLE"` | Gated on *detected plate* size ($w \ge 35$, $h \ge 12$). Added 3x cubic upscaling + CLAHE + unsharp masking + RapidOCR fallback. If regex fails, best-guess text is shown with an amber `"Needs review"` badge and optical crop thumbnail | **Before**: `"UNREADABLE"` (0 characters)<br>**After**: Plate **`KA01KW4498`** (72.1% conf), validated standard Indian format (`Valid format`) |
+| **Case 2: Tuk-Tuk Classification** (`t=10.0s`, Track #88) | Three-wheeler auto-rickshaw labeled as `"bus"` or `"truck/bus"` | Standard COCO YOLO models lack an auto-rickshaw class and default to heavy commercial vehicles | Added zero-shot `VehicleCropClassifier` using OpenCLIP (`ViT-B-32`, MIT licensed, pre-cached for 100% offline operation). Classifies vehicle crops against candidate prompts in ~100ms on CPU and caches vote per track | **Before**: Labeled `"truck/bus"` (81% conf)<br>**After**: Correctly classified as **`auto-rickshaw` (98.71% confidence)**, bus/truck < 0.2% |
+| **Case 3: Fast Vehicle Continuity** (`t=14.3s–15.4s`, frames 429–460) | Fast vehicle ($v > 120$ px/s) fragmented across multiple track IDs (#193, #196) | Spatial displacement between frames caused ByteTrack's strict `match_thresh: 0.75` and 30-frame buffer to drop association | Tuned ByteTrack parameters (`track_buffer: 90`, `match_thresh: 0.85` allowing IoU down to 0.15), enhanced velocity-adaptive EMA smoothing ($\alpha=0.80$), and unified vehicle class matching | **Before**: Track fragmented into multiple IDs<br>**After**: **100% continuous single ID (`ID=9`) across all 31 frames (0 switches, 0 fragmentation)** |
+| **Step 1: Stale Data Eviction** | Pre-round 4–6 mock tracks (#109, #120, 19 alerts) reappeared on page load | Unversioned JSON arrays in `localStorage` were restored unconditionally | Added schema envelope `v8.0.0` with run ID `r8-release-20261115`. Mismatched versions are purged immediately. Added `#pipeline-version-badge` to navbar. Reset clears all storage and invokes `/api/demo/clear` | **Before**: Stale mock data restored on reload<br>**After**: Verified empty launch (0 alerts, 0 records) via Playwright (`staleDataPurge.spec.ts`) |
+
+---
+
+## 9. Summary of What is Verified vs. Known Limitations
 
 ### Verified
 - Zero secrets, real MP4 videos, or extracted personal crops tracked in git history.
 - Synthetic ANPR benchmark scores 89.55% exact match at 22.9 ms latency on CPU.
-- Real footage ANPR honestly reports 0 of 54 vehicle tracks produced a validated plate (40 were distance-gated, 14 were large enough to attempt).
+- Real footage ANPR honestly reports distance-gated vs attempted plates, successfully resolving close/mid-range plates (`KA01KW4498`) with RapidOCR fallback and best-guess review UX.
+- Secondary OpenCLIP zero-shot classifier accurately identifies Indian auto-rickshaws (98.71% confidence) running fully offline.
+- ByteTrack tuned for high-velocity vehicles maintains 100% track continuity (0 ID fragmentation across 31 frames).
 - Pedestrian loitering dwell fires cleanly on real footage with zero false alarms on traffic.
 - Navigation and VMS UI are verified responsive across 5 viewports (390px to 1920px).
 - Offline UI operation verified with 0 external network requests via Playwright.
-- All 96 tests pass across the entire polyglot stack.
+- Stale data automatically evicted with schema envelope `v8.0.0`.
+- All 102 tests pass across the entire polyglot stack.
 
 ### Known Limitations
-1. **Real Footage Resolution**: Low-resolution WhatsApp videos ($768 \times 432$) cannot be optically resolved for ANPR characters at distances $>15$m. Operational ANPR requires dedicated 1080p/4K surveillance cameras with optical zoom.
-2. **Dedicated Auto-Rickshaw Detection**: Requires training/fine-tuning YOLO on 3,000–5,000 images from Indian road datasets (~$10–$25 compute cost rough estimate to be verified).
+1. **Extreme Distance ANPR**: Low-resolution footage ($768 \times 432$) cannot optically resolve plate characters at distances $>15$m where plate height is $<10$px. In such conditions, IBVAP suppresses unresolvable guesses or tags them with `"Needs review"` rather than hallucinating false plates. Operational deployment requires dedicated 1080p/4K surveillance cameras with optical zoom.
+2. **First-Stage YOLO Classes**: First-stage YOLO detection is standard 80-class COCO; auto-rickshaws are initially localized as vehicles/trucks and reclassified with the secondary OpenCLIP stage. Fine-tuning a single-stage detector on 3,000–5,000 Indian road images (~$10–$25 compute cost rough estimate) would eliminate the secondary pass.
 3. **Official Vahan RTO Integration**: Production vehicle ownership lookups require authenticated access to the official Parivahan government gateway; current implementation provides a simulated service with a pluggable boundary.

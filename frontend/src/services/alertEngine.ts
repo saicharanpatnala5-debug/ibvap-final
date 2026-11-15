@@ -128,8 +128,8 @@ export class AlertEngine {
           const mappedClass = track.class;
           const isAllowed =
             zone.alertOnClasses.includes(mappedClass) ||
-            (mappedClass === 'two-wheeler' && (zone.alertOnClasses.includes('motorcycle') || zone.alertOnClasses.includes('bicycle'))) ||
-            (mappedClass === 'three-wheeler' && zone.alertOnClasses.includes('car')) ||
+            (mappedClass === 'two-wheeler' && (zone.alertOnClasses.includes('motorcycle') || zone.alertOnClasses.includes('bicycle') || zone.alertOnClasses.includes('two-wheeler'))) ||
+            ((mappedClass === 'three-wheeler' || mappedClass === 'auto-rickshaw') && (zone.alertOnClasses.includes('car') || zone.alertOnClasses.includes('auto-rickshaw') || zone.alertOnClasses.includes('three-wheeler'))) ||
             (mappedClass === 'pedestrian' && zone.alertOnClasses.includes('person'));
           if (!isAllowed) continue;
         }

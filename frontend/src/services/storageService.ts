@@ -5,6 +5,16 @@ import {
   AIChatMessage,
 } from '../types';
 
+export const PIPELINE_SCHEMA_VERSION = 'v8.0.0';
+export const PIPELINE_RUN_ID = 'r8-release-20261115';
+
+export interface StorageEnvelope<T> {
+  schemaVersion: string;
+  runId: string;
+  savedAt: number;
+  data: T;
+}
+
 export interface PlatformEventLogEntry {
   id: string;
   timestamp: number;
@@ -16,21 +26,74 @@ export interface PlatformEventLogEntry {
   details?: string;
 }
 
-const STORAGE_KEYS = {
-  CAMERAS: 'ibvap_cameras_v1',
-  ALERTS: 'ibvap_alerts_v1',
-  PLATES: 'ibvap_plates_v1',
-  CHAT: 'ibvap_chat_history_v1',
-  EVENT_LOG: 'ibvap_event_log_v1',
+export const STORAGE_KEYS = {
+  CAMERAS: 'ibvap_cameras_v8',
+  ALERTS: 'ibvap_alerts_v8',
+  PLATES: 'ibvap_plates_v8',
+  CHAT: 'ibvap_chat_history_v8',
+  EVENT_LOG: 'ibvap_event_log_v8',
 };
 
-// Safe JSON parse helper
-function safeJsonParse<T>(raw: string | null, fallback: T): T {
+// Legacy unversioned storage keys that must be discarded to eliminate stale data
+const LEGACY_STORAGE_KEYS = [
+  'ibvap_cameras_v1',
+  'ibvap_alerts_v1',
+  'ibvap_plates_v1',
+  'ibvap_chat_history_v1',
+  'ibvap_event_log_v1',
+  'ibvap_cameras',
+  'ibvap_alerts',
+  'ibvap_plates',
+];
+
+// Purge legacy unversioned keys on initialization
+if (typeof window !== 'undefined') {
+  try {
+    LEGACY_STORAGE_KEYS.forEach((k) => localStorage.removeItem(k));
+  } catch {
+    // ignore
+  }
+}
+
+// Version-validated envelope serialization
+function wrapWithEnvelope<T>(data: T): string {
+  const envelope: StorageEnvelope<T> = {
+    schemaVersion: PIPELINE_SCHEMA_VERSION,
+    runId: PIPELINE_RUN_ID,
+    savedAt: Date.now(),
+    data,
+  };
+  return JSON.stringify(envelope);
+}
+
+// Version-validated JSON parser
+function safeJsonParseVersioned<T>(raw: string | null, fallback: T, keyName?: string): T {
   if (!raw) return fallback;
   try {
-    return JSON.parse(raw) as T;
+    const parsed = JSON.parse(raw);
+    if (parsed && typeof parsed === 'object' && 'schemaVersion' in parsed && 'data' in parsed) {
+      if (parsed.schemaVersion !== PIPELINE_SCHEMA_VERSION) {
+        console.warn(
+          `[IBVAP Storage] Version mismatch for ${keyName || 'record'}: stored=${parsed.schemaVersion}, required=${PIPELINE_SCHEMA_VERSION}. Purging stale record.`
+        );
+        if (typeof window !== 'undefined' && keyName) {
+          localStorage.removeItem(keyName);
+        }
+        return fallback;
+      }
+      return parsed.data as T;
+    }
+    // If raw payload is legacy unversioned JSON (e.g. raw array), discard immediately
+    console.warn(`[IBVAP Storage] Discarding legacy unversioned data for ${keyName || 'key'}.`);
+    if (typeof window !== 'undefined' && keyName) {
+      localStorage.removeItem(keyName);
+    }
+    return fallback;
   } catch (err) {
     console.warn('[IBVAP Storage] Failed to parse key from localStorage:', err);
+    if (typeof window !== 'undefined' && keyName) {
+      localStorage.removeItem(keyName);
+    }
     return fallback;
   }
 }
@@ -39,27 +102,36 @@ function safeJsonParse<T>(raw: string | null, fallback: T): T {
 export function cleanCameraName(rawName: string, fallbackIndex = 1): string {
   if (!rawName || typeof rawName !== 'string') return `Camera ${fallbackIndex}`;
   let clean = rawName.trim();
-  // Strip file extensions
   clean = clean.replace(/\.(mp4|avi|mov|mkv|webm|m4v|flv|wmv)$/i, '');
-  // Strip common camera/phone boilerplate prefixes
   clean = clean.replace(/^(WhatsApp\s*Video|VID|REC|CCTV|DVR|MOV|DSC|CLIP)[-_\s]*/i, '');
-  // Strip timestamps like "at 8.42.08 PM" or "8.42.08 PM"
   clean = clean.replace(/\bat\s*\d{1,2}[.:]\d{2}[.:]\d{2}\s*(?:AM|PM)?/i, '');
   clean = clean.replace(/\b\d{1,2}[.:]\d{2}[.:]\d{2}\s*(?:AM|PM)?/i, '');
-  // Strip date formats like "2026-09-09" or "2026_09_09" or "20260909"
   clean = clean.replace(/\b\d{4}[-_.]\d{2}[-_.]\d{2}\b/g, '');
   clean = clean.replace(/\b\d{6,14}\b/g, '');
   clean = clean.replace(/[-_]+/g, ' ').trim();
-  // If only digits or punctuation remain, or string is too short, default to Camera N
   if (!clean || clean.length < 2 || !/[a-zA-Z]/.test(clean)) {
     return `Camera ${fallbackIndex}`;
   }
   return clean;
 }
 
+/**
+ * 1-Click Platform Reset:
+ * Clears ALL browser storage (localStorage and sessionStorage)
+ * and resets backend core-service tables via /api/demo/clear.
+ */
 export function clearStoredPlatformData() {
   if (typeof window === 'undefined') return;
-  Object.values(STORAGE_KEYS).forEach((key) => localStorage.removeItem(key));
+  try {
+    localStorage.clear();
+    sessionStorage.clear();
+  } catch (err) {
+    console.warn('[IBVAP Storage] Error clearing web storage:', err);
+  }
+  // Clear backend tables
+  fetch('/api/demo/clear', { method: 'POST' }).catch((err) => {
+    console.warn('[IBVAP Storage] Failed to clear core-service tables:', err);
+  });
 }
 
 // -------------------------------------------------------------
@@ -68,8 +140,11 @@ export function clearStoredPlatformData() {
 
 export function loadStoredCameras(): CameraFeedItem[] {
   if (typeof window === 'undefined') return [];
-  const stored = safeJsonParse<CameraFeedItem[]>(localStorage.getItem(STORAGE_KEYS.CAMERAS), []);
-  // Filter out dead file cameras that had non-persisted blob URLs with no source
+  const stored = safeJsonParseVersioned<CameraFeedItem[]>(
+    localStorage.getItem(STORAGE_KEYS.CAMERAS),
+    [],
+    STORAGE_KEYS.CAMERAS
+  );
   const valid = stored.filter((c) => {
     if (c.sourceType === 'file' && (!c.sourceUrl || c.sourceUrl.trim() === '')) {
       return false;
@@ -85,13 +160,12 @@ export function loadStoredCameras(): CameraFeedItem[] {
 export function saveStoredCameras(cameras: CameraFeedItem[]) {
   if (typeof window === 'undefined') return;
   try {
-    // Retain only serializable data (avoid gigantic in-memory blob URLs if expired)
     const sanitized = cameras.slice(0, 20).map((c) => ({
       ...c,
       sourceUrl: c.sourceType === 'stream' ? c.sourceUrl : c.sourceUrl.startsWith('blob:') ? '' : c.sourceUrl,
-      status: (c.sourceType === 'file' && c.sourceUrl.startsWith('blob:')) ? 'paused' : c.status,
+      status: c.sourceType === 'file' && c.sourceUrl.startsWith('blob:') ? 'paused' : c.status,
     }));
-    localStorage.setItem(STORAGE_KEYS.CAMERAS, JSON.stringify(sanitized));
+    localStorage.setItem(STORAGE_KEYS.CAMERAS, wrapWithEnvelope(sanitized));
   } catch (err) {
     console.warn('[IBVAP Storage] Failed to save cameras:', err);
   }
@@ -103,18 +177,21 @@ export function saveStoredCameras(cameras: CameraFeedItem[]) {
 
 export function loadStoredAlerts(): AlertIncident[] {
   if (typeof window === 'undefined') return [];
-  return safeJsonParse<AlertIncident[]>(localStorage.getItem(STORAGE_KEYS.ALERTS), []);
+  return safeJsonParseVersioned<AlertIncident[]>(
+    localStorage.getItem(STORAGE_KEYS.ALERTS),
+    [],
+    STORAGE_KEYS.ALERTS
+  );
 }
 
 export function saveStoredAlerts(alerts: AlertIncident[], maxItems = 80) {
   if (typeof window === 'undefined') return;
   try {
-    // Truncate large snapshot data URLs in storage to prevent quota overflow
     const sanitized = alerts.slice(0, maxItems).map((a) => ({
       ...a,
       snapshotUrl: typeof a.snapshotUrl === 'string' && a.snapshotUrl.length > 50000 ? undefined : a.snapshotUrl,
     }));
-    localStorage.setItem(STORAGE_KEYS.ALERTS, JSON.stringify(sanitized));
+    localStorage.setItem(STORAGE_KEYS.ALERTS, wrapWithEnvelope(sanitized));
   } catch (err) {
     console.warn('[IBVAP Storage] Failed to save alerts:', err);
   }
@@ -126,7 +203,11 @@ export function saveStoredAlerts(alerts: AlertIncident[], maxItems = 80) {
 
 export function loadStoredPlateRecords(): PlateRegistryRecord[] {
   if (typeof window === 'undefined') return [];
-  return safeJsonParse<PlateRegistryRecord[]>(localStorage.getItem(STORAGE_KEYS.PLATES), []);
+  return safeJsonParseVersioned<PlateRegistryRecord[]>(
+    localStorage.getItem(STORAGE_KEYS.PLATES),
+    [],
+    STORAGE_KEYS.PLATES
+  );
 }
 
 export function saveStoredPlateRecords(records: PlateRegistryRecord[], maxItems = 80) {
@@ -136,7 +217,7 @@ export function saveStoredPlateRecords(records: PlateRegistryRecord[], maxItems 
       ...r,
       cropUrl: typeof r.cropUrl === 'string' && r.cropUrl.length > 50000 ? undefined : r.cropUrl,
     }));
-    localStorage.setItem(STORAGE_KEYS.PLATES, JSON.stringify(sanitized));
+    localStorage.setItem(STORAGE_KEYS.PLATES, wrapWithEnvelope(sanitized));
   } catch (err) {
     console.warn('[IBVAP Storage] Failed to save plate records:', err);
   }
@@ -148,7 +229,11 @@ export function saveStoredPlateRecords(records: PlateRegistryRecord[], maxItems 
 
 export function loadStoredChatHistory(): AIChatMessage[] {
   if (typeof window === 'undefined') return [];
-  return safeJsonParse<AIChatMessage[]>(localStorage.getItem(STORAGE_KEYS.CHAT), []);
+  return safeJsonParseVersioned<AIChatMessage[]>(
+    localStorage.getItem(STORAGE_KEYS.CHAT),
+    [],
+    STORAGE_KEYS.CHAT
+  );
 }
 
 export function saveStoredChatHistory(messages: AIChatMessage[], maxItems = 40) {
@@ -158,7 +243,7 @@ export function saveStoredChatHistory(messages: AIChatMessage[], maxItems = 40) 
       ...m,
       attachment: m.attachment ? { name: m.attachment.name, type: m.attachment.type, url: '' } : undefined,
     }));
-    localStorage.setItem(STORAGE_KEYS.CHAT, JSON.stringify(sanitized));
+    localStorage.setItem(STORAGE_KEYS.CHAT, wrapWithEnvelope(sanitized));
   } catch (err) {
     console.warn('[IBVAP Storage] Failed to save chat history:', err);
   }
@@ -170,7 +255,11 @@ export function saveStoredChatHistory(messages: AIChatMessage[], maxItems = 40) 
 
 export function loadStoredEventLog(): PlatformEventLogEntry[] {
   if (typeof window === 'undefined') return [];
-  return safeJsonParse<PlatformEventLogEntry[]>(localStorage.getItem(STORAGE_KEYS.EVENT_LOG), []);
+  return safeJsonParseVersioned<PlatformEventLogEntry[]>(
+    localStorage.getItem(STORAGE_KEYS.EVENT_LOG),
+    [],
+    STORAGE_KEYS.EVENT_LOG
+  );
 }
 
 export function appendStoredEvent(
@@ -185,7 +274,7 @@ export function appendStoredEvent(
       ...entry,
     };
     const updated = [newEntry, ...current].slice(0, maxEntries);
-    localStorage.setItem(STORAGE_KEYS.EVENT_LOG, JSON.stringify(updated));
+    localStorage.setItem(STORAGE_KEYS.EVENT_LOG, wrapWithEnvelope(updated));
     return updated;
   } catch (err) {
     console.warn('[IBVAP Storage] Failed to append event log:', err);

@@ -23,7 +23,12 @@ samples/debug_crops_round4/
 docs/anpr_review.html
 docs/detection_review.html
 docs/*review*.html
+docs/pipeline_inspector.html
+docs/*inspector*.html
 docs/demo_video/
+scratch/
+tools/*.json
+tools/tracks_*.json
 *.debug.mp4
 
 # Java / Spring Boot Artifacts

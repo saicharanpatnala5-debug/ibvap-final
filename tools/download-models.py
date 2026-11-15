@@ -59,7 +59,22 @@ def main():
     except Exception as e:
         log(f"Warning loading RapidOCR: {e}")
 
-    # 4. In-Browser Fallback Models (COCO-SSD MobileNet v1)
+    # 4. OpenCLIP ViT-B-32 Zero-Shot Secondary Classifier (for Auto-Rickshaws & fine-grained classes)
+    try:
+        import huggingface_hub
+        repo_id = "timm/vit_base_patch32_clip_224.openai"
+        filename = "open_clip_pytorch_model.bin"
+        cached = huggingface_hub.try_to_load_from_cache(repo_id, filename)
+        if cached and os.path.exists(cached):
+            log(f"✓ OpenCLIP ViT-B-32 checkpoint already cached ({cached}).")
+        else:
+            log("Downloading OpenCLIP ViT-B-32 checkpoint for secondary vehicle classification...")
+            downloaded = huggingface_hub.hf_hub_download(repo_id, filename)
+            log(f"✓ OpenCLIP ViT-B-32 checkpoint downloaded and cached: {downloaded}")
+    except Exception as e:
+        log(f"Warning caching OpenCLIP checkpoint: {e}")
+
+    # 5. In-Browser Fallback Models (COCO-SSD MobileNet v1)
     try:
         import urllib.request
         root_dir = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))

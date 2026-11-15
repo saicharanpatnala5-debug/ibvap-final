@@ -135,7 +135,7 @@ export const ANPRRegistryView: React.FC<ANPRRegistryViewProps> = ({
         </span>
       );
     }
-    if (status === 'Low confidence - needs review') {
+    if (status === 'Low confidence - needs review' || (status as string).includes('needs review') || (status as string).includes('Invalid format')) {
       return (
         <span className="inline-flex items-center gap-1 rounded bg-amber-950/80 border border-amber-700/60 px-2 py-0.5 text-[11px] font-semibold text-amber-300">
           <AlertTriangle className="h-3 w-3" />

@@ -16,6 +16,7 @@ from app.services.anpr import (
     ANPRResult,
 )
 from app.services.anpr_async import AsyncANPRWorker
+from app.services.classifier import VehicleCropClassifier
 from app.services.tracking_manager import TrackingManager, compute_direction_string
 
 # Standard border surveillance target classes
@@ -57,6 +58,9 @@ class SurveillanceDetector:
             max_queue_per_frame=2,
         )
         self._ocr = None
+        self.vehicle_classifier = VehicleCropClassifier.get_instance()
+        self.vehicle_class_votes: dict[int, list[str]] = {}
+        self.vehicle_class_confirmed: dict[int, str] = {}
         self.target_class_ids: list[int] = []
         self._init_model()
 
@@ -70,6 +74,8 @@ class SurveillanceDetector:
         self.tracking_manager.reset()
         self.plate_voter.reset()
         self.async_anpr.reset()
+        self.vehicle_class_votes.clear()
+        self.vehicle_class_confirmed.clear()
         if self.model is not None and hasattr(self.model, "predictor") and self.model.predictor is not None:
             if hasattr(self.model.predictor, "trackers"):
                 self.model.predictor.trackers.clear()
@@ -405,16 +411,45 @@ class SurveillanceDetector:
             frame_height=h,
         )
 
+        # Second-stage fine-grained vehicle re-classification (e.g. Tuk-tuk / Auto-rickshaw)
+        for ent in entities:
+            if ent.class_name in ["car", "truck/bus", "truck", "bus", "three-wheeler", "auto-rickshaw"]:
+                if ent.id in self.vehicle_class_confirmed:
+                    ent.class_name = self.vehicle_class_confirmed[ent.id]
+                elif ent.id in veh_crops_to_queue and len(self.vehicle_class_votes.get(ent.id, [])) < 3:
+                    crop = veh_crops_to_queue[ent.id]
+                    clf_res = self.vehicle_classifier.classify_crop(crop)
+                    if clf_res:
+                        pred_label, pred_conf = clf_res
+                        if pred_label == "auto-rickshaw" and pred_conf >= 0.70:
+                            self.vehicle_class_confirmed[ent.id] = "auto-rickshaw"
+                            ent.class_name = "auto-rickshaw"
+                            if ent.id in self.tracking_manager.tracks:
+                                self.tracking_manager.tracks[ent.id].subclass_history.append("auto-rickshaw")
+                        else:
+                            self.vehicle_class_votes.setdefault(ent.id, []).append(pred_label)
+                            if len(self.vehicle_class_votes[ent.id]) >= 2:
+                                from collections import Counter
+                                top_lbl, _ = Counter(self.vehicle_class_votes[ent.id]).most_common(1)[0]
+                                if top_lbl == "auto-rickshaw":
+                                    self.vehicle_class_confirmed[ent.id] = "auto-rickshaw"
+                                    ent.class_name = "auto-rickshaw"
+                                    if ent.id in self.tracking_manager.tracks:
+                                        self.tracking_manager.tracks[ent.id].subclass_history.append("auto-rickshaw")
+
         # Trigger ON-DEMAND ASYNC ANPR ONLY FOR CONFIRMED VEHICLES
         # Ceases immediately once a plate is confirmed via multi-frame voting
-        veh_classes = {"car", "truck/bus", "two-wheeler", "three-wheeler", "truck", "bus", "motorcycle"}
+        veh_classes = {"car", "truck/bus", "two-wheeler", "three-wheeler", "auto-rickshaw", "truck", "bus", "motorcycle"}
         queued_count = 0
         for ent in entities:
             if ent.class_name in veh_classes:
                 confirmed = self.plate_voter.get_confirmed(ent.id)
+                best_guess = self.plate_voter.get_best_guess(ent.id)
                 if confirmed:
                     ent.anpr = confirmed
                     plates.append(confirmed)
+                elif best_guess:
+                    ent.anpr = best_guess
                 elif ent.id in veh_crops_to_queue and queued_count < self.async_anpr.max_queue_per_frame:
                     submitted = self.async_anpr.submit_vehicle_crop(
                         track_id=ent.id,

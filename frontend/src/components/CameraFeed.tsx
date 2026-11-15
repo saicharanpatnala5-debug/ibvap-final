@@ -525,6 +525,7 @@ export const CameraFeed: React.FC<CameraFeedProps> = ({
           'bus',
           'two-wheeler',
           'three-wheeler',
+          'auto-rickshaw',
           'truck/bus',
           'motorcycle',
         ].includes(track.class);
@@ -851,11 +852,11 @@ export const CameraFeed: React.FC<CameraFeedProps> = ({
               const isProvisional = !!obj.isProvisional;
               const isPedestrian = obj.class === 'pedestrian' || obj.class === 'person';
               const isTwoWheeler = obj.class === 'two-wheeler' || obj.class === 'motorcycle' || obj.class === 'bicycle';
-              const isThreeWheeler = obj.class === 'three-wheeler';
+              const isThreeWheeler = obj.class === 'three-wheeler' || obj.class === 'auto-rickshaw';
               const isHeavy = obj.class === 'truck/bus' || obj.class === 'truck' || obj.class === 'bus';
               const isLuggage = ['suitcase', 'backpack', 'handbag'].includes(obj.class);
               const isPerson = isPedestrian;
-              const isVehicle = ['car', 'two-wheeler', 'three-wheeler', 'truck/bus', 'truck', 'bus', 'motorcycle'].includes(obj.class);
+              const isVehicle = ['car', 'two-wheeler', 'three-wheeler', 'auto-rickshaw', 'truck/bus', 'truck', 'bus', 'motorcycle'].includes(obj.class);
 
               const bx = Math.max(1, Math.min(cW - 4, Math.round(bbox.x * cW)));
               const by = Math.max(1, Math.min(cH - 4, Math.round(bbox.y * cH)));

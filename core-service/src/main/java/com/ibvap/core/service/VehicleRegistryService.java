@@ -11,6 +11,9 @@ import java.util.stream.Collectors;
 
 @Service
 public class VehicleRegistryService {
+    public static final String CURRENT_SCHEMA_VERSION = "v8.0.0";
+    public static final String CURRENT_RUN_ID = "r8-release-20261115";
+
     // Registered vehicles known in National/RTO registry (reference simulated DB)
     private final Map<String, VehicleRecord> registryDb = new ConcurrentHashMap<>();
 
@@ -33,12 +36,15 @@ public class VehicleRegistryService {
     }
 
     public List<VehicleRecord> getAllObserved() {
-        return new ArrayList<>(observedPlates.values());
+        return observedPlates.values().stream()
+                .filter(v -> CURRENT_SCHEMA_VERSION.equals(v.getSchemaVersion()))
+                .collect(Collectors.toList());
     }
 
     public Optional<VehicleRecord> getObservedByPlate(String plate) {
         String norm = normalize(plate);
-        return Optional.ofNullable(observedPlates.get(norm));
+        return Optional.ofNullable(observedPlates.get(norm))
+                .filter(v -> CURRENT_SCHEMA_VERSION.equals(v.getSchemaVersion()));
     }
 
     /**
@@ -46,6 +52,14 @@ public class VehicleRegistryService {
      * Enforces dossier integrity: UNREADABLE or LOW_CONFIDENCE plates never get attached to fake dossiers.
      */
     public VehicleRecord recordObservation(VehicleRecord observation) {
+        if (observation.getSchemaVersion() != null && !CURRENT_SCHEMA_VERSION.equals(observation.getSchemaVersion())) {
+            return null;
+        }
+        observation.setSchemaVersion(CURRENT_SCHEMA_VERSION);
+        if (observation.getRunId() == null) {
+            observation.setRunId(CURRENT_RUN_ID);
+        }
+
         String rawPlate = observation.getPlateNumber();
         String norm = normalize(rawPlate);
         observation.setNormalizedPlate(norm);
