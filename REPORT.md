@@ -263,4 +263,34 @@ Audited on `samples/whatsapp_video_2026_09_09_842pm.mp4` (1280x720, 30.0 fps, 53
 | **Unreadable / Obscured** | **17** | Vehicles viewed from side or obscured angles |
 
 - Complete visual review sheet generated at `docs/anpr_all_tracks_review.html` (gitignored).
-- Test suites: 47/47 Pytest, 31/31 Gateway Vitest, 26/26 Frontend Vitest, 13/13 Playwright tests passing.
+- Test suites: 47/47 Pytest, 40/40 Gateway Vitest, 26/26 Frontend Vitest, passing.
+
+---
+
+## 9. Copilot Provider Backup & Multi-Provider Architecture
+
+### Key Capabilities
+1. **Provider-Agnostic LLM Engine**:
+   - `LLM_PROVIDER`: `gemini` (default) | `openai_compatible` | `anthropic`.
+   - `LLM_API_KEY`: Universal credentials parameter.
+   - `LLM_BASE_URL`: Configurable base URL for any OpenAI-compatible provider (e.g. OpenAI, Moonshot/Kimi, Groq, OpenRouter, Ollama).
+   - `LLM_MODEL`: Target model identifier per provider (e.g. `gemini-3.8-flash`, `gpt-4o`, `moonshot-v1-8k`, `claude-3-5-sonnet-20241022`).
+2. **Backwards Compatibility**:
+   - Gemini remains the seamless default and continues to load with `GEMINI_API_KEY`.
+   - Provider-specific keys (`OPENAI_API_KEY`, `ANTHROPIC_API_KEY`) are automatically recognized.
+3. **Multimodal Vision & Graceful Fallback**:
+   - Image input is formatted specifically for each provider:
+     * **Gemini**: `inlineData` with JPEG base64 payload.
+     * **OpenAI-Compatible**: `image_url` data URL scheme.
+     * **Anthropic**: `source: { type: 'base64', media_type: 'image/jpeg', data: ... }`.
+   - If a model is text-only or returns an HTTP 400 error rejecting image input, the gateway automatically retries with text-only surveillance telemetry prepended with:
+     `"[Note: model cannot see the video - analyzing telemetry only]"`.
+4. **Ordered Failover**:
+   - Configured via `LLM_FAILOVER` (defaults to `true`).
+   - If the primary provider encounters an error (rate limits, 503, probe failure), execution automatically cascades to the next configured provider in sequence (e.g. Gemini $\to$ OpenAI-compatible $\to$ Anthropic) before falling back to local grounded heuristic tracker mode.
+5. **Windows Notepad Trap Protection**:
+   - Environment loader automatically detects `.env.txt` and `.env.local.txt` to safeguard operators on Windows whose text editors append `.txt` extensions.
+6. **Zero Client Leakage**:
+   - API keys are held strictly in server memory and `.env.local` (mode 0600); never returned in API payloads or bundled in client bundles.
+7. **Verification**:
+   - 9 dedicated unit and mock server tests in `gateway/tests/provider_backup.test.ts` (40/40 total Gateway vitest tests passing).

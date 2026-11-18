@@ -97,6 +97,7 @@ export const AICommandCenter: React.FC<AICommandCenterProps> = ({
   // Copilot connection / model status state
   const [copilotStatus, setCopilotStatus] = useState<{
     online: boolean;
+    provider?: string;
     model?: string;
     reason?: string;
   }>({ online: false, reason: 'Checking copilot connection...' });
@@ -108,11 +109,19 @@ export const AICommandCenter: React.FC<AICommandCenterProps> = ({
         const res = await fetch('/api/health');
         if (res.ok && isMounted) {
           const data = await res.json();
-          if (data.geminiReachable) {
-            setCopilotStatus({ online: true, model: data.model });
+          if (data.reachable || data.geminiReachable) {
+            setCopilotStatus({
+              online: true,
+              provider: data.provider || 'gemini',
+              model: data.model,
+            });
           } else {
-            const reason = data.lastErrorCode || (data.hasGeminiKey ? 'Gemini API unreachable' : 'no API key configured');
-            setCopilotStatus({ online: false, reason });
+            const reason =
+              data.lastErrorCode ||
+              (data.hasKey || data.hasGeminiKey
+                ? `${data.provider || 'AI'} API unreachable`
+                : 'no API key configured');
+            setCopilotStatus({ online: false, reason, provider: data.provider });
           }
         }
       } catch {
@@ -125,8 +134,11 @@ export const AICommandCenter: React.FC<AICommandCenterProps> = ({
     return () => { isMounted = false; };
   }, []);
 
-  // In-app Gemini API Key Modal state
+  // In-app LLM API Key Modal state
   const [isKeyModalOpen, setIsKeyModalOpen] = useState(false);
+  const [selectedProvider, setSelectedProvider] = useState<'gemini' | 'openai_compatible' | 'anthropic'>('gemini');
+  const [providerBaseUrl, setProviderBaseUrl] = useState('');
+  const [providerModel, setProviderModel] = useState('');
   const [keyInputValue, setKeyInputValue] = useState('');
   const [showKeySecret, setShowKeySecret] = useState(false);
   const [rememberKey, setRememberKey] = useState(true);
@@ -143,7 +155,7 @@ export const AICommandCenter: React.FC<AICommandCenterProps> = ({
     if (e) e.preventDefault();
     const clean = keyInputValue.trim();
     if (!clean) {
-      setKeyModalError('Please enter a valid Gemini API key.');
+      setKeyModalError(`Please enter a valid ${selectedProvider === 'gemini' ? 'Gemini' : selectedProvider} API key.`);
       return;
     }
     setKeyModalLoading(true);
@@ -152,11 +164,21 @@ export const AICommandCenter: React.FC<AICommandCenterProps> = ({
       const res = await fetch('/api/ai/set-key', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ apiKey: clean, remember: rememberKey }),
+        body: JSON.stringify({
+          apiKey: clean,
+          provider: selectedProvider,
+          baseUrl: providerBaseUrl.trim() || undefined,
+          model: providerModel.trim() || undefined,
+          remember: rememberKey,
+        }),
       });
       const data = await res.json();
       if (res.ok && data.success) {
-        setCopilotStatus({ online: true, model: data.model });
+        setCopilotStatus({
+          online: true,
+          provider: data.provider || selectedProvider,
+          model: data.model,
+        });
         setIsKeyModalOpen(false);
         setKeyInputValue('');
       } else {
@@ -775,13 +797,15 @@ Ask me anything or pick a quick command to begin:`,
             }`}
             title={
               copilotStatus.online
-                ? `Online: Connected to ${copilotStatus.model} (Click to manage key)`
-                : `Offline mode: ${copilotStatus.reason} (Click to configure Gemini API key)`
+                ? `Online: ${copilotStatus.provider ? `${copilotStatus.provider} (${copilotStatus.model})` : copilotStatus.model} (Click to manage key)`
+                : `Offline mode: ${copilotStatus.reason} (Click to configure AI key)`
             }
           >
             <span className={`h-2 w-2 rounded-full ${copilotStatus.online ? 'bg-emerald-400 animate-ping' : 'bg-amber-400'}`} />
             <span id="copilot-status-text">
-              {copilotStatus.online ? `Online: ${copilotStatus.model}` : `Offline mode: ${copilotStatus.reason}`}
+              {copilotStatus.online
+                ? `Online: ${copilotStatus.provider ? `${copilotStatus.provider} (${copilotStatus.model})` : copilotStatus.model}`
+                : `Offline mode: ${copilotStatus.reason}`}
             </span>
             <Key className="h-3 w-3 opacity-60 ml-0.5" />
           </button>
@@ -1365,23 +1389,61 @@ Ask me anything or pick a quick command to begin:`,
                   }`}
                 />
                 <span className={`font-mono font-medium ${copilotStatus.online ? 'text-emerald-400' : 'text-amber-400'}`}>
-                  {copilotStatus.online ? `Online (${copilotStatus.model})` : `Offline (${copilotStatus.reason || 'NO_API_KEY'})`}
+                  {copilotStatus.online
+                    ? `Online: ${copilotStatus.provider ? `${copilotStatus.provider} (${copilotStatus.model})` : copilotStatus.model}`
+                    : `Offline (${copilotStatus.reason || 'NO_API_KEY'})`}
                 </span>
               </div>
             </div>
 
-            <p className="mt-3 text-xs text-neutral-300 leading-relaxed">
-              Create an API key at{' '}
-              <a
-                href="https://aistudio.google.com/apikey"
-                target="_blank"
-                rel="noreferrer"
-                className="text-amber-400 hover:underline inline-flex items-center gap-0.5"
-              >
-                aistudio.google.com/apikey
-              </a>
-              . The key is verified with a minimal probe call and held in server memory. It is never logged or exposed in browser bundles.
-            </p>
+            {/* Provider Selector Tabs */}
+            <div className="mt-3 flex gap-1 rounded-xl bg-neutral-950 p-1 border border-neutral-800 text-xs">
+              {(['gemini', 'openai_compatible', 'anthropic'] as const).map((prov) => (
+                <button
+                  key={prov}
+                  type="button"
+                  onClick={() => setSelectedProvider(prov)}
+                  className={`flex-1 rounded-lg py-1.5 font-medium transition-all ${
+                    selectedProvider === prov
+                      ? 'bg-amber-500/20 text-amber-300 border border-amber-500/30'
+                      : 'text-neutral-400 hover:text-white'
+                  }`}
+                >
+                  {prov === 'gemini'
+                    ? 'Gemini'
+                    : prov === 'openai_compatible'
+                    ? 'OpenAI / Kimi / Groq'
+                    : 'Claude'}
+                </button>
+              ))}
+            </div>
+
+            {selectedProvider === 'gemini' && (
+              <p className="mt-3 text-xs text-neutral-300 leading-relaxed">
+                Create an API key at{' '}
+                <a
+                  href="https://aistudio.google.com/apikey"
+                  target="_blank"
+                  rel="noreferrer"
+                  className="text-amber-400 hover:underline inline-flex items-center gap-0.5"
+                >
+                  aistudio.google.com/apikey
+                </a>
+                . The key is verified with a minimal probe call and held in server memory. It is never logged or exposed in browser bundles.
+              </p>
+            )}
+
+            {selectedProvider === 'openai_compatible' && (
+              <p className="mt-3 text-xs text-neutral-300 leading-relaxed">
+                Supports OpenAI, Moonshot (Kimi), Groq, OpenRouter, or any OpenAI-compatible endpoint. Base URL defaults to OpenAI if blank.
+              </p>
+            )}
+
+            {selectedProvider === 'anthropic' && (
+              <p className="mt-3 text-xs text-neutral-300 leading-relaxed">
+                Connect your Anthropic Claude API key for high-precision multimodal surveillance forensics.
+              </p>
+            )}
 
             {/* Error Message if any */}
             {keyModalError && (
@@ -1404,10 +1466,58 @@ Ask me anything or pick a quick command to begin:`,
               </div>
             )}
 
-            <form onSubmit={handleSaveKey} className="mt-4 flex flex-col gap-4">
+            <form onSubmit={handleSaveKey} className="mt-4 flex flex-col gap-3">
+              {selectedProvider === 'openai_compatible' && (
+                <>
+                  <div>
+                    <label className="block text-xs font-semibold text-neutral-300 mb-1">
+                      API Base URL (Optional)
+                    </label>
+                    <input
+                      type="text"
+                      value={providerBaseUrl}
+                      onChange={(e) => setProviderBaseUrl(e.target.value)}
+                      placeholder="https://api.openai.com/v1 (or https://api.moonshot.cn/v1)"
+                      className="w-full rounded-xl border border-neutral-700 bg-neutral-950 px-3.5 py-2 text-xs font-mono text-neutral-100 placeholder-neutral-500 focus:border-amber-500 focus:outline-none"
+                    />
+                  </div>
+                  <div>
+                    <label className="block text-xs font-semibold text-neutral-300 mb-1">
+                      Model Identifier (Optional)
+                    </label>
+                    <input
+                      type="text"
+                      value={providerModel}
+                      onChange={(e) => setProviderModel(e.target.value)}
+                      placeholder="gpt-4o, moonshot-v1-8k, etc."
+                      className="w-full rounded-xl border border-neutral-700 bg-neutral-950 px-3.5 py-2 text-xs font-mono text-neutral-100 placeholder-neutral-500 focus:border-amber-500 focus:outline-none"
+                    />
+                  </div>
+                </>
+              )}
+
+              {selectedProvider === 'anthropic' && (
+                <div>
+                  <label className="block text-xs font-semibold text-neutral-300 mb-1">
+                    Model Identifier (Optional)
+                  </label>
+                  <input
+                    type="text"
+                    value={providerModel}
+                    onChange={(e) => setProviderModel(e.target.value)}
+                    placeholder="claude-3-5-sonnet-20241022"
+                    className="w-full rounded-xl border border-neutral-700 bg-neutral-950 px-3.5 py-2 text-xs font-mono text-neutral-100 placeholder-neutral-500 focus:border-amber-500 focus:outline-none"
+                  />
+                </div>
+              )}
+
               <div>
                 <label htmlFor="gemini-api-key-input" className="block text-xs font-semibold text-neutral-300 mb-1.5">
-                  Gemini API Key
+                  {selectedProvider === 'gemini'
+                    ? 'Gemini API Key'
+                    : selectedProvider === 'openai_compatible'
+                    ? 'OpenAI / API Key'
+                    : 'Anthropic API Key'}
                 </label>
                 <div className="relative">
                   <input
@@ -1416,7 +1526,13 @@ Ask me anything or pick a quick command to begin:`,
                     type={showKeySecret ? 'text' : 'password'}
                     value={keyInputValue}
                     onChange={(e) => setKeyInputValue(e.target.value)}
-                    placeholder="AIzaSy..."
+                    placeholder={
+                      selectedProvider === 'gemini'
+                        ? 'AIzaSy...'
+                        : selectedProvider === 'anthropic'
+                        ? 'sk-ant-...'
+                        : 'sk-...'
+                    }
                     autoFocus
                     className="w-full rounded-xl border border-neutral-700 bg-neutral-950 px-3.5 py-2.5 pr-10 text-xs font-mono text-neutral-100 placeholder-neutral-500 focus:border-amber-500 focus:outline-none focus:ring-1 focus:ring-amber-500"
                   />

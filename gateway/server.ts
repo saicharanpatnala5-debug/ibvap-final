@@ -8,12 +8,38 @@ import { z } from 'zod';
 import { createServer as createViteServer } from 'vite';
 import { GoogleGenAI } from '@google/genai';
 import dotenv from 'dotenv';
+import {
+  LLMProviderType,
+  LLMConfig,
+  modelSupportsVision,
+  cleanKey,
+  probeProvider,
+  executeUnifiedChat,
+  executeUnifiedStreamChat,
+  DEFAULT_MODELS,
+  DEFAULT_BASE_URLS,
+  ChatImageInput,
+  UnifiedChatOptions,
+} from './llmProvider.js';
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
 
-// In-memory API key held after in-app entry
+// In-memory API key held after in-app entry (backwards compatible)
 export let inMemoryApiKey: string | null = null;
+
+// Multi-provider configuration state
+export let activeProvider: LLMProviderType = 'gemini';
+export let activeLLMModel: string = 'gemini-3.8-flash';
+export let activeBaseUrl: string | undefined = undefined;
+export let llmReachable = false;
+export let llmLastErrorCode: string | null = null;
+export let inMemoryLLMConfig: {
+  provider?: LLMProviderType;
+  apiKey?: string;
+  baseUrl?: string;
+  model?: string;
+} | null = null;
 
 export function getEffectiveGeminiKey(): string | null {
   if (inMemoryApiKey && inMemoryApiKey.length > 5) {
@@ -23,29 +49,143 @@ export function getEffectiveGeminiKey(): string | null {
   return (envKey && envKey.length > 5) ? envKey : null;
 }
 
+export function getEffectiveLLMConfig(): LLMConfig | null {
+  // 1. In-memory override if set by in-app modal
+  if (inMemoryLLMConfig && inMemoryLLMConfig.apiKey && inMemoryLLMConfig.apiKey.length > 5) {
+    const provider = inMemoryLLMConfig.provider || 'gemini';
+    const model = inMemoryLLMConfig.model || DEFAULT_MODELS[provider];
+    return {
+      provider,
+      apiKey: inMemoryLLMConfig.apiKey,
+      baseUrl: inMemoryLLMConfig.baseUrl || DEFAULT_BASE_URLS[provider],
+      model,
+      supportsVision: modelSupportsVision(provider, model),
+    };
+  }
+
+  // 2. Explicit or default provider (Gemini is always default)
+  const rawProvider = (process.env.LLM_PROVIDER || '').trim().toLowerCase();
+  let provider: LLMProviderType = 'gemini';
+  if (rawProvider === 'openai_compatible' || rawProvider === 'openai') {
+    provider = 'openai_compatible';
+  } else if (rawProvider === 'anthropic' || rawProvider === 'claude') {
+    provider = 'anthropic';
+  } else {
+    provider = 'gemini';
+  }
+
+  // Determine API key
+  let apiKey: string | null = cleanKey(process.env.LLM_API_KEY);
+  if (!apiKey) {
+    if (provider === 'gemini') {
+      apiKey = cleanKey(process.env.GEMINI_API_KEY) || inMemoryApiKey;
+    } else if (provider === 'openai_compatible') {
+      apiKey = cleanKey(process.env.OPENAI_API_KEY);
+    } else if (provider === 'anthropic') {
+      apiKey = cleanKey(process.env.ANTHROPIC_API_KEY);
+    }
+  }
+
+  if (!apiKey) return null;
+
+  const model =
+    cleanKey(process.env.LLM_MODEL) ||
+    (provider === 'gemini' ? cleanKey(process.env.GEMINI_MODEL) : null) ||
+    DEFAULT_MODELS[provider];
+
+  const baseUrl = cleanKey(process.env.LLM_BASE_URL) || DEFAULT_BASE_URLS[provider];
+
+  return {
+    provider,
+    apiKey,
+    baseUrl,
+    model,
+    supportsVision: modelSupportsVision(provider, model),
+  };
+}
+
+export function getFailoverChain(): LLMConfig[] {
+  const primary = getEffectiveLLMConfig();
+  const list: LLMConfig[] = [];
+  if (primary) list.push(primary);
+
+  if (process.env.LLM_FAILOVER !== 'false') {
+    // Backup 1: Gemini if not primary and key exists
+    const geminiKey = cleanKey(process.env.GEMINI_API_KEY) || inMemoryApiKey;
+    if (geminiKey && primary?.provider !== 'gemini') {
+      list.push({
+        provider: 'gemini',
+        apiKey: geminiKey,
+        baseUrl: DEFAULT_BASE_URLS.gemini,
+        model: cleanKey(process.env.GEMINI_MODEL) || DEFAULT_MODELS.gemini,
+        supportsVision: true,
+      });
+    }
+
+    // Backup 2: OpenAI-compatible if not primary and key exists
+    const openAIKey = cleanKey(process.env.OPENAI_API_KEY);
+    if (openAIKey && primary?.provider !== 'openai_compatible') {
+      list.push({
+        provider: 'openai_compatible',
+        apiKey: openAIKey,
+        baseUrl: cleanKey(process.env.LLM_BASE_URL) || DEFAULT_BASE_URLS.openai_compatible,
+        model: cleanKey(process.env.OPENAI_MODEL) || DEFAULT_MODELS.openai_compatible,
+        supportsVision: modelSupportsVision('openai_compatible', cleanKey(process.env.OPENAI_MODEL) || DEFAULT_MODELS.openai_compatible),
+      });
+    }
+
+    // Backup 3: Anthropic if not primary and key exists
+    const anthropicKey = cleanKey(process.env.ANTHROPIC_API_KEY);
+    if (anthropicKey && primary?.provider !== 'anthropic') {
+      list.push({
+        provider: 'anthropic',
+        apiKey: anthropicKey,
+        baseUrl: DEFAULT_BASE_URLS.anthropic,
+        model: cleanKey(process.env.ANTHROPIC_MODEL) || DEFAULT_MODELS.anthropic,
+        supportsVision: modelSupportsVision('anthropic', cleanKey(process.env.ANTHROPIC_MODEL) || DEFAULT_MODELS.anthropic),
+      });
+    }
+  }
+
+  return list;
+}
+
 // Load environment variables prioritizing gateway/.env.local, gateway/.env, then root .env, then process.env
+// Also protects against Windows Notepad saving .env as .env.txt
 export function loadEnvironmentVariables(): boolean {
   const localCandidates = [
     path.resolve(__dirname, '.env.local'),
     path.resolve(process.cwd(), 'gateway/.env.local'),
+    path.resolve(__dirname, '.env.local.txt'),
+    path.resolve(process.cwd(), 'gateway/.env.local.txt'),
   ];
   const gatewayCandidates = [
     path.resolve(__dirname, '.env'),
     path.resolve(process.cwd(), 'gateway/.env'),
+    path.resolve(__dirname, '.env.txt'),
+    path.resolve(process.cwd(), 'gateway/.env.txt'),
   ];
   const rootCandidates = [
     path.resolve(__dirname, '../.env'),
     path.resolve(process.cwd(), '.env'),
+    path.resolve(__dirname, '../.env.txt'),
+    path.resolve(process.cwd(), '.env.txt'),
   ];
 
   let resolvedApiKey: string | null = null;
   let resolvedModel: string | null = null;
+  let resolvedProvider: string | null = null;
+  let resolvedLlmKey: string | null = null;
+  let resolvedBaseUrl: string | null = null;
 
   function tryReadFile(filePath: string) {
     if (fs.existsSync(filePath)) {
       try {
         const raw = fs.readFileSync(filePath, 'utf-8');
         const parsed = dotenv.parse(raw);
+        if (filePath.endsWith('.txt')) {
+          console.log(`[IBVAP Gateway] Note: Loaded environment from ${filePath} (Windows Notepad .txt extension detected).`);
+        }
         for (const [k, v] of Object.entries(parsed)) {
           if (process.env[k] === undefined || process.env[k] === '') {
             process.env[k] = v;
@@ -63,17 +203,27 @@ export function loadEnvironmentVariables(): boolean {
             resolvedModel = clean;
           }
         }
+        if (!resolvedProvider && parsed.LLM_PROVIDER) {
+          resolvedProvider = parsed.LLM_PROVIDER.trim();
+        }
+        if (!resolvedLlmKey && parsed.LLM_API_KEY) {
+          const clean = parsed.LLM_API_KEY.trim().replace(/^["']|["']$/g, '');
+          if (clean.length > 5) resolvedLlmKey = clean;
+        }
+        if (!resolvedBaseUrl && parsed.LLM_BASE_URL) {
+          resolvedBaseUrl = parsed.LLM_BASE_URL.trim();
+        }
       } catch (err) {
         console.warn(`[IBVAP Gateway] Notice reading ${filePath}:`, err);
       }
     }
   }
 
-  // 1. gateway/.env.local
+  // 1. gateway/.env.local (and .txt)
   for (const p of localCandidates) tryReadFile(p);
-  // 2. gateway/.env
+  // 2. gateway/.env (and .txt)
   for (const p of gatewayCandidates) tryReadFile(p);
-  // 3. root .env
+  // 3. root .env (and .txt)
   for (const p of rootCandidates) tryReadFile(p);
 
   // 4. process.env fallback
@@ -95,8 +245,8 @@ export function loadEnvironmentVariables(): boolean {
     process.env.GEMINI_MODEL = resolvedModel;
   }
 
-  const hasKey = Boolean(getEffectiveGeminiKey());
-  console.log(`[IBVAP Gateway] Gemini key loaded: ${hasKey ? 'yes' : 'no'}`);
+  const hasKey = Boolean(getEffectiveGeminiKey() || getEffectiveLLMConfig());
+  console.log(`[IBVAP Gateway] Gemini key loaded: ${Boolean(getEffectiveGeminiKey()) ? 'yes' : 'no'}`);
   return hasKey;
 }
 
@@ -261,6 +411,42 @@ export async function verifyAndSelectGeminiModel(overrideKey?: string): Promise<
     geminiReachable = false;
     geminiLastErrorCode = err?.status || err?.code || err?.message || 'INIT_ERROR';
     console.warn(`[IBVAP Gateway] ⚠️ Gemini initialization error (${geminiLastErrorCode}). Operating in offline fallback mode.`);
+  }
+}
+
+export async function verifyAndSelectLLM(): Promise<void> {
+  const config = getEffectiveLLMConfig();
+  if (!config) {
+    llmReachable = false;
+    geminiReachable = false;
+    llmLastErrorCode = 'NO_API_KEY';
+    geminiLastErrorCode = 'NO_API_KEY';
+    console.log('[IBVAP Gateway] No LLM API key configured. AI Copilot operates in grounded heuristic fallback mode.');
+    return;
+  }
+
+  activeProvider = config.provider;
+  activeLLMModel = config.model;
+  activeBaseUrl = config.baseUrl;
+
+  if (config.provider === 'gemini') {
+    await verifyAndSelectGeminiModel(config.apiKey);
+    llmReachable = geminiReachable;
+    llmLastErrorCode = geminiLastErrorCode;
+    activeLLMModel = activeGeminiModel;
+  } else {
+    console.log(`[IBVAP Gateway] Verifying ${config.provider} connection (model=${config.model})...`);
+    const probe = await probeProvider(config.provider, config.apiKey, config.model, config.baseUrl);
+    if (probe.success) {
+      llmReachable = true;
+      llmLastErrorCode = null;
+      activeLLMModel = probe.model;
+      console.log(`[IBVAP Gateway] ✓ ${config.provider} connection verified. Active model: ${activeLLMModel}`);
+    } else {
+      llmReachable = false;
+      llmLastErrorCode = probe.error || 'PROBE_FAILED';
+      console.warn(`[IBVAP Gateway] ⚠️ ${config.provider} probe failed (${llmLastErrorCode}). Operating in offline fallback mode.`);
+    }
   }
 }
 
@@ -907,13 +1093,20 @@ app.get('/api/health', async (_req, res) => {
     coreHealth = { status: 'offline', details: err.message };
   }
 
+  const effectiveConfig = getEffectiveLLMConfig();
   res.json({
     status: 'ok',
     gateway: 'online',
+    provider: activeProvider,
+    activeProvider: llmReachable ? activeProvider : 'offline',
+    model: activeLLMModel || activeGeminiModel,
+    hasKey: !!effectiveConfig,
     hasGeminiKey: !!getEffectiveGeminiKey(),
-    geminiReachable,
-    model: activeGeminiModel,
-    lastErrorCode: geminiLastErrorCode,
+    geminiReachable: (activeProvider === 'gemini' && llmReachable) || geminiReachable,
+    reachable: llmReachable,
+    visionSupported: modelSupportsVision(activeProvider, activeLLMModel),
+    lastErrorCode: llmLastErrorCode || geminiLastErrorCode,
+    failoverChain: getFailoverChain().map((c) => ({ provider: c.provider, model: c.model })),
     services: {
       gateway: { status: 'online', port: PORT },
       aiService: { url: AI_SERVICE_URL, ...aiHealth },
@@ -1024,7 +1217,7 @@ const keySetupRateLimiter = rateLimit({
   },
 });
 
-// POST /api/ai/set-key - In-app Gemini API key registration & verification
+// POST /api/ai/set-key - In-app LLM API key registration & verification
 app.post('/api/ai/set-key', keySetupRateLimiter, async (req, res) => {
   const ip = req.ip || req.socket.remoteAddress || '';
   const isLocal =
@@ -1041,43 +1234,64 @@ app.post('/api/ai/set-key', keySetupRateLimiter, async (req, res) => {
     });
   }
 
-  const { apiKey, remember } = req.body || {};
-  const cleanKey = typeof apiKey === 'string' ? apiKey.trim().replace(/^["']|["']$/g, '') : '';
-  if (!cleanKey || cleanKey.length < 8) {
+  const { apiKey, provider = 'gemini', baseUrl, model, remember } = req.body || {};
+  const clean = cleanKey(apiKey);
+  if (!clean || clean.length < 5) {
     return res.status(400).json({
       success: false,
       error: 'INVALID_KEY',
-      message: 'Invalid key: Gemini API key must be at least 8 characters.',
+      message: 'Invalid key: API key must be at least 5 characters.',
     });
   }
 
-  console.log(`[IBVAP Gateway] Received in-app Gemini key update (remember=${Boolean(remember)}). Validating...`);
+  const chosenProvider: LLMProviderType =
+    provider === 'openai_compatible' || provider === 'anthropic' ? provider : 'gemini';
+  const chosenModel = model?.trim() || DEFAULT_MODELS[chosenProvider];
+  const chosenBaseUrl = baseUrl?.trim() || DEFAULT_BASE_URLS[chosenProvider];
+
+  console.log(`[IBVAP Gateway] Received in-app key update for provider "${chosenProvider}" (remember=${Boolean(remember)}). Validating...`);
 
   try {
-    const testClient = new GoogleGenAI({ apiKey: cleanKey });
-    // Minimal 1-token test probe
-    const probe = await testClient.models.generateContent({
-      model: activeGeminiModel || 'gemini-3.8-flash',
-      contents: 'ping',
-      config: { maxOutputTokens: 1 },
-    });
-
-    if (!probe) {
-      throw new Error('PROBE_EMPTY');
+    const probe = await probeProvider(chosenProvider, clean, chosenModel, chosenBaseUrl);
+    if (!probe.success) {
+      return res.status(400).json({
+        success: false,
+        error: 'PROBE_FAILED',
+        message: `Failed to authenticate with ${chosenProvider}: ${probe.error}`,
+      });
     }
 
-    inMemoryApiKey = cleanKey;
-    process.env.GEMINI_API_KEY = cleanKey;
-    geminiClient = testClient;
-    (geminiClient as any)._apiKey = cleanKey;
+    inMemoryApiKey = clean;
+    inMemoryLLMConfig = {
+      provider: chosenProvider,
+      apiKey: clean,
+      baseUrl: chosenBaseUrl,
+      model: probe.model,
+    };
+    activeProvider = chosenProvider;
+    activeLLMModel = probe.model;
+    activeBaseUrl = chosenBaseUrl;
+    llmReachable = true;
+    llmLastErrorCode = null;
 
-    await verifyAndSelectGeminiModel(cleanKey);
+    if (chosenProvider === 'gemini') {
+      process.env.GEMINI_API_KEY = clean;
+      await verifyAndSelectGeminiModel(clean);
+    }
 
     if (remember) {
       try {
         const localEnvFile = path.resolve(__dirname, '.env.local');
-        fs.writeFileSync(localEnvFile, `GEMINI_API_KEY=${cleanKey}\n`, { mode: 0o600 });
-        console.log(`[IBVAP Gateway] Gemini key written to ${localEnvFile} (mode 0600)`);
+        let envContent = '';
+        if (chosenProvider === 'gemini') {
+          envContent = `LLM_PROVIDER=gemini\nGEMINI_API_KEY=${clean}\nGEMINI_MODEL=${probe.model}\n`;
+        } else if (chosenProvider === 'openai_compatible') {
+          envContent = `LLM_PROVIDER=openai_compatible\nLLM_API_KEY=${clean}\nLLM_BASE_URL=${chosenBaseUrl}\nLLM_MODEL=${probe.model}\n`;
+        } else if (chosenProvider === 'anthropic') {
+          envContent = `LLM_PROVIDER=anthropic\nLLM_API_KEY=${clean}\nLLM_MODEL=${probe.model}\n`;
+        }
+        fs.writeFileSync(localEnvFile, envContent, { mode: 0o600 });
+        console.log(`[IBVAP Gateway] LLM credentials written to ${localEnvFile} (mode 0600)`);
       } catch (err: any) {
         console.warn('[IBVAP Gateway] Could not write .env.local:', err.message);
       }
@@ -1085,27 +1299,18 @@ app.post('/api/ai/set-key', keySetupRateLimiter, async (req, res) => {
 
     return res.json({
       success: true,
-      model: activeGeminiModel,
-      message: 'Gemini API key successfully verified and connected.',
+      provider: activeProvider,
+      model: activeLLMModel,
+      message: `${chosenProvider} API key successfully verified and connected.`,
     });
   } catch (err: any) {
     const errMsg = err?.message || String(err);
-    const errStatus = err?.status || err?.code;
     console.warn('[IBVAP Gateway] In-app key validation failed:', errMsg);
-
-    let friendlyError = 'The provided API key could not authenticate with Google Gemini.';
-    if (errMsg.includes('API_KEY_INVALID') || errMsg.includes('400') || errMsg.includes('INVALID_ARGUMENT')) {
-      friendlyError = 'Invalid API key. Please check your key at aistudio.google.com/apikey.';
-    } else if (errMsg.includes('429') || errMsg.includes('RESOURCE_EXHAUSTED')) {
-      friendlyError = 'API quota exceeded. Please check your rate limits or try a different key.';
-    } else if (errMsg.includes('FETCH_ERROR') || errMsg.includes('ENOTFOUND') || errMsg.includes('ETIMEDOUT') || errMsg.includes('ECONNREFUSED')) {
-      friendlyError = 'Network error reaching Google Gemini API. Please check your internet connection.';
-    }
 
     return res.status(400).json({
       success: false,
-      error: errStatus || 'INVALID_KEY',
-      message: friendlyError,
+      error: 'INVALID_KEY',
+      message: `Authentication error with ${chosenProvider}: ${errMsg}`,
     });
   }
 });
@@ -1124,8 +1329,16 @@ app.post('/api/ai/remove-key', async (req, res) => {
   }
 
   inMemoryApiKey = null;
+  inMemoryLLMConfig = null;
   delete process.env.GEMINI_API_KEY;
+  delete process.env.LLM_API_KEY;
+  delete process.env.OPENAI_API_KEY;
+  delete process.env.ANTHROPIC_API_KEY;
   geminiClient = null;
+  geminiReachable = false;
+  llmReachable = false;
+  geminiLastErrorCode = 'NO_API_KEY';
+  llmLastErrorCode = 'NO_API_KEY';
 
   const localCandidates = [
     path.resolve(__dirname, '.env.local'),
@@ -1140,10 +1353,10 @@ app.post('/api/ai/remove-key', async (req, res) => {
     }
   }
 
-  await verifyAndSelectGeminiModel();
+  await verifyAndSelectLLM();
   return res.json({
     success: true,
-    message: 'Gemini API key removed. Switched to offline mode.',
+    message: 'API key removed. Switched to offline mode.',
   });
 });
 
@@ -1179,7 +1392,6 @@ app.post(
 
     const isStreamRequested = req.query.stream === 'true' || stream === true;
     const enrichedContext = await enrichTelemetryContext(context);
-    const client = getGeminiClient();
 
     // Exact required system instruction
     const compactTelemetry = buildCompactTelemetryBlock(enrichedContext, cameraName);
@@ -1188,155 +1400,98 @@ app.post(
 SURVEILLANCE TELEMETRY CONTEXT:
 ${compactTelemetry}`;
 
-    if (client) {
-      try {
-        const contents: any[] = [];
-
-        // Build multi-turn history (last ~10 turns)
-        for (const msg of history.slice(-10)) {
-          const role = msg.sender === 'user' ? 'user' : 'model';
-          contents.push({
-            role,
-            parts: [{ text: sanitizeTelemetryString(msg.text, 1500) }],
-          });
-        }
-
-        // Current turn parts
-        const currentParts: any[] = [];
-
-        // If motion question, attach preceding frame ~1s earlier
-        if (motionFrameBase64) {
-          const cleanMotion = motionFrameBase64.replace(/^data:image\/\w+;base64,/, '');
-          currentParts.push({
-            inlineData: { mimeType: 'image/jpeg', data: cleanMotion },
-          });
-          currentParts.push({
-            text: '[Preceding video frame captured ~1.0s earlier for motion / trajectory analysis]',
-          });
-        }
-
-        // Current native frame
-        if (frameBase64) {
-          const cleanBase64 = frameBase64.replace(/^data:image\/\w+;base64,/, '');
-          currentParts.push({
-            inlineData: {
-              mimeType: 'image/jpeg',
-              data: cleanBase64,
-            },
-          });
-        }
-
-        // Attached entity crop if operator asked about a specific vehicle/person
-        if (attachedCrop) {
-          const cleanCrop = attachedCrop.replace(/^data:image\/\w+;base64,/, '');
-          currentParts.push({
-            inlineData: {
-              mimeType: 'image/jpeg',
-              data: cleanCrop,
-            },
-          });
-          currentParts.push({
-            text: `[Target optical crop for Track #${attachedTrackId || 'selected'}]`,
-          });
-        }
-
-        currentParts.push({
-          text: message || 'Please analyze this surveillance scene.',
+    const failoverList = getFailoverChain();
+    if (failoverList.length > 0) {
+      const images: ChatImageInput[] = [];
+      if (motionFrameBase64) {
+        images.push({
+          dataBase64: motionFrameBase64.replace(/^data:image\/\w+;base64,/, ''),
+          mimeType: 'image/jpeg',
+          caption: '[Preceding video frame captured ~1.0s earlier for motion / trajectory analysis]',
         });
-
-        contents.push({
-          role: 'user',
-          parts: currentParts,
+      }
+      if (frameBase64) {
+        images.push({
+          dataBase64: frameBase64.replace(/^data:image\/\w+;base64,/, ''),
+          mimeType: 'image/jpeg',
         });
+      }
+      if (attachedCrop) {
+        images.push({
+          dataBase64: attachedCrop.replace(/^data:image\/\w+;base64,/, ''),
+          mimeType: 'image/jpeg',
+          caption: `[Target optical crop for Track #${attachedTrackId || 'selected'}]`,
+        });
+      }
 
-        // 1. Streaming response if requested
-        if (isStreamRequested) {
-          res.setHeader('Content-Type', 'text/event-stream');
-          res.setHeader('Cache-Control', 'no-cache');
-          res.setHeader('Connection', 'keep-alive');
-          if (typeof (res as any).flushHeaders === 'function') {
-            (res as any).flushHeaders();
-          }
+      const chatOptions: UnifiedChatOptions = {
+        message: message || 'Please analyze this surveillance scene.',
+        history,
+        systemInstruction,
+        images,
+        temperature: 0.3,
+      };
 
-          const streamResponse = await client.models.generateContentStream({
-            model: activeGeminiModel,
-            contents,
-            config: {
-              systemInstruction,
-              temperature: 0.3,
-            },
-          });
-
-          for await (const chunk of streamResponse) {
-            if (chunk.text) {
-              res.write(`data: ${JSON.stringify({ text: chunk.text })}\n\n`);
+      for (let i = 0; i < failoverList.length; i++) {
+        const provConfig = failoverList[i];
+        try {
+          if (isStreamRequested) {
+            res.setHeader('Content-Type', 'text/event-stream');
+            res.setHeader('Cache-Control', 'no-cache');
+            res.setHeader('Connection', 'keep-alive');
+            if (typeof (res as any).flushHeaders === 'function') {
+              (res as any).flushHeaders();
             }
+
+            let chunksSent = 0;
+            await executeUnifiedStreamChat(provConfig, chatOptions, {
+              onChunk: (chunkText) => {
+                chunksSent++;
+                res.write(`data: ${JSON.stringify({ text: chunkText })}\n\n`);
+              },
+              onDone: (doneMeta) => {
+                res.write(
+                  `data: ${JSON.stringify({
+                    done: true,
+                    model: doneMeta.model,
+                    provider: doneMeta.provider,
+                    source: doneMeta.source,
+                    visionUsed: doneMeta.visionUsed,
+                  })}\n\n`
+                );
+                res.end();
+              },
+              onError: (err) => {
+                console.warn(`[IBVAP /api/ai/chat] Streaming error on provider ${provConfig.provider}:`, err.message);
+                if (chunksSent === 0 && i < failoverList.length - 1) {
+                  return;
+                }
+                const fallbackText = computeOfflineTrackerFallback(enrichedContext);
+                res.write(`data: ${JSON.stringify({ text: fallbackText, done: true, source: 'fallback', reason: err.message })}\n\n`);
+                res.end();
+              },
+            });
+            return;
           }
-          res.write(`data: ${JSON.stringify({ done: true, model: activeGeminiModel, source: 'gemini' })}\n\n`);
-          return res.end();
-        }
 
-        // 2. Standard JSON response
-        const geminiCall = client.models.generateContent({
-          model: activeGeminiModel,
-          contents,
-          config: {
-            systemInstruction,
-            temperature: 0.3,
-          },
-        });
-
-        const timeoutPromise = new Promise<never>((_, reject) =>
-          setTimeout(() => reject(new Error('GEMINI_TIMEOUT')), GEMINI_TIMEOUT_MS)
-        );
-
-        const response = await Promise.race([geminiCall, timeoutPromise]);
-        const replyText = response?.text?.trim();
-
-        if (replyText) {
-          return res.json({
-            text: replyText,
-            source: 'gemini',
-            model: activeGeminiModel,
-            timestamp: Date.now(),
-          });
-        }
-
-        console.warn('[IBVAP /api/ai/chat] Gemini returned empty response.');
-        const fallbackText = computeOfflineTrackerFallback(enrichedContext);
-        return res.json({
-          text: fallbackText,
-          source: 'fallback',
-          reason: 'empty response',
-          timestamp: Date.now(),
-        });
-      } catch (geminiError: any) {
-        const isTimeout = geminiError?.message === 'GEMINI_TIMEOUT';
-        const reason = isTimeout ? 'timeout' : 'API error';
-        console.error(`[IBVAP /api/ai/chat] Gemini call failed (${reason}):`, geminiError?.message || geminiError);
-
-        const fallbackText = computeOfflineTrackerFallback(enrichedContext);
-        if (isStreamRequested) {
-          res.setHeader('Content-Type', 'text/event-stream');
-          res.setHeader('Cache-Control', 'no-cache');
-          res.setHeader('Connection', 'keep-alive');
-          if (typeof (res as any).flushHeaders === 'function') {
-            (res as any).flushHeaders();
+          const result = await executeUnifiedChat(provConfig, chatOptions);
+          if (result && result.text) {
+            return res.json({
+              text: result.text,
+              source: result.source,
+              provider: result.provider,
+              model: result.model,
+              visionUsed: result.visionUsed,
+              timestamp: Date.now(),
+            });
           }
-          res.write(`data: ${JSON.stringify({ text: fallbackText, done: true, source: 'fallback', reason })}\n\n`);
-          return res.end();
+        } catch (provErr: any) {
+          console.warn(`[IBVAP /api/ai/chat] Provider ${provConfig.provider} failed:`, provErr?.message || provErr);
         }
-
-        return res.json({
-          text: fallbackText,
-          source: 'fallback',
-          reason,
-          timestamp: Date.now(),
-        });
       }
     }
 
-    // Offline (no key): minimal honest tracker-only fallback
+    // Offline (no key or all providers failed): minimal honest tracker-only fallback
     const fallbackText = computeOfflineTrackerFallback(enrichedContext);
     if (isStreamRequested) {
       res.setHeader('Content-Type', 'text/event-stream');
@@ -1345,14 +1500,14 @@ ${compactTelemetry}`;
       if (typeof (res as any).flushHeaders === 'function') {
         (res as any).flushHeaders();
       }
-      res.write(`data: ${JSON.stringify({ text: fallbackText, done: true, source: 'fallback', reason: geminiLastErrorCode || 'NO_API_KEY' })}\n\n`);
+      res.write(`data: ${JSON.stringify({ text: fallbackText, done: true, source: 'fallback', reason: llmLastErrorCode || geminiLastErrorCode || 'NO_API_KEY' })}\n\n`);
       return res.end();
     }
 
     return res.json({
       text: fallbackText,
       source: 'fallback',
-      reason: geminiLastErrorCode || 'NO_API_KEY',
+      reason: llmLastErrorCode || geminiLastErrorCode || 'NO_API_KEY',
       timestamp: Date.now(),
     });
   }
@@ -1377,9 +1532,9 @@ app.post(
     }
 
     const { frameBase64, camera, entities, alerts } = parsed.data;
-    const client = getGeminiClient();
+    const failoverList = getFailoverChain();
 
-    if (client && frameBase64) {
+    if (failoverList.length > 0 && frameBase64) {
       try {
         const cleanBase64 = frameBase64.replace(/^data:image\/\w+;base64,/, '');
         const safeCamName = sanitizeTelemetryString(camera?.name || 'CCTV Feed', 60);
@@ -1391,79 +1546,33 @@ Structure your answer into:
 3. Spatial & Behavioral Observations
 4. Security & Risk Assessment`;
 
-        const geminiCall = client.models.generateContent({
-          model: activeGeminiModel,
-          contents: [
-            {
-              role: 'user',
-              parts: [
-                {
-                  inlineData: {
-                    mimeType: 'image/jpeg',
-                    data: cleanBase64,
-                  },
-                },
-                { text: prompt },
-              ],
-            },
-          ],
-          config: {
-            temperature: 0.2,
-          },
-        });
+        for (const provConfig of failoverList) {
+          try {
+            const result = await executeUnifiedChat(provConfig, {
+              message: prompt,
+              images: [{ dataBase64: cleanBase64, mimeType: 'image/jpeg' }],
+              temperature: 0.2,
+            });
 
-        const timeoutPromise = new Promise<never>((_, reject) =>
-          setTimeout(() => reject(new Error('GEMINI_TIMEOUT')), GEMINI_TIMEOUT_MS)
-        );
-
-        const response = await Promise.race([geminiCall, timeoutPromise]);
-        const replyText = response?.text?.trim();
-
-        if (replyText) {
-          return res.json({
-            text: replyText,
-            source: 'gemini',
-            model: activeGeminiModel,
-            timestamp: Date.now(),
-          });
+            if (result && result.text) {
+              return res.json({
+                text: result.text,
+                source: result.source,
+                provider: result.provider,
+                model: result.model,
+                visionUsed: result.visionUsed,
+                timestamp: Date.now(),
+              });
+            }
+          } catch (provErr: any) {
+            console.warn(`[IBVAP /api/ai/explain-scene] Provider ${provConfig.provider} failed:`, provErr?.message || provErr);
+          }
         }
-
-        console.warn('[IBVAP /api/ai/explain-scene] Gemini returned empty response; using fallback.');
-        const fallback = generateGroundedFallbackResponse(
-          'explain scene',
-          { cameras: camera ? [camera] : [], alerts, entities },
-          camera?.name
-        );
-        return res.json({
-          text: fallback,
-          source: 'fallback',
-          reason: 'empty response',
-          timestamp: Date.now(),
-        });
       } catch (err: any) {
-        const isTimeout = err?.message === 'GEMINI_TIMEOUT';
-        const reason = isTimeout ? 'timeout' : 'API error';
-        console.error(
-          `[IBVAP /api/ai/explain-scene] Gemini error (${reason}):`,
-          err?.message || err
-        );
-
-        const fallback = generateGroundedFallbackResponse(
-          'explain scene',
-          { cameras: camera ? [camera] : [], alerts, entities },
-          camera?.name
-        );
-        return res.json({
-          text: fallback,
-          source: 'fallback',
-          reason,
-          timestamp: Date.now(),
-        });
+        console.error('[IBVAP /api/ai/explain-scene] Failed calling LLM:', err?.message || err);
       }
     }
 
-    // Fallback grounded synthesis (no key or no frame)
-    const reason = !client ? 'no key' : 'empty response';
     const fallback = generateGroundedFallbackResponse(
       'explain scene',
       { cameras: camera ? [camera] : [], alerts, entities },
@@ -1472,7 +1581,7 @@ Structure your answer into:
     return res.json({
       text: fallback,
       source: 'fallback',
-      reason,
+      reason: llmLastErrorCode || geminiLastErrorCode || 'NO_API_KEY',
       timestamp: Date.now(),
     });
   }
@@ -1953,10 +2062,10 @@ async function startServer() {
     });
   }
 
-  await verifyAndSelectGeminiModel();
+  await verifyAndSelectLLM();
 
   app.listen(PORT, '0.0.0.0', () => {
-    console.log(`IBVAP Gateway running on port ${PORT} [Model: ${activeGeminiModel}]`);
+    console.log(`IBVAP Gateway running on port ${PORT} [Provider: ${activeProvider}, Model: ${activeLLMModel}]`);
   });
 }
 

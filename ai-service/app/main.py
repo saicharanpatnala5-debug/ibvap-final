@@ -287,22 +287,24 @@ async def detect_frame(
 
     detections = []
     for ent in raw_entities:
+        ent_id = getattr(ent, "id", getattr(ent, "track_id", 1))
+        anpr_val = getattr(ent, "anpr_plate", getattr(ent, "anpr", None))
         detections.append({
-            "id": ent.track_id,
-            "class": ent.class_name,
-            "confidence": ent.confidence / 100.0,
+            "id": ent_id,
+            "class": getattr(ent, "class_name", "object"),
+            "confidence": getattr(ent, "confidence", 80) / 100.0 if getattr(ent, "confidence", 80) > 1 else getattr(ent, "confidence", 0.8),
             "bbox": {
                 "x": ent.bbox.x,
                 "y": ent.bbox.y,
                 "width": ent.bbox.width,
                 "height": ent.bbox.height,
             },
-            "appearance": ent.appearance.dict() if ent.appearance else None,
-            "anpr": ent.anpr_plate,
-            "velocity": ent.velocity,
-            "direction": ent.direction,
-            "speed": ent.speed,
-            "state": ent.state,
+            "appearance": ent.appearance.dict() if getattr(ent, "appearance", None) else None,
+            "anpr": anpr_val,
+            "velocity": getattr(ent, "velocity", 0.0),
+            "direction": getattr(ent, "direction", "Stationary"),
+            "speed": getattr(ent, "speed", "0 px/s"),
+            "state": getattr(ent, "state", "confirmed"),
         })
 
     weapons_out = []
