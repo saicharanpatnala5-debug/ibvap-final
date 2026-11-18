@@ -407,15 +407,16 @@ export async function extractAndReadLicensePlate(
     };
   }
 
-  // Extract full vehicle crop with 5% margin to preserve bumpers and plates
-  const padX = vehicleBbox.width * 0.05;
-  const padY = vehicleBbox.height * 0.05;
+  // Extract full vehicle crop with 8% margin to preserve bumpers and plates
+  const padX = vehicleBbox.width * 0.08;
+  const padY = vehicleBbox.height * 0.08;
   const rawCropX = Math.max(0, (vehicleBbox.x - padX) * vW);
   const rawCropY = Math.max(0, (vehicleBbox.y - padY) * vH);
   const rawCropW = Math.min(vW - rawCropX, (vehicleBbox.width + padX * 2) * vW);
   const rawCropH = Math.min(vH - rawCropY, (vehicleBbox.height + padY * 2) * vH);
 
-  if (rawCropW < 30 || rawCropH * 1.5 < 15) {
+  // Microscopic fragment check (<20x10 px)
+  if (rawCropW < 20 || rawCropH < 10) {
     return {
       plateText: '',
       confidence: 0,
@@ -424,18 +425,17 @@ export async function extractAndReadLicensePlate(
       formatType: 'distance_gated',
       validationStatus: 'Plate not legible at this distance',
       isDistanceGated: true,
+      attempts: 1,
       processedAt: Date.now(),
     };
   }
 
   const cropCanvas = document.createElement('canvas');
-  const maxDim = 800;
-  let targetW = Math.round(rawCropW);
-  let targetH = Math.round(rawCropH);
-  if (targetW > maxDim) {
-    targetH = Math.round(targetH * (maxDim / targetW));
-    targetW = maxDim;
-  }
+  // For small crops, preserve resolution or upscale 2x so high-frequency plate edges are preserved
+  const scaleFactor = rawCropW < 300 ? 2 : 1;
+  const targetW = Math.round(rawCropW * scaleFactor);
+  const targetH = Math.round(rawCropH * scaleFactor);
+
   cropCanvas.width = targetW;
   cropCanvas.height = targetH;
   const cCtx = cropCanvas.getContext('2d', { willReadFrequently: true });
@@ -448,13 +448,17 @@ export async function extractAndReadLicensePlate(
       formatType: 'invalid',
       validationStatus: 'Canvas context error',
       isDistanceGated: false,
+      attempts: 1,
       processedAt: Date.now(),
     };
   }
+  // High quality image smoothing
+  cCtx.imageSmoothingEnabled = true;
+  cCtx.imageSmoothingQuality = 'high';
   cCtx.drawImage(video, rawCropX, rawCropY, rawCropW, rawCropH, 0, 0, targetW, targetH);
-  const cropDataUrl = cropCanvas.toDataURL('image/jpeg', 0.85);
+  const cropDataUrl = cropCanvas.toDataURL('image/jpeg', 0.88);
 
-  // 1. Send vehicle crop to server-side Fast-ALPR pipeline (YOLOv9 plate detector + RapidOCR + CLAHE)
+  // 1. Send vehicle crop to server-side Fast-ALPR pipeline (Multi-scale YOLOv9 + RapidOCR + CLAHE)
   try {
     const res = await fetch('/api/vision/anpr/read-crop', {
       method: 'POST',
@@ -462,8 +466,8 @@ export async function extractAndReadLicensePlate(
       body: JSON.stringify({
         cropBase64: cropDataUrl,
         track_id: trackId,
-        min_w: 35,
-        min_h: 12,
+        min_w: 100,
+        min_h: 60,
       }),
       signal: AbortSignal.timeout(3500),
     });
@@ -488,6 +492,9 @@ export async function extractAndReadLicensePlate(
           cropDataUrl: data.plateCropDataUrl || cropDataUrl,
           plateCropDataUrl: data.plateCropDataUrl,
           vehicleCropDataUrl: data.vehicleCropDataUrl || cropDataUrl,
+          charConfidences: data.charConfidences,
+          scaleUsed: data.scaleUsed,
+          attempts: data.attempts || 1,
           isDistanceGated: isDistGated,
           processedAt: data.processedAt || Date.now(),
         };
@@ -497,8 +504,8 @@ export async function extractAndReadLicensePlate(
     // Upstream server busy or unreachable; fallback below
   }
 
-  // Fallback: If server is unavailable, mark distance gated if vehicle box is small
-  const isDistanceGated = rawCropW < 120 || rawCropH < 80;
+  // Fallback: If server is unavailable, mark distance gated only if vehicle box is genuinely tiny
+  const isDistanceGated = rawCropW < 90 && rawCropH < 50;
   return {
     plateText: '',
     confidence: 0,
@@ -509,6 +516,7 @@ export async function extractAndReadLicensePlate(
     isDistanceGated,
     vehicleCropDataUrl: cropDataUrl,
     cropDataUrl,
+    attempts: 1,
     processedAt: Date.now(),
   };
 }

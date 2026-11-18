@@ -32,6 +32,9 @@ class ANPRResult(BaseModel):
     cropDataUrl: Optional[str] = None
     plateCropDataUrl: Optional[str] = None
     vehicleCropDataUrl: Optional[str] = None
+    charConfidences: Optional[list[float]] = None
+    scaleUsed: Optional[str] = None
+    attempts: Optional[int] = 1
     isDistanceGated: bool = False
     processedAt: int = 0
 

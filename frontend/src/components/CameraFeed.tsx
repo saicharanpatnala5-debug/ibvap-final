@@ -583,9 +583,12 @@ export const CameraFeed: React.FC<CameraFeedProps> = ({
         if (isVehicle && canAttemptAnpr) {
           trackLastAnprTimeRef.current[track.id] = nowMs;
           extractAndReadLicensePlate(video, track.bbox, track.id).then((anprResult) => {
+            track.anpr = anprResult;
+            const bestCrop = anprResult.plateCropDataUrl || anprResult.cropDataUrl;
+            const vehThumbnail = anprResult.vehicleCropDataUrl || anprResult.cropDataUrl;
+            const bestGuess = anprResult.plateText || 'UNRESOLVED';
+
             if (anprResult.isValidFormat || (anprResult.isReadable && anprResult.plateText && anprResult.plateText.length >= 4)) {
-              track.anpr = anprResult;
-              const bestCrop = anprResult.plateCropDataUrl || anprResult.cropDataUrl;
               setLatestReadPlate({
                 plate: anprResult.plateText,
                 confidence: anprResult.confidence,
@@ -600,12 +603,17 @@ export const CameraFeed: React.FC<CameraFeedProps> = ({
                   plate: anprResult.plateText,
                   confidence: anprResult.confidence,
                   cropUrl: bestCrop,
+                  vehicleThumbnailUrl: vehThumbnail,
                   cameraId: camera.id,
                   cameraName: camera.name,
                   videoTime: video.currentTime,
                   trackId: track.id,
                   formatType: anprResult.formatType,
                   validationStatus: anprResult.validationStatus,
+                  charConfidences: anprResult.charConfidences,
+                  scaleUsed: anprResult.scaleUsed,
+                  attempts: anprResult.attempts || 1,
+                  bestGuessPlate: bestGuess,
                 });
               }
               if (anprResult.isValidFormat && !autoOpenedPlatesRef.current.has(anprResult.plateText)) {
@@ -615,17 +623,42 @@ export const CameraFeed: React.FC<CameraFeedProps> = ({
             } else if (anprResult.formatType === 'distance_gated') {
               if (onPlateDetected && !autoOpenedPlatesRef.current.has(`dist-${track.id}`)) {
                 autoOpenedPlatesRef.current.add(`dist-${track.id}`);
-                const bestCrop = anprResult.cropDataUrl;
                 onPlateDetected({
-                  plate: 'DISTANCE_GATED',
+                  plate: bestGuess,
                   confidence: anprResult.confidence,
                   cropUrl: bestCrop,
+                  vehicleThumbnailUrl: vehThumbnail,
                   cameraId: camera.id,
                   cameraName: camera.name,
                   videoTime: video.currentTime,
                   trackId: track.id,
                   formatType: 'distance_gated',
                   validationStatus: 'Plate not legible at this distance',
+                  charConfidences: anprResult.charConfidences,
+                  scaleUsed: anprResult.scaleUsed,
+                  attempts: anprResult.attempts || 1,
+                  bestGuessPlate: bestGuess,
+                });
+              }
+            } else {
+              // Unlocalized or obscured vehicle
+              if (onPlateDetected && !autoOpenedPlatesRef.current.has(`unloc-${track.id}`)) {
+                autoOpenedPlatesRef.current.add(`unloc-${track.id}`);
+                onPlateDetected({
+                  plate: bestGuess,
+                  confidence: anprResult.confidence,
+                  cropUrl: bestCrop,
+                  vehicleThumbnailUrl: vehThumbnail,
+                  cameraId: camera.id,
+                  cameraName: camera.name,
+                  videoTime: video.currentTime,
+                  trackId: track.id,
+                  formatType: anprResult.formatType || 'invalid',
+                  validationStatus: anprResult.validationStatus || 'Plate not detected / obscured',
+                  charConfidences: anprResult.charConfidences,
+                  scaleUsed: anprResult.scaleUsed,
+                  attempts: anprResult.attempts || 1,
+                  bestGuessPlate: bestGuess,
                 });
               }
             }

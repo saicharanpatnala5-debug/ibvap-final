@@ -103,16 +103,29 @@ class PlateValidator:
         for i in range(max(2, n - 4), n):
             chars[i] = LETTER_TO_DIGIT.get(chars[i], chars[i])
 
-        # 3. Middle section: RTO digits (usually 2) then Series letters (1-3)
+        # 3. Middle section: RTO digits then Series letters
         if n == 10:
+            # SS DD LL NNNN: unambiguous slots
             chars[2] = LETTER_TO_DIGIT.get(chars[2], chars[2])
             chars[3] = LETTER_TO_DIGIT.get(chars[3], chars[3])
             chars[4] = DIGIT_TO_LETTER.get(chars[4], chars[4])
             chars[5] = DIGIT_TO_LETTER.get(chars[5], chars[5])
         elif n == 9:
+            # SS D LL NNNN (e.g. DL1CA1234) or SS DD L NNNN (e.g. KA01M4449)
+            # Slot 2 is ALWAYS RTO digit
+            chars[2] = LETTER_TO_DIGIT.get(chars[2], chars[2])
+            # Slot 4 is ALWAYS Series letter
+            chars[4] = DIGIT_TO_LETTER.get(chars[4], chars[4])
+            # Slot 3 is ambiguous: only swap if unambiguous based on adjacent character
+            # If slot 3 is already a digit, it is SS DD L NNNN format; do not swap to letter.
+            # If slot 3 is already a letter, it is SS D LL NNNN format; do not swap to digit.
+        elif n == 11:
+            # SS DD LLL NNNN
             chars[2] = LETTER_TO_DIGIT.get(chars[2], chars[2])
             chars[3] = LETTER_TO_DIGIT.get(chars[3], chars[3])
             chars[4] = DIGIT_TO_LETTER.get(chars[4], chars[4])
+            chars[5] = DIGIT_TO_LETTER.get(chars[5], chars[5])
+            chars[6] = DIGIT_TO_LETTER.get(chars[6], chars[6])
 
         return "".join(chars)
 
@@ -298,13 +311,14 @@ class FastALPREngine:
     def process_vehicle_crop(
         self,
         vehicle_crop_bgr: np.ndarray,
-        min_veh_w: int = 120,
-        min_veh_h: int = 80,
+        min_veh_w: int = 100,
+        min_veh_h: int = 60,
     ) -> ANPRResult:
         """
-        Executes end-to-end plate localization and recognition on vehicle crop.
-        Enforces distance gating rule: if vehicle is physically too small, returns neutral status.
-        Returns ANPRResult with tight plate optical crop and vehicle thumbnail.
+        Executes end-to-end multi-scale plate localization and recognition on vehicle crop.
+        No vehicle-size pre-gate: every vehicle undergoes multi-scale plate detection.
+        "Distant Target" is an outcome ONLY when no plate is localized at any scale
+        AND the vehicle is physically smaller than the measured resolution threshold (min_veh_w, min_veh_h).
         """
         now_ms = int(time.time() * 1000)
         if vehicle_crop_bgr is None or vehicle_crop_bgr.size == 0:
@@ -322,8 +336,8 @@ class FastALPREngine:
         vh, vw = vehicle_crop_bgr.shape[:2]
         veh_crop_b64 = bgr_to_base64_jpeg(vehicle_crop_bgr, quality=80)
 
-        # Distance gating: Vehicle too small or distant for optical character resolution
-        if vw < min_veh_w or vh < min_veh_h:
+        # Microscopic fragment check (<30x15 px):
+        if vw < 30 or vh < 15:
             return ANPRResult(
                 plateText="",
                 confidence=0.0,
@@ -337,148 +351,203 @@ class FastALPREngine:
                 processedAt=now_ms,
             )
 
+        best_cand = None
+        best_cand_score = -1.0
+
         if self._alpr is not None:
             try:
-                results = self._alpr.predict(vehicle_crop_bgr)
-                if results and len(results) > 0:
-                    # Select detection with highest detector confidence
-                    best = max(results, key=lambda r: float(r.detection.confidence))
-                    bx = best.detection.bounding_box
-                    x1, y1, x2, y2 = int(bx.x1), int(bx.y1), int(bx.x2), int(bx.y2)
-                    pw = x2 - x1
-                    ph = y2 - y1
+                # Build multi-scale search candidates:
+                scales = []
+                # 1. Native crop
+                scales.append(("native", vehicle_crop_bgr))
 
-                    # Distance gating: Enforced on DETECTED PLATE size
-                    if pw < 35 or ph < 12:
-                        return ANPRResult(
-                            plateText="",
-                            confidence=round(float(best.detection.confidence) * 100, 1),
-                            isReadable=False,
-                            isValidFormat=False,
-                            formatType="distance_gated",
-                            validationStatus="Plate not legible at this distance",
-                            isDistanceGated=True,
-                            vehicleCropDataUrl=veh_crop_b64,
-                            cropDataUrl=veh_crop_b64,
-                            processedAt=now_ms,
-                        )
+                # 2. 2x Cubic Upscaled crop
+                scales.append(("upscaled_2x", cv2.resize(vehicle_crop_bgr, (vw * 2, vh * 2), interpolation=cv2.INTER_CUBIC)))
 
-                    # Extract tight plate crop with 8% horizontal and 10% vertical padding
-                    pad_x = max(2, int(pw * 0.08))
-                    pad_y = max(2, int(ph * 0.10))
-                    px1 = max(0, x1 - pad_x)
-                    py1 = max(0, y1 - pad_y)
-                    px2 = min(vw, x2 + pad_x)
-                    py2 = min(vh, y2 + pad_y)
-                    tight_plate = vehicle_crop_bgr[py1:py2, px1:px2]
-                    plate_b64 = bgr_to_base64_jpeg(tight_plate, quality=90)
-
-                    # Preprocess with 3x upscaling, CLAHE, unsharp mask, and deskewing
-                    prep = preprocess_plate_crop(tight_plate)
-
-                    # 1. Fast-ALPR OCR
-                    fast_raw = best.ocr.text if best.ocr else ""
-                    fast_conf = (
-                        float(np.mean(best.ocr.confidence) * 100.0)
-                        if best.ocr and best.ocr.confidence
-                        else float(best.detection.confidence) * 100.0
-                    )
-                    fast_cleaned = PlateValidator.clean_text(fast_raw)
-                    fast_corr = PlateValidator.position_aware_correction(fast_cleaned)
-                    fast_valid, fast_type, fast_status = PlateValidator.validate(fast_corr)
-
-                    # 2. RapidOCR on enhanced preprocessed crop
-                    rapid_raw = ""
-                    rapid_conf = 0.0
-                    try:
-                        if self._rapid_ocr is None:
-                            from rapidocr_onnxruntime import RapidOCR
-                            self._rapid_ocr = RapidOCR()
-                        ocr_out, _ = self._rapid_ocr(prep)
-                        if ocr_out and len(ocr_out) > 0:
-                            rapid_raw = ocr_out[0][1]
-                            rapid_conf = float(ocr_out[0][2]) * 100.0
-                    except Exception:
-                        pass
-
-                    rapid_cleaned = PlateValidator.clean_text(rapid_raw)
-                    rapid_corr = PlateValidator.position_aware_correction(rapid_cleaned)
-                    rapid_valid, rapid_type, rapid_status = PlateValidator.validate(rapid_corr)
-
-                    # 3. Decision & Fusion
-                    if rapid_valid and not fast_valid:
-                        chosen_text = rapid_corr
-                        chosen_conf = rapid_conf
-                        is_valid = True
-                        ftype = rapid_type
-                        vstatus = "Valid format"
-                    elif fast_valid and not rapid_valid:
-                        chosen_text = fast_corr
-                        chosen_conf = fast_conf
-                        is_valid = True
-                        ftype = fast_type
-                        vstatus = "Valid format"
-                    elif fast_valid and rapid_valid:
-                        if rapid_conf >= fast_conf:
-                            chosen_text = rapid_corr
-                            chosen_conf = rapid_conf
-                            ftype = rapid_type
-                        else:
-                            chosen_text = fast_corr
-                            chosen_conf = fast_conf
-                            ftype = fast_type
-                        is_valid = True
-                        vstatus = "Valid format"
+                # 3. Lower 50% vehicle region (most likely location for plates)
+                y_lower = int(vh * 0.45)
+                lower_crop = vehicle_crop_bgr[y_lower:, :]
+                if lower_crop.shape[0] >= 15 and lower_crop.shape[1] >= 30:
+                    if lower_crop.shape[0] < 120:
+                        lower_crop_up = cv2.resize(lower_crop, (lower_crop.shape[1] * 2, lower_crop.shape[0] * 2), interpolation=cv2.INTER_CUBIC)
+                        scales.append(("lower_50", lower_crop_up))
                     else:
-                        # Neither passed strict regex: provide best-guess text for human review
-                        if len(rapid_corr) >= len(fast_corr) and len(rapid_corr) >= 4:
-                            chosen_text = rapid_corr
-                            chosen_conf = rapid_conf
-                        elif len(fast_corr) >= 4:
-                            chosen_text = fast_corr
-                            chosen_conf = fast_conf
-                        else:
-                            chosen_text = rapid_corr or fast_corr
-                            chosen_conf = max(rapid_conf, fast_conf)
+                        scales.append(("lower_50", lower_crop))
 
-                        is_valid = False
-                        ftype = "invalid"
-                        if chosen_text and len(chosen_text) >= 4:
-                            vstatus = "Needs review"
-                        else:
-                            vstatus = "Unreadable"
+                # 4. Wide vehicle tile splits (if vehicle is wide)
+                if vw > 250:
+                    tile_l = vehicle_crop_bgr[int(vh * 0.4):, :int(vw * 0.6)]
+                    tile_r = vehicle_crop_bgr[int(vh * 0.4):, int(vw * 0.4):]
+                    if tile_l.size > 0:
+                        scales.append(("tile_left", tile_l))
+                    if tile_r.size > 0:
+                        scales.append(("tile_right", tile_r))
 
-                    is_readable = bool(chosen_text and len(chosen_text) >= 4)
-
-                    return ANPRResult(
-                        plateText=chosen_text if is_readable else "",
-                        confidence=round(chosen_conf, 1),
-                        isReadable=is_readable,
-                        isValidFormat=is_valid,
-                        formatType=ftype,
-                        validationStatus=vstatus,
-                        stateCode=chosen_text[:2] if is_valid and ftype == "standard" else None,
-                        plateNumber=chosen_text if is_readable else "",
-                        cropDataUrl=plate_b64,
-                        plateCropDataUrl=plate_b64,
-                        vehicleCropDataUrl=veh_crop_b64,
-                        isDistanceGated=False,
-                        processedAt=now_ms,
-                    )
+                # Run detector across candidates and find best plate bounding box
+                for scale_name, scale_img in scales:
+                    results = self._alpr.predict(scale_img)
+                    if results and len(results) > 0:
+                        for det in results:
+                            det_conf = float(det.detection.confidence)
+                            bx = det.detection.bounding_box
+                            dx1, dy1, dx2, dy2 = int(bx.x1), int(bx.y1), int(bx.x2), int(bx.y2)
+                            pw = dx2 - dx1
+                            ph = dy2 - dy1
+                            if pw < 15 or ph < 6:
+                                continue
+                            ar = float(pw) / float(max(1, ph))
+                            is_good_ar = (2.0 <= ar <= 5.8)
+                            score = det_conf * (1.2 if is_good_ar else 0.7) * (1.0 if pw >= 30 and ph >= 10 else 0.75)
+                            if score > best_cand_score:
+                                best_cand_score = score
+                                best_cand = {
+                                    "det": det,
+                                    "scale_name": scale_name,
+                                    "img": scale_img,
+                                    "box": (dx1, dy1, dx2, dy2),
+                                    "pw": pw,
+                                    "ph": ph,
+                                }
             except Exception as err:
-                print(f"[FastALPREngine] Prediction error: {err}")
+                print(f"[FastALPREngine] Multi-scale prediction error: {err}")
 
-        # Fallback if no plate found by detector
+        if best_cand is not None:
+            # Plate detected and localized!
+            scale_img = best_cand["img"]
+            x1, y1, x2, y2 = best_cand["box"]
+            pw, ph = best_cand["pw"], best_cand["ph"]
+            sim_h, sim_w = scale_img.shape[:2]
+
+            # Extract tight plate crop with 8% H / 10% V padding
+            pad_x = max(2, int(pw * 0.08))
+            pad_y = max(2, int(ph * 0.10))
+            px1 = max(0, x1 - pad_x)
+            py1 = max(0, y1 - pad_y)
+            px2 = min(sim_w, x2 + pad_x)
+            py2 = min(sim_h, y2 + pad_y)
+            tight_plate = scale_img[py1:py2, px1:px2]
+            plate_b64 = bgr_to_base64_jpeg(tight_plate, quality=90)
+
+            # Preprocess plate crop (3x upscaling, CLAHE, unsharp mask, deskew)
+            prep = preprocess_plate_crop(tight_plate)
+
+            best_det = best_cand["det"]
+            # 1. Fast-ALPR OCR
+            fast_raw = best_det.ocr.text if best_det.ocr else ""
+            fast_conf = (
+                float(np.mean(best_det.ocr.confidence) * 100.0)
+                if best_det.ocr and best_det.ocr.confidence
+                else float(best_det.detection.confidence) * 100.0
+            )
+            fast_char_confs = (
+                [round(float(c) * 100.0, 1) for c in best_det.ocr.confidence]
+                if best_det.ocr and best_det.ocr.confidence
+                else []
+            )
+            fast_cleaned = PlateValidator.clean_text(fast_raw)
+            fast_corr = PlateValidator.position_aware_correction(fast_cleaned)
+            fast_valid, fast_type, fast_status = PlateValidator.validate(fast_corr)
+
+            # 2. RapidOCR on enhanced preprocessed crop
+            rapid_raw = ""
+            rapid_conf = 0.0
+            try:
+                if self._rapid_ocr is None:
+                    from rapidocr_onnxruntime import RapidOCR
+                    self._rapid_ocr = RapidOCR()
+                ocr_out, _ = self._rapid_ocr(prep)
+                if ocr_out and len(ocr_out) > 0:
+                    rapid_raw = ocr_out[0][1]
+                    rapid_conf = float(ocr_out[0][2]) * 100.0
+            except Exception:
+                pass
+
+            rapid_cleaned = PlateValidator.clean_text(rapid_raw)
+            rapid_corr = PlateValidator.position_aware_correction(rapid_cleaned)
+            rapid_valid, rapid_type, rapid_status = PlateValidator.validate(rapid_corr)
+
+            # 3. Decision & Fusion
+            chosen_char_confs = fast_char_confs
+            if rapid_valid and not fast_valid:
+                chosen_text = rapid_corr
+                chosen_conf = rapid_conf
+                is_valid = True
+                ftype = rapid_type
+                vstatus = "Valid format"
+                chosen_char_confs = [round(rapid_conf, 1)] * len(rapid_corr)
+            elif fast_valid and not rapid_valid:
+                chosen_text = fast_corr
+                chosen_conf = fast_conf
+                is_valid = True
+                ftype = fast_type
+                vstatus = "Valid format"
+            elif fast_valid and rapid_valid:
+                if rapid_conf >= fast_conf:
+                    chosen_text = rapid_corr
+                    chosen_conf = rapid_conf
+                    ftype = rapid_type
+                    chosen_char_confs = [round(rapid_conf, 1)] * len(rapid_corr)
+                else:
+                    chosen_text = fast_corr
+                    chosen_conf = fast_conf
+                    ftype = fast_type
+                is_valid = True
+                vstatus = "Valid format"
+            else:
+                # Neither passed strict format: retain best-guess text for human review
+                if len(rapid_corr) >= len(fast_corr) and len(rapid_corr) >= 4:
+                    chosen_text = rapid_corr
+                    chosen_conf = rapid_conf
+                    chosen_char_confs = [round(rapid_conf, 1)] * len(rapid_corr)
+                elif len(fast_corr) >= 4:
+                    chosen_text = fast_corr
+                    chosen_conf = fast_conf
+                else:
+                    chosen_text = rapid_corr or fast_corr
+                    chosen_conf = max(rapid_conf, fast_conf)
+
+                is_valid = False
+                ftype = "invalid"
+                if chosen_text and len(chosen_text) >= 4:
+                    vstatus = "Needs review"
+                else:
+                    vstatus = "Unreadable"
+
+            is_readable = bool(chosen_text and len(chosen_text) >= 4)
+
+            return ANPRResult(
+                plateText=chosen_text if is_readable else "",
+                confidence=round(chosen_conf, 1),
+                isReadable=is_readable,
+                isValidFormat=is_valid,
+                formatType=ftype,
+                validationStatus=vstatus,
+                stateCode=chosen_text[:2] if is_valid and ftype == "standard" else None,
+                plateNumber=chosen_text if is_readable else "",
+                cropDataUrl=plate_b64,
+                plateCropDataUrl=plate_b64,
+                vehicleCropDataUrl=veh_crop_b64,
+                charConfidences=chosen_char_confs if is_readable else None,
+                scaleUsed=best_cand["scale_name"],
+                attempts=1,
+                isDistanceGated=False,
+                processedAt=now_ms,
+            )
+
+        # Fallback: No plate localized at any scale.
+        # "Distant" becomes an outcome ONLY when no plate is localized AND vehicle is small.
+        is_small_vehicle = (vw < min_veh_w or vh < min_veh_h or (vw * vh) < 6000)
         return ANPRResult(
             plateText="",
             confidence=0.0,
             isReadable=False,
             isValidFormat=False,
-            formatType="invalid",
-            validationStatus="Plate not detected / obscured",
-            isDistanceGated=False,
+            formatType="distance_gated" if is_small_vehicle else "invalid",
+            validationStatus="Plate not legible at this distance" if is_small_vehicle else "Plate not detected / obscured",
+            isDistanceGated=is_small_vehicle,
             vehicleCropDataUrl=veh_crop_b64,
             cropDataUrl=veh_crop_b64,
+            attempts=1,
             processedAt=now_ms,
         )
 
@@ -498,14 +567,21 @@ class PlateVotingTracker:
         self.confirmed_plates: Dict[int, ANPRResult] = {}
         self.best_guess_plates: Dict[int, ANPRResult] = {}
         self.gated_statuses: Dict[int, ANPRResult] = {}
+        self.attempts: Dict[int, int] = {}
 
     def set_distance_gated(self, track_id: int, result: ANPRResult):
         """Records neutral distance-gated status for distant tracks."""
+        self.attempts[track_id] = self.attempts.get(track_id, 0) + 1
+        if result:
+            result.attempts = self.attempts[track_id]
         self.gated_statuses[track_id] = result
 
     def add_reading(self, track_id: int, reading: ANPRResult, sharpness: float = 50.0) -> Optional[ANPRResult]:
+        self.attempts[track_id] = self.attempts.get(track_id, 0) + 1
         if not reading:
             return self.get_confirmed(track_id)
+
+        reading.attempts = self.attempts[track_id]
 
         # If reading is distance gated, store status
         if reading.isDistanceGated or reading.formatType == "distance_gated":
@@ -553,10 +629,21 @@ class PlateVotingTracker:
 
         if len(filtered) >= self.required_votes:
             voted_chars = []
+            fused_confidences = []
             for col in range(dominant_len):
-                col_chars = [c[col] for c in filtered]
-                most_common = Counter(col_chars).most_common(1)[0][0]
-                voted_chars.append(most_common)
+                col_entries = []
+                for h in self.readings_history[track_id]:
+                    t = h["text"]
+                    if len(t) == dominant_len:
+                        c_conf = h["conf"]
+                        if h["result"].charConfidences and len(h["result"].charConfidences) == dominant_len:
+                            c_conf = h["result"].charConfidences[col]
+                        col_entries.append((t[col], c_conf))
+                # Multi-frame character fusion: highest confidence character across frames
+                best_char, best_cconf = max(col_entries, key=lambda x: x[1])
+                voted_chars.append(best_char)
+                fused_confidences.append(round(best_cconf, 1))
+
             consensus_raw = "".join(voted_chars)
 
             corrected = PlateValidator.position_aware_correction(consensus_raw)
@@ -575,6 +662,8 @@ class PlateVotingTracker:
                 cropDataUrl=best_plate_crop,
                 plateCropDataUrl=best_plate_crop,
                 vehicleCropDataUrl=best_veh_crop,
+                charConfidences=fused_confidences,
+                attempts=self.attempts.get(track_id, 1),
                 isDistanceGated=False,
                 processedAt=int(time.time() * 1000),
             )
@@ -612,6 +701,7 @@ class PlateVotingTracker:
         self.confirmed_plates.clear()
         self.best_guess_plates.clear()
         self.gated_statuses.clear()
+        self.attempts.clear()
 
     def prune(self, active_track_ids: set[int]):
         stale = [t for t in list(self.readings_history.keys()) if t not in active_track_ids]
@@ -620,6 +710,7 @@ class PlateVotingTracker:
             self.confirmed_plates.pop(t, None)
             self.best_guess_plates.pop(t, None)
             self.gated_statuses.pop(t, None)
+            self.attempts.pop(t, None)
 
 
 # Backward compatibility alias

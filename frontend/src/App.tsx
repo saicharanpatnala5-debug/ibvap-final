@@ -255,7 +255,8 @@ export default function App() {
         const shouldUpgrade =
           (isValid && !existing.isValidFormat) ||
           (existing.formatType === 'distance_gated' && !isDistanceGated && cleanPlate.length >= 4) ||
-          (cleanPlate && plateInfo.confidence > existing.confidence + 5);
+          (cleanPlate && plateInfo.confidence > existing.confidence + 5) ||
+          ((plateInfo.attempts || 1) > (existing.attempts || 1));
 
         if (shouldUpgrade) {
           const updated = [...prev];
@@ -268,7 +269,12 @@ export default function App() {
             formatType: formatType !== 'invalid' ? formatType : existing.formatType,
             confidence: Math.max(existing.confidence, plateInfo.confidence),
             cropUrl: plateInfo.cropUrl || existing.cropUrl,
-            vehicleThumbnailUrl: plateInfo.cropUrl || existing.vehicleThumbnailUrl,
+            vehicleThumbnailUrl: plateInfo.vehicleThumbnailUrl || plateInfo.cropUrl || existing.vehicleThumbnailUrl,
+            charConfidences: plateInfo.charConfidences || existing.charConfidences,
+            scaleUsed: plateInfo.scaleUsed || existing.scaleUsed,
+            attempts: Math.max(existing.attempts || 1, plateInfo.attempts || 1),
+            bestGuessPlate: cleanPlate || existing.bestGuessPlate || 'UNRESOLVED',
+            isAiAssisted: plateInfo.isAiAssisted ?? existing.isAiAssisted,
             dossier: dossier || existing.dossier,
             videoTime: plateInfo.videoTime,
           };
@@ -280,7 +286,7 @@ export default function App() {
 
       const newRecord: PlateRegistryRecord = {
         id: `rec-${cleanPlate || 'plate'}-${Date.now()}-${Math.random().toString(36).slice(2, 6)}`,
-        plateNumber: isDistanceGated ? 'UNRESOLVED' : (cleanPlate || 'UNREADABLE'),
+        plateNumber: isDistanceGated ? 'UNRESOLVED' : (cleanPlate || 'UNRESOLVED'),
         status,
         formatValidationStatus: plateInfo.validationStatus || status,
         isValidFormat: isValid,
@@ -292,7 +298,12 @@ export default function App() {
         videoTime: plateInfo.videoTime,
         trackId: plateInfo.trackId,
         cropUrl: plateInfo.cropUrl,
-        vehicleThumbnailUrl: plateInfo.cropUrl,
+        vehicleThumbnailUrl: plateInfo.vehicleThumbnailUrl || plateInfo.cropUrl,
+        charConfidences: plateInfo.charConfidences,
+        scaleUsed: plateInfo.scaleUsed,
+        attempts: plateInfo.attempts || 1,
+        bestGuessPlate: cleanPlate || 'UNRESOLVED',
+        isAiAssisted: Boolean(plateInfo.isAiAssisted),
         dossier,
       };
 

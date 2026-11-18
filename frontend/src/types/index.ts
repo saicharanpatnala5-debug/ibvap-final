@@ -232,6 +232,11 @@ export interface PlateRegistryRecord {
   trackId?: number;
   cropUrl?: string; // plate thumbnail
   vehicleThumbnailUrl?: string; // vehicle thumbnail
+  charConfidences?: number[];
+  scaleUsed?: string;
+  attempts?: number;
+  isAiAssisted?: boolean;
+  bestGuessPlate?: string;
   dossier?: VehicleDossier | null;
   manualCorrection?: string;
   isDemo?: boolean;
