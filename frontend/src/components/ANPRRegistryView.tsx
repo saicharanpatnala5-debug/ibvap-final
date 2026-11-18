@@ -737,9 +737,15 @@ export const ANPRRegistryView: React.FC<ANPRRegistryViewProps> = ({
                         <div className="flex flex-col items-end gap-1">
                           <div className="flex items-center gap-1.5">
                             {getStatusBadge(record.status, record.formatType, record.isAiAssisted)}
-                            <span className="font-mono text-xs text-neutral-400">
-                              {record.confidence}% OCR
-                            </span>
+                            {record.confidence > 0 ? (
+                              <span className="font-mono text-xs text-neutral-400">
+                                {record.confidence}% OCR
+                              </span>
+                            ) : (
+                              <span className="font-mono text-xs text-neutral-400">
+                                {record.attempts || 1} attempt{(record.attempts || 1) > 1 ? 's' : ''}
+                              </span>
+                            )}
                           </div>
                           <span className="text-[11px] text-neutral-500 flex items-center gap-1">
                             <Clock className="h-3 w-3" />

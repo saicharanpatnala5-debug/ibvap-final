@@ -71,6 +71,7 @@ interface CameraFeedProps {
     attempts?: number;
     isAiAssisted?: boolean;
     bestGuessPlate?: string;
+    objectClass?: string;
     cameraId: string;
     cameraName?: string;
     videoTime: number;
@@ -620,8 +621,11 @@ export const CameraFeed: React.FC<CameraFeedProps> = ({
       // 4. Automatic ANPR on vehicles in the same background detection pass
       const nowMs = Date.now();
       for (const track of updatedTracks) {
-        const isVehicle = [
+        const rawClass = (track.class || '').toLowerCase().trim();
+        const isPedestrian = rawClass === 'person' || rawClass === 'pedestrian';
+        const isVehicle = !isPedestrian && [
           'car',
+          'van',
           'truck',
           'bus',
           'two-wheeler',
@@ -629,7 +633,8 @@ export const CameraFeed: React.FC<CameraFeedProps> = ({
           'auto-rickshaw',
           'truck/bus',
           'motorcycle',
-        ].includes(track.class);
+          'bicycle',
+        ].some((v) => rawClass.includes(v));
 
         const hasConfirmedValidPlate = Boolean(track.anpr?.isValidFormat);
         const lastAttempt = trackLastAnprTimeRef.current[track.id] || 0;
@@ -641,7 +646,7 @@ export const CameraFeed: React.FC<CameraFeedProps> = ({
             track.anpr = anprResult;
             const bestCrop = anprResult.plateCropDataUrl || anprResult.cropDataUrl;
             const vehThumbnail = anprResult.vehicleCropDataUrl || anprResult.cropDataUrl;
-            const bestGuess = anprResult.plateText || 'UNRESOLVED';
+            const bestGuess = anprResult.plateText || (anprResult.formatType === 'distance_gated' ? 'Distant Target' : 'Plate not detected');
 
             if (anprResult.isValidFormat || (anprResult.isReadable && anprResult.plateText && anprResult.plateText.length >= 4)) {
               setLatestReadPlate({
@@ -663,6 +668,7 @@ export const CameraFeed: React.FC<CameraFeedProps> = ({
                   cameraName: camera.name,
                   videoTime: video.currentTime,
                   trackId: track.id,
+                  objectClass: track.class,
                   formatType: anprResult.formatType,
                   validationStatus: anprResult.validationStatus,
                   charConfidences: anprResult.charConfidences,
@@ -687,6 +693,7 @@ export const CameraFeed: React.FC<CameraFeedProps> = ({
                   cameraName: camera.name,
                   videoTime: video.currentTime,
                   trackId: track.id,
+                  objectClass: track.class,
                   formatType: 'distance_gated',
                   validationStatus: 'Plate not legible at this distance',
                   charConfidences: anprResult.charConfidences,
@@ -708,6 +715,7 @@ export const CameraFeed: React.FC<CameraFeedProps> = ({
                   cameraName: camera.name,
                   videoTime: video.currentTime,
                   trackId: track.id,
+                  objectClass: track.class,
                   formatType: anprResult.formatType || 'invalid',
                   validationStatus: anprResult.validationStatus || 'Plate not detected / obscured',
                   charConfidences: anprResult.charConfidences,

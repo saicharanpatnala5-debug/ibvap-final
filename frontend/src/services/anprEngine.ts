@@ -466,8 +466,8 @@ export async function extractAndReadLicensePlate(
       body: JSON.stringify({
         cropBase64: cropDataUrl,
         track_id: trackId,
-        min_w: 100,
-        min_h: 60,
+        min_w: Math.max(35, Math.round(vW * 0.035)),
+        min_h: Math.max(15, Math.round(vH * 0.02)),
       }),
       signal: AbortSignal.timeout(3500),
     });
@@ -505,7 +505,7 @@ export async function extractAndReadLicensePlate(
   }
 
   // Fallback: If server is unavailable, mark distance gated only if vehicle box is genuinely tiny
-  const isDistanceGated = rawCropW < 90 && rawCropH < 50;
+  const isDistanceGated = rawCropW < Math.max(35, Math.round(vW * 0.035)) && rawCropH < Math.max(15, Math.round(vH * 0.02));
   return {
     plateText: '',
     confidence: 0,

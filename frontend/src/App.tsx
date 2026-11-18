@@ -206,6 +206,7 @@ export default function App() {
     attempts?: number;
     isAiAssisted?: boolean;
     bestGuessPlate?: string;
+    objectClass?: string;
     cameraId: string;
     cameraName?: string;
     videoTime: number;
@@ -213,6 +214,12 @@ export default function App() {
     formatType?: 'standard' | 'bharat' | 'invalid' | 'distance_gated';
     validationStatus?: string;
   }) => {
+    // ANPR Fix 3 - Step 3: Reject pedestrian tracks; strictly vehicle classes only
+    const rawClass = (plateInfo.objectClass || '').toLowerCase().trim();
+    if (rawClass === 'person' || rawClass === 'pedestrian') {
+      return;
+    }
+
     const rawPlate = plateInfo.plate;
     const cleanPlate = rawPlate.toUpperCase().replace(/[^A-Z0-9]/g, '');
     const isDistanceGated =
@@ -241,13 +248,17 @@ export default function App() {
 
     const dossier = isValid ? lookupVehicleDossier(cleanPlate) : null;
     const cam = cameras.find((c) => c.id === plateInfo.cameraId);
+    const resolvedDisplayPlate = cleanPlate || (isDistanceGated ? 'Distant Target' : 'Plate not detected');
+    const resolvedBestGuess = plateInfo.bestGuessPlate && plateInfo.bestGuessPlate !== 'UNRESOLVED'
+      ? plateInfo.bestGuessPlate
+      : resolvedDisplayPlate;
 
     setPlateRecords((prev) => {
       // Find matching record by track ID or near-identical plate text within 12s video time
       const existingIdx = prev.findIndex((r) => {
         const timeDiff = Math.abs((r.videoTime || 0) - plateInfo.videoTime);
         if (plateInfo.trackId && r.trackId === plateInfo.trackId && timeDiff < 12) return true;
-        if (!isDistanceGated && cleanPlate && r.plateNumber && r.plateNumber !== 'UNRESOLVED' && r.plateNumber !== 'UNREADABLE') {
+        if (!isDistanceGated && cleanPlate && r.plateNumber && r.plateNumber !== 'UNRESOLVED' && r.plateNumber !== 'UNREADABLE' && r.plateNumber !== 'Distant Target' && r.plateNumber !== 'Plate not detected') {
           if (r.plateNumber === cleanPlate && timeDiff < 12) return true;
           // Levenshtein distance <= 2 for optical OCR variations of the same plate
           if (timeDiff < 12 && Math.abs(r.plateNumber.length - cleanPlate.length) <= 2) {
@@ -288,7 +299,7 @@ export default function App() {
             charConfidences: plateInfo.charConfidences || existing.charConfidences,
             scaleUsed: plateInfo.scaleUsed || existing.scaleUsed,
             attempts: Math.max(existing.attempts || 1, plateInfo.attempts || 1),
-            bestGuessPlate: cleanPlate || existing.bestGuessPlate || 'UNRESOLVED',
+            bestGuessPlate: cleanPlate || existing.bestGuessPlate || resolvedBestGuess,
             isAiAssisted: plateInfo.isAiAssisted ?? existing.isAiAssisted,
             dossier: dossier || existing.dossier,
             videoTime: plateInfo.videoTime,
@@ -300,8 +311,8 @@ export default function App() {
       }
 
       const newRecord: PlateRegistryRecord = {
-        id: `rec-${cleanPlate || 'plate'}-${Date.now()}-${Math.random().toString(36).slice(2, 6)}`,
-        plateNumber: isDistanceGated ? 'UNRESOLVED' : (cleanPlate || 'UNRESOLVED'),
+        id: `rec-${cleanPlate || 'track-' + (plateInfo.trackId || 'veh')}-${Date.now()}-${Math.random().toString(36).slice(2, 6)}`,
+        plateNumber: resolvedDisplayPlate,
         status,
         formatValidationStatus: plateInfo.validationStatus || status,
         isValidFormat: isValid,
@@ -317,7 +328,7 @@ export default function App() {
         charConfidences: plateInfo.charConfidences,
         scaleUsed: plateInfo.scaleUsed,
         attempts: plateInfo.attempts || 1,
-        bestGuessPlate: cleanPlate || 'UNRESOLVED',
+        bestGuessPlate: resolvedBestGuess,
         isAiAssisted: Boolean(plateInfo.isAiAssisted),
         dossier,
       };
