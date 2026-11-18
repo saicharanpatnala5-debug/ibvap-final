@@ -353,6 +353,7 @@ export interface AIChatMessage {
   source?: 'gemini' | 'fallback';
   reason?: string;
   model?: string;
+  isStreaming?: boolean;
   referencedEntities?: {
     cameraIds?: string[];
     incidentIds?: string[];

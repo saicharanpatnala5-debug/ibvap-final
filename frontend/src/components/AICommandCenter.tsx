@@ -71,6 +71,8 @@ interface AICommandCenterProps {
   onToggleDock?: () => void;
   initialQuery?: string | null;
   onClearInitialQuery?: () => void;
+  initialAttachment?: any | null;
+  onClearInitialAttachment?: () => void;
 }
 
 export const AICommandCenter: React.FC<AICommandCenterProps> = ({
@@ -86,6 +88,8 @@ export const AICommandCenter: React.FC<AICommandCenterProps> = ({
   onToggleDock,
   initialQuery,
   onClearInitialQuery,
+  initialAttachment,
+  onClearInitialAttachment,
 }) => {
   // Active Subtab inside Command Center: 'chat' | 'anomalies_predictions' | 'audit_log'
   const [activeSubTab, setActiveSubTab] = useState<'chat' | 'anomalies_predictions' | 'audit_log'>('chat');
@@ -230,6 +234,14 @@ Ask me anything or pick a quick command to begin:`,
     };
   }, []);
 
+  // Handle initialAttachment if passed from Live Monitor
+  useEffect(() => {
+    if (initialAttachment) {
+      setAttachedFile(initialAttachment);
+      if (onClearInitialAttachment) onClearInitialAttachment();
+    }
+  }, [initialAttachment, onClearInitialAttachment]);
+
   // AI Session Memory
   const [sessionMemory, setSessionMemory] = useState<AISessionMemory>({
     investigationCount: 0,
@@ -324,56 +336,60 @@ Ask me anything or pick a quick command to begin:`,
   };
 
   // Dispatch Query Execution
-  const handleExecuteQuery = async (queryText: string) => {
-    const text = queryText.trim();
-    if (!text && !attachedFile) return;
+  const handleExecuteQuery = async (queryText?: string, attachmentOverride?: any) => {
+    const text = (queryText !== undefined ? queryText : inputQuery).trim();
+    const currentAttachment = attachmentOverride || attachedFile;
+    if (!text && !currentAttachment) return;
 
     const userMessage: AIChatMessage = {
       id: `user-msg-${Date.now()}`,
       sender: 'user',
-      text: text || `[Uploaded visual asset: ${attachedFile?.name}]`,
+      text: text || `[Uploaded visual asset: ${currentAttachment?.name || 'media crop'}]`,
       timestamp: Date.now(),
-      attachment: attachedFile || undefined,
+      attachment: currentAttachment || undefined,
     };
 
     setMessages((prev) => [...prev, userMessage]);
     setInputQuery('');
-    const currentAttachment = attachedFile;
     setAttachedFile(null);
     setIsProcessing(true);
 
+    const aiMsgId = `ai-msg-${Date.now()}`;
+    const placeholderAiMessage: AIChatMessage = {
+      id: aiMsgId,
+      sender: 'ai',
+      text: '',
+      timestamp: Date.now(),
+      source: 'gemini',
+      isStreaming: true,
+    };
+    setMessages((prev) => [...prev, placeholderAiMessage]);
+
     try {
-      // 1. Check for live camera frame snapshot (optical ground truth)
+      // 1. Capture live camera frame snapshot (optical ground truth at native resolution)
       const frameSnapshot = getActiveCameraFrameSnapshot(sessionMemory.focusedCameraId);
       const targetCamName = frameSnapshot?.cameraName || cameras[0]?.name || 'Primary Surveillance Feed';
       const targetCamId = frameSnapshot?.cameraId || sessionMemory.focusedCameraId || cameras[0]?.id;
-      
-      const lower = text.toLowerCase();
-      const shouldIncludeFrame =
-        currentAttachment?.type === 'image' ||
-        lower.includes('scene') ||
-        lower.includes('explain') ||
-        lower.includes('footage') ||
-        lower.includes('look') ||
-        lower.includes('who') ||
-        lower.includes('vehicle') ||
-        lower.includes('pedestrian') ||
-        lower.includes('how many') ||
-        lower.includes('count') ||
-        lower.includes('breakdown') ||
-        lower.includes('plate') ||
-        lower.includes('what');
 
-      const frameBase64 = currentAttachment?.type === 'image'
-        ? currentAttachment.url
-        : shouldIncludeFrame
-        ? frameSnapshot?.dataUrl
-        : undefined;
+      // Motion query detection: send 2 frames (current + ~1.0s earlier) for speed/movement analysis
+      const isMovementQuery = /\b(move|moving|motion|speed|fast|slow|direction|velocity|towards|where did)\b/i.test(text);
+      const motionFrameBase64 = isMovementQuery ? frameSnapshot?.motionDataUrl : undefined;
 
-      // 2. Prepare conversation history for natural conversational context & follow-ups
+      // Always send the active decoded video frame if available
+      const frameBase64 = frameSnapshot?.dataUrl;
+
+      // Target crop if operator asked about a specific vehicle/person
+      let attachedCrop: string | undefined = undefined;
+      let attachedTrackId: number | string | undefined = undefined;
+      if (currentAttachment?.url) {
+        attachedCrop = currentAttachment.url;
+        attachedTrackId = currentAttachment.trackId;
+      }
+
+      // 2. Prepare conversation history for natural multi-turn context (last 10 turns)
       const historyPayload = messages
         .filter((m) => m.id !== 'welcome-msg')
-        .slice(-8)
+        .slice(-10)
         .map((m) => ({
           sender: m.sender,
           text: m.text,
@@ -398,119 +414,140 @@ Ask me anything or pick a quick command to begin:`,
         videoTime: currentTime,
       };
 
-      let aiMessageText = '';
-      let aiSource: 'gemini' | 'fallback' = 'fallback';
-      let aiReason: string | undefined = undefined;
-      let aiModel: string | undefined = undefined;
+      // Call streaming backend AI Copilot endpoint
+      const res = await fetch('/api/ai/chat?stream=true', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          message: text,
+          history: historyPayload,
+          frameBase64,
+          motionFrameBase64,
+          attachedCrop,
+          attachedTrackId,
+          cameraId: targetCamId,
+          cameraName: targetCamName,
+          currentTime,
+          context: contextPayload,
+          stream: true,
+        }),
+      });
 
-      // Call backend AI Copilot endpoint
-      try {
-        const res = await fetch('/api/ai/chat', {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({
-            message: text,
-            history: historyPayload,
-            frameBase64,
-            cameraId: targetCamId,
-            cameraName: targetCamName,
-            currentTime,
-            context: contextPayload,
-          }),
-        });
+      const contentType = res.headers.get('content-type') || '';
+      if (res.ok && contentType.includes('text/event-stream') && res.body) {
+        const reader = res.body.getReader();
+        const decoder = new TextDecoder();
+        let accumulatedText = '';
+        let streamDone = false;
+        let finalSource: 'gemini' | 'fallback' = 'gemini';
+        let finalModel: string | undefined = undefined;
+        let finalReason: string | undefined = undefined;
+        let buffer = '';
 
-        if (res.ok) {
-          const data = await res.json();
-          if (data.text) {
-            aiMessageText = data.text;
+        while (!streamDone) {
+          const { value, done } = await reader.read();
+          if (done) break;
+          buffer += decoder.decode(value, { stream: true });
+          const lines = buffer.split('\n');
+          buffer = lines.pop() || '';
+
+          for (const line of lines) {
+            const trimmed = line.trim();
+            if (!trimmed.startsWith('data:')) continue;
+            const dataStr = trimmed.slice(5).trim();
+            if (!dataStr) continue;
+            try {
+              const parsed = JSON.parse(dataStr);
+              if (parsed.text) {
+                accumulatedText += parsed.text;
+              }
+              if (parsed.source) finalSource = parsed.source;
+              if (parsed.model) finalModel = parsed.model;
+              if (parsed.reason) finalReason = parsed.reason;
+              if (parsed.done) {
+                streamDone = true;
+              }
+
+              setMessages((prev) =>
+                prev.map((m) =>
+                  m.id === aiMsgId
+                    ? {
+                        ...m,
+                        text: accumulatedText,
+                        source: finalSource,
+                        model: finalModel,
+                        reason: finalReason,
+                        isStreaming: !streamDone,
+                      }
+                    : m
+                )
+              );
+            } catch {
+              // Ignore partial or non-JSON SSE lines
+            }
           }
-          if (data.source === 'gemini') {
-            aiSource = 'gemini';
-            aiModel = data.model;
-          } else {
-            aiSource = 'fallback';
-            aiReason = data.reason || 'local engine';
-          }
-        } else {
-          const errData = await res.json().catch(() => ({}));
-          aiSource = 'fallback';
-          aiReason = errData.reason || `server error ${res.status}`;
         }
-      } catch (networkErr: any) {
-        console.warn('AI endpoint network notice, utilizing grounded fallback engine:', networkErr);
-        aiSource = 'fallback';
-        aiReason = 'network error';
-      }
 
-      // Also compute structured action recommendations (investigation report, action dispatch)
-      const localAnalysis = await processAICommand(
-        text,
-        {
-          cameras,
-          alerts,
-          sessionMemory,
-        },
-        currentAttachment || undefined
+        setMessages((prev) =>
+          prev.map((m) =>
+            m.id === aiMsgId
+              ? {
+                  ...m,
+                  text: accumulatedText || 'Offline mode: tracker data only. To enable visual understanding, set your Gemini API key.',
+                  source: finalSource,
+                  model: finalModel,
+                  reason: finalReason,
+                  isStreaming: false,
+                }
+              : m
+          )
+        );
+      } else {
+        // Fallback for non-streaming or error JSON payload
+        const data = await res.json().catch(() => ({}));
+        const responseText = data.text || 'Offline mode: tracker data only. To enable visual understanding, set your Gemini API key.';
+        const source = data.source === 'gemini' ? 'gemini' : 'fallback';
+        setMessages((prev) =>
+          prev.map((m) =>
+            m.id === aiMsgId
+              ? {
+                  ...m,
+                  text: responseText,
+                  source,
+                  model: data.model,
+                  reason: data.reason,
+                  isStreaming: false,
+                }
+              : m
+          )
+        );
+      }
+    } catch (networkErr: any) {
+      console.warn('AI endpoint communication notice:', networkErr);
+      setMessages((prev) =>
+        prev.map((m) =>
+          m.id === aiMsgId
+            ? {
+                ...m,
+                text: 'Offline mode: tracker data only. To enable visual understanding, set your Gemini API key.',
+                source: 'fallback',
+                reason: 'network error',
+                isStreaming: false,
+              }
+            : m
+        )
       );
-
-      const finalMessage: AIChatMessage = {
-        id: `ai-msg-${Date.now()}`,
-        sender: 'ai',
-        text: aiMessageText || localAnalysis.text,
-        timestamp: Date.now(),
-        source: aiSource,
-        reason: aiReason,
-        model: aiModel,
-        recommendation: localAnalysis.recommendation,
-        investigationReport: localAnalysis.investigationReport,
-        predictiveSignals: localAnalysis.predictiveSignals,
-        referencedEntities: localAnalysis.referencedEntities,
-      };
-
-      setMessages((prev) => [...prev, finalMessage]);
-
-      // Update session memory
-      if (finalMessage.referencedEntities?.incidentIds?.[0]) {
-        setSessionMemory((m) => ({
-          ...m,
-          focusedIncidentId: finalMessage.referencedEntities?.incidentIds?.[0],
-        }));
-      }
-      if (finalMessage.referencedEntities?.cameraIds?.[0]) {
-        setSessionMemory((m) => ({
-          ...m,
-          focusedCameraId: finalMessage.referencedEntities?.cameraIds?.[0],
-        }));
-      }
-    } catch (err: any) {
-      console.error('AI Command processing error:', err);
-      setMessages((prev) => [
-        ...prev,
-        {
-          id: `err-${Date.now()}`,
-          sender: 'ai',
-          text: `⚠️ **Diagnostic Notice**: Encountered an issue executing command: "${queryText}".
-Reason: ${err?.message || 'Inference engine timeout or parsing mismatch'}.
-
-**Live Grounding State:**
-- Cameras Active: **${cameras.length}**
-- Logged Incidents: **${alerts.length}**
-- High/Critical Alerts: **${alerts.filter((a) => a.severity === 'critical' || a.severity === 'high').length}**
-
-Try clicking one of the suggested command actions above or retry your query.`,
-          timestamp: Date.now(),
-        },
-      ]);
     } finally {
       setIsProcessing(false);
     }
   };
 
-  // Automatically execute pending initial query forwarded from CommandBar
+  // Automatically execute pending initial query forwarded from CommandBar / Live Monitor
   useEffect(() => {
     if (initialQuery && initialQuery.trim()) {
-      handleExecuteQuery(initialQuery.trim());
+      handleExecuteQuery(initialQuery.trim(), initialAttachment);
       onClearInitialQuery?.();
+      onClearInitialAttachment?.();
     }
   }, [initialQuery]);
 
@@ -887,7 +924,7 @@ Try clicking one of the suggested command actions above or retry your query.`,
                             {msg.source === 'gemini' ? (
                               <span
                                 className="inline-flex items-center gap-1 rounded bg-emerald-950/80 border border-emerald-700/60 px-2 py-0.5 text-[10px] font-semibold text-emerald-300"
-                                title={`Grounded by Gemini Multimodal API (${msg.model || 'gemini-2.5-flash'})`}
+                                title={`Grounded by Gemini Multimodal API (${msg.model || 'gemini-3.8-flash'})`}
                               >
                                 <Sparkles className="h-2.5 w-2.5 text-emerald-400" />
                                 <span>Gemini AI {msg.model ? `(${msg.model})` : ''}</span>
@@ -912,10 +949,30 @@ Try clicking one of the suggested command actions above or retry your query.`,
                       {isAi ? (
                         <div className="markdown-body text-neutral-100 text-xs sm:text-sm leading-relaxed space-y-2 [&_h3]:text-sm [&_h3]:font-bold [&_h3]:text-amber-400 [&_h3]:mt-2 [&_ul]:list-disc [&_ul]:pl-4 [&_ol]:list-decimal [&_ol]:pl-4 [&_li]:my-0.5 [&_strong]:text-amber-300 [&_code]:bg-neutral-800 [&_code]:px-1 [&_code]:py-0.5 [&_code]:rounded [&_code]:font-mono [&_code]:text-neutral-200">
                           <Markdown>{msg.text}</Markdown>
+                          {msg.isStreaming && (
+                            <span className="inline-block w-2 h-4 bg-amber-400 ml-1 animate-pulse align-middle" />
+                          )}
                         </div>
                       ) : (
                         <div className="whitespace-pre-wrap leading-relaxed text-neutral-950 font-medium text-xs sm:text-sm">
                           {msg.text}
+                        </div>
+                      )}
+
+                      {/* Prominent 'Set API key' button on offline fallback */}
+                      {isAi && msg.source === 'fallback' && msg.id !== 'welcome-msg' && (
+                        <div className="mt-3 pt-2.5 border-t border-neutral-800 flex flex-wrap items-center justify-between gap-2">
+                          <span className="text-[11px] text-neutral-400">Gemini vision key required for visual multimodal reasoning</span>
+                          <button
+                            type="button"
+                            data-testid="copilot-fallback-set-key-btn"
+                            id="copilot-fallback-set-key-btn"
+                            onClick={handleOpenKeyModal}
+                            className="inline-flex items-center gap-1.5 rounded-lg bg-amber-500 hover:bg-amber-400 text-neutral-950 px-3 py-1 text-xs font-semibold shadow-sm transition-colors shrink-0"
+                          >
+                            <Key className="h-3 w-3" />
+                            <span>Set API key</span>
+                          </button>
                         </div>
                       )}
 

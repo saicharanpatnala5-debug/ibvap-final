@@ -2,6 +2,7 @@ import { TrackedObject } from '../types';
 
 export interface CameraFrameSnapshot {
   dataUrl: string;
+  motionDataUrl?: string;
   width: number;
   height: number;
   trackedObjects: TrackedObject[];

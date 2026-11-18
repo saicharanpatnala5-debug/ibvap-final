@@ -79,7 +79,7 @@ interface CameraFeedProps {
     validationStatus?: string;
   }) => void;
   onInspectObject?: (object: TrackedObject) => void;
-  onAskAI?: (prompt: string) => void;
+  onAskAI?: (prompt: string, attachment?: any) => void;
   reducedMotion?: boolean;
   seekToTime?: number | null;
 }
@@ -326,25 +326,56 @@ export const CameraFeed: React.FC<CameraFeedProps> = ({
     };
   }, [camera.wsUrl, camera.aiSourceId]);
 
+  // Rolling frame buffer for motion reasoning (~1s earlier)
+  const recentFramesRef = useRef<{ dataUrl: string; time: number }[]>([]);
+
   // Register active camera frame provider for AI visual grounding
   useEffect(() => {
     registerCameraFrameProvider(camera.id, camera.name, () => {
       const video = videoRef.current;
       if (!video || video.readyState < 2) return null;
+
+      // Native resolution scaled to max 1280px on long side
+      const origW = video.videoWidth || 640;
+      const origH = video.videoHeight || 360;
+      const maxDim = Math.max(origW, origH);
+      const scale = maxDim > 1280 ? 1280 / maxDim : 1.0;
+
+      const targetW = Math.round(origW * scale);
+      const targetH = Math.round(origH * scale);
+
       const snapCanvas = document.createElement('canvas');
-      snapCanvas.width = video.videoWidth || 640;
-      snapCanvas.height = video.videoHeight || 360;
+      snapCanvas.width = targetW;
+      snapCanvas.height = targetH;
       const ctx = snapCanvas.getContext('2d');
       if (!ctx) return null;
-      ctx.drawImage(video, 0, 0, snapCanvas.width, snapCanvas.height);
+      ctx.drawImage(video, 0, 0, targetW, targetH);
+      const currentJpeg = snapCanvas.toDataURL('image/jpeg', 0.85);
+
+      // Find frame from ~1.0s earlier in buffer
+      const curTime = video.currentTime;
+      const buf = recentFramesRef.current;
+      let motionJpeg: string | undefined = undefined;
+      for (let i = buf.length - 1; i >= 0; i--) {
+        const diff = Math.abs(curTime - buf[i].time);
+        if (diff >= 0.7 && diff <= 1.8) {
+          motionJpeg = buf[i].dataUrl;
+          break;
+        }
+      }
+
+      buf.push({ dataUrl: currentJpeg, time: curTime });
+      if (buf.length > 20) buf.shift();
+
       return {
-        dataUrl: snapCanvas.toDataURL('image/jpeg', 0.88),
-        width: snapCanvas.width,
-        height: snapCanvas.height,
+        dataUrl: currentJpeg,
+        motionDataUrl: motionJpeg,
+        width: targetW,
+        height: targetH,
         trackedObjects: targetTracksRef.current,
         clipTotalEntities: trackerRef.current.getCumulativeUniqueTracks(),
         isNightMode,
-        currentTime: video.currentTime,
+        currentTime: curTime,
       };
     });
     return () => {
@@ -1673,6 +1704,54 @@ export const CameraFeed: React.FC<CameraFeedProps> = ({
                 <span>
                   #{obj.id} {obj.class}
                 </span>
+
+                {/* Ask about this vehicle/person in AI Copilot */}
+                {onAskAI && (
+                  <button
+                    type="button"
+                    id={`ask-about-track-${obj.id}-btn`}
+                    onClick={(e) => {
+                      e.stopPropagation();
+                      const video = videoRef.current;
+                      let cropUrl: string | undefined = undefined;
+                      if (video && video.readyState >= 2) {
+                        try {
+                          const c = document.createElement('canvas');
+                          const sx = Math.max(0, Math.floor((obj.bbox.x || 0) * video.videoWidth));
+                          const sy = Math.max(0, Math.floor((obj.bbox.y || 0) * video.videoHeight));
+                          const sw = Math.min(video.videoWidth - sx, Math.ceil((obj.bbox.width || 0.1) * video.videoWidth));
+                          const sh = Math.min(video.videoHeight - sy, Math.ceil((obj.bbox.height || 0.1) * video.videoHeight));
+                          if (sw > 10 && sh > 10) {
+                            c.width = sw;
+                            c.height = sh;
+                            const ctx = c.getContext('2d');
+                            if (ctx) {
+                              ctx.drawImage(video, sx, sy, sw, sh, 0, 0, sw, sh);
+                              cropUrl = c.toDataURL('image/jpeg', 0.85);
+                            }
+                          }
+                        } catch {}
+                      }
+                      const isPerson = obj.class === 'person' || obj.class === 'pedestrian';
+                      const label = isPerson ? 'person' : 'vehicle';
+                      onAskAI(
+                        `What is ${label} #${obj.id} (${obj.class}) doing in the scene?`,
+                        {
+                          type: 'crop',
+                          url: cropUrl || obj.anpr?.cropDataUrl || '',
+                          trackId: obj.id,
+                          objectClass: obj.class,
+                        }
+                      );
+                    }}
+                    className="ml-1 inline-flex items-center gap-1 rounded bg-cyan-950/90 border border-cyan-700/70 px-1.5 py-0.5 text-[10px] font-medium text-cyan-300 hover:bg-cyan-900 transition-colors"
+                    title={`Ask about this ${obj.class} in AI Copilot`}
+                  >
+                    <Sparkles className="h-2.5 w-2.5 text-cyan-400" />
+                    <span>Ask AI</span>
+                  </button>
+                )}
+
                 {obj.anpr && (
                   <button
                     onClick={() => onSelectPlate(obj.anpr!.plateText, obj.anpr!.cropDataUrl)}

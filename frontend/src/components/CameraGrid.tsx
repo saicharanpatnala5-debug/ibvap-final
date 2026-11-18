@@ -12,7 +12,7 @@ interface CameraGridProps {
   onSelectPlate: (plate: string, cropUrl?: string) => void;
   onPlateDetected?: (info: any) => void;
   onOpenAddCamera: () => void;
-  onAskAI?: (prompt: string) => void;
+  onAskAI?: (prompt: string, attachment?: any) => void;
   reducedMotion?: boolean;
   seekTarget?: { cameraId: string; time: number } | null;
 }

@@ -50,8 +50,9 @@ export default function App() {
   const [investigatingIncident, setInvestigatingIncident] = useState<AlertIncident | null>(null);
   const [dossierPlate, setDossierPlate] = useState<{ plate: string; cropUrl?: string } | null>(null);
 
-  // Command center query trigger from CommandBar
+  // Command center query trigger from CommandBar / Live Monitor
   const [pendingCommandQuery, setPendingCommandQuery] = useState<string | null>(null);
+  const [pendingCommandAttachment, setPendingCommandAttachment] = useState<any | null>(null);
 
   // ANPR Plate Registry records collected from camera detections
   const [plateRecords, setPlateRecords] = useState<PlateRegistryRecord[]>(() => loadStoredPlateRecords());
@@ -652,8 +653,9 @@ export default function App() {
               onSelectPlate={(plate, cropUrl) => setDossierPlate({ plate, cropUrl })}
               onPlateDetected={handlePlateDetected}
               onOpenAddCamera={() => setIsAddCameraOpen(true)}
-              onAskAI={(prompt) => {
+              onAskAI={(prompt, attachment) => {
                 setPendingCommandQuery(prompt);
+                setPendingCommandAttachment(attachment || null);
                 setActiveTab('command');
               }}
               reducedMotion={a11ySettings.reducedMotion}
@@ -670,6 +672,7 @@ export default function App() {
               onJumpToFootage={handleJumpToFootage}
               onAskAI={(prompt) => {
                 setPendingCommandQuery(prompt);
+                setPendingCommandAttachment(null);
                 setActiveTab('command');
               }}
               onLoadDemoData={handleLoadDemoData}
@@ -707,6 +710,8 @@ export default function App() {
               onOpenIncidentModal={(incident) => setInvestigatingIncident(incident)}
               initialQuery={pendingCommandQuery}
               onClearInitialQuery={() => setPendingCommandQuery(null)}
+              initialAttachment={pendingCommandAttachment}
+              onClearInitialAttachment={() => setPendingCommandAttachment(null)}
             />
           </div>
         )}
