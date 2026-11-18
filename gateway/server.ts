@@ -411,23 +411,65 @@ function sanitizeTelemetryString(val: unknown, maxLen = 100): string {
     .slice(0, maxLen);
 }
 
+export function countEntities(entities: any[]): {
+  pedestrians: number;
+  cars: number;
+  autoRickshaws: number;
+  twoWheelers: number;
+  trucksBuses: number;
+  vehicles: number;
+  total: number;
+} {
+  let pedestrians = 0;
+  let cars = 0;
+  let autoRickshaws = 0;
+  let twoWheelers = 0;
+  let trucksBuses = 0;
+
+  for (const ent of entities || []) {
+    const cls = (ent?.class || '').toLowerCase();
+    if (cls === 'person' || cls === 'pedestrian') {
+      pedestrians++;
+    } else if (cls === 'car') {
+      cars++;
+    } else if (cls === 'auto-rickshaw' || cls === 'three-wheeler') {
+      autoRickshaws++;
+    } else if (cls === 'motorcycle' || cls === 'bicycle' || cls === 'two-wheeler') {
+      twoWheelers++;
+    } else if (cls === 'truck' || cls === 'bus' || cls === 'truck/bus') {
+      trucksBuses++;
+    }
+  }
+  const vehicles = cars + autoRickshaws + twoWheelers + trucksBuses;
+  return {
+    pedestrians,
+    cars,
+    autoRickshaws,
+    twoWheelers,
+    trucksBuses,
+    vehicles,
+    total: pedestrians + vehicles,
+  };
+}
+
 export function computeOfflineTrackerFallback(context: any): string {
   const vis = Array.isArray(context?.entities) ? context.entities : [];
   const clip = Array.isArray(context?.clipTotalEntities) && context.clipTotalEntities.length > 0
     ? context.clipTotalEntities
     : vis;
 
-  const isPed = (c?: string) => c === 'person' || c === 'pedestrian';
-  const isVeh = (c?: string) =>
-    ['car', 'two-wheeler', 'motorcycle', 'bicycle', 'auto-rickshaw', 'three-wheeler', 'truck', 'bus', 'truck/bus'].includes(c || '');
+  const visCounts = countEntities(vis);
+  const clipCounts = countEntities(clip);
+  const time = typeof context?.videoTime === 'number' ? `At ${context.videoTime.toFixed(1)}s: ` : '';
 
-  const visPedestrians = vis.filter((e: any) => isPed(e?.class)).length;
-  const visVehicles = vis.filter((e: any) => isVeh(e?.class)).length;
+  const visDetails: string[] = [];
+  if (visCounts.cars > 0) visDetails.push(`${visCounts.cars} car${visCounts.cars > 1 ? 's' : ''}`);
+  if (visCounts.autoRickshaws > 0) visDetails.push(`${visCounts.autoRickshaws} auto-rickshaw${visCounts.autoRickshaws > 1 ? 's' : ''}`);
+  if (visCounts.twoWheelers > 0) visDetails.push(`${visCounts.twoWheelers} two-wheeler${visCounts.twoWheelers > 1 ? 's' : ''}`);
+  if (visCounts.trucksBuses > 0) visDetails.push(`${visCounts.trucksBuses} truck/bus${visCounts.trucksBuses > 1 ? 'es' : ''}`);
+  const visVehStr = visDetails.length > 0 ? `${visDetails.join(', ')} (${visCounts.vehicles} vehicles)` : `${visCounts.vehicles} vehicles`;
 
-  const clipPedestrians = clip.filter((e: any) => isPed(e?.class)).length;
-  const clipVehicles = clip.filter((e: any) => isVeh(e?.class)).length;
-
-  return `Offline mode: tracker data only. To enable visual understanding, set your Gemini API key.\n\nVisible now: ${visVehicles} vehicles, ${visPedestrians} pedestrians.\nClip total: ${clipVehicles} vehicles, ${clipPedestrians} pedestrians.`;
+  return `Offline mode: tracker data only. To enable visual understanding, set your Gemini API key.\n\n- ${time}${visVehStr}, ${visCounts.pedestrians} pedestrian${visCounts.pedestrians !== 1 ? 's' : ''}.\n- Clip total: ${clipCounts.vehicles} vehicle${clipCounts.vehicles !== 1 ? 's' : ''}, ${clipCounts.pedestrians} pedestrian${clipCounts.pedestrians !== 1 ? 's' : ''} across ${clipCounts.total} track${clipCounts.total !== 1 ? 's' : ''}.`;
 }
 
 export function buildCompactTelemetryBlock(context: any, cameraName?: string): string {
@@ -454,21 +496,8 @@ export function buildCompactTelemetryBlock(context: any, cameraName?: string): s
     zone: a?.zoneName,
   }));
 
-  const isPed = (c?: string) => c === 'person' || c === 'pedestrian';
-  const isVeh = (c?: string) =>
-    ['car', 'two-wheeler', 'motorcycle', 'bicycle', 'auto-rickshaw', 'three-wheeler', 'truck', 'bus', 'truck/bus'].includes(c || '');
-
-  const clipCounts = {
-    totalTracksInClip: clipTotal.length,
-    pedestrians: clipTotal.filter((e: any) => isPed(e?.class)).length,
-    vehicles: clipTotal.filter((e: any) => isVeh(e?.class)).length,
-  };
-
-  const visibleCounts = {
-    visibleTracksNow: entities.length,
-    pedestrians: entities.filter((e: any) => isPed(e?.class)).length,
-    vehicles: entities.filter((e: any) => isVeh(e?.class)).length,
-  };
+  const clipCounts = countEntities(clipTotal);
+  const visibleCounts = countEntities(entities);
 
   return JSON.stringify(
     {
