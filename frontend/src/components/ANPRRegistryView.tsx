@@ -1,4 +1,4 @@
-import React, { useState, useMemo } from 'react';
+import React, { useState, useMemo, useRef } from 'react';
 import {
   Car,
   Search,
@@ -17,8 +17,17 @@ import {
   Plus,
   Trash2,
   EyeOff,
+  Camera,
+  Download,
+  UploadCloud,
+  FileSpreadsheet,
+  Layers,
+  Info,
+  X,
+  ExternalLink,
 } from 'lucide-react';
-import { PlateRegistryRecord, CameraFeedItem, PlateStatus } from '../types';
+import { PlateRegistryRecord, CameraFeedItem, PlateStatus, ImageANPRPlateItem } from '../types';
+import { detectPlatesFromImage } from '../services/anprEngine';
 
 interface ANPRRegistryViewProps {
   records: PlateRegistryRecord[];
@@ -30,6 +39,7 @@ interface ANPRRegistryViewProps {
   onCorrectPlate?: (recordId: string, newPlate: string) => void;
   onUpgradeRecordWithAi?: (recordId: string, aiData: any) => void;
   onOpenAddCamera?: () => void;
+  onAddPlateRecord?: (record: PlateRegistryRecord) => void;
 }
 
 export const ANPRRegistryView: React.FC<ANPRRegistryViewProps> = ({
@@ -42,10 +52,20 @@ export const ANPRRegistryView: React.FC<ANPRRegistryViewProps> = ({
   onCorrectPlate,
   onUpgradeRecordWithAi,
   onOpenAddCamera,
+  onAddPlateRecord,
 }) => {
   const [searchQuery, setSearchQuery] = useState('');
   const [statusFilter, setStatusFilter] = useState<'all' | 'valid' | 'review' | 'unreadable' | 'distant' | 'watchlist'>('all');
   const [selectedRecordId, setSelectedRecordId] = useState<string | null>(null);
+
+  // Static Image ANPR modal state
+  const [isImageModalOpen, setIsImageModalOpen] = useState(false);
+  const [uploadedImagePreview, setUploadedImagePreview] = useState<string | null>(null);
+  const [isAnalyzingImage, setIsAnalyzingImage] = useState(false);
+  const [imageAnprResults, setImageAnprResults] = useState<ImageANPRPlateItem[] | null>(null);
+  const [imageAnprLatency, setImageAnprLatency] = useState<number | null>(null);
+  const [imageAnprError, setImageAnprError] = useState<string | null>(null);
+  const fileInputRef = useRef<HTMLInputElement>(null);
 
   // Operator manual correction inline state
   const [isEditingPlate, setIsEditingPlate] = useState(false);
@@ -327,6 +347,138 @@ export const ANPRRegistryView: React.FC<ANPRRegistryViewProps> = ({
     }
   };
 
+  // Static Image ANPR Handlers
+  const handleImageFileChange = (e: React.ChangeEvent<HTMLInputElement>) => {
+    const file = e.target.files?.[0];
+    if (!file) return;
+
+    setImageAnprError(null);
+    setImageAnprResults(null);
+    setImageAnprLatency(null);
+
+    const reader = new FileReader();
+    reader.onload = async () => {
+      const b64 = reader.result as string;
+      setUploadedImagePreview(b64);
+      setIsAnalyzingImage(true);
+      try {
+        const data = await detectPlatesFromImage(b64);
+        setImageAnprResults(data.results || []);
+        setImageAnprLatency(data.latencyMs);
+      } catch (err: any) {
+        setImageAnprError(err.message || 'Image ANPR failed');
+      } finally {
+        setIsAnalyzingImage(false);
+      }
+    };
+    reader.onerror = () => {
+      setImageAnprError('Failed to read image file');
+    };
+    reader.readAsDataURL(file);
+  };
+
+  const handleAddImageResultToRegistry = (item: ImageANPRPlateItem) => {
+    if (!onAddPlateRecord) return;
+    const clean = (item.plateText || '').toUpperCase().replace(/[^A-Z0-9]/g, '');
+    const rec: PlateRegistryRecord = {
+      id: `img-rec-${clean || 'plate'}-${Date.now()}-${Math.random().toString(36).slice(2, 6)}`,
+      plateNumber: clean || 'UNREADABLE',
+      status: item.isValidFormat ? 'Valid format' : (item.isReadable ? 'Low confidence - needs review' : 'Unreadable'),
+      formatValidationStatus: item.validationStatus,
+      isValidFormat: item.isValidFormat,
+      formatType: item.formatType as any,
+      confidence: item.confidence,
+      cameraId: 'cam-image-upload',
+      cameraName: 'Static Image Upload',
+      timestamp: Date.now(),
+      cropUrl: item.plateCropDataUrl,
+      vehicleThumbnailUrl: item.vehicleCropDataUrl,
+      charConfidences: item.charConfidences,
+      scaleUsed: item.scaleUsed,
+      attempts: 1,
+      bestGuessPlate: clean,
+      isDualRow: item.isDualRow,
+      stateCode: item.stateCode,
+      stateName: item.stateName,
+      rtoCode: item.rtoCode,
+      rtoOffice: item.rtoOffice,
+      ocrModel: item.ocrModel || 'Awiros ANPR-OCR',
+      vehicleClass: item.vehicleClass,
+    };
+    onAddPlateRecord(rec);
+  };
+
+  const handleAddAllImageResultsToRegistry = () => {
+    if (!imageAnprResults || !onAddPlateRecord) return;
+    for (const item of imageAnprResults) {
+      handleAddImageResultToRegistry(item);
+    }
+    setIsImageModalOpen(false);
+  };
+
+  // Export Handlers
+  const handleExportCSV = () => {
+    if (records.length === 0) return;
+    const headers = [
+      'Record ID',
+      'Plate Number',
+      'Validation Status',
+      'Format Valid',
+      'Format Type',
+      'Confidence (%)',
+      'State Code',
+      'State Name',
+      'RTO Office',
+      'Layout',
+      'OCR Model',
+      'Vehicle Class',
+      'Camera Name',
+      'Timestamp',
+      'Registered Owner',
+      'Vehicle Make/Model',
+    ];
+
+    const rows = records.map((r) => [
+      `"${r.id}"`,
+      `"${r.plateNumber || ''}"`,
+      `"${r.formatValidationStatus || r.status || ''}"`,
+      r.isValidFormat ? 'Yes' : 'No',
+      `"${r.formatType || ''}"`,
+      r.confidence,
+      `"${r.stateCode || ''}"`,
+      `"${r.stateName || ''}"`,
+      `"${r.rtoOffice || ''}"`,
+      r.isDualRow ? 'Dual-Row' : 'Single-Row',
+      `"${r.ocrModel || 'Awiros ANPR-OCR'}"`,
+      `"${r.vehicleClass || ''}"`,
+      `"${r.cameraName || ''}"`,
+      `"${new Date(r.timestamp).toISOString()}"`,
+      `"${r.dossier?.registeredOwner || ''}"`,
+      `"${r.dossier ? `${r.dossier.vehicleMake} ${r.dossier.vehicleModel}` : ''}"`,
+    ]);
+
+    const csvContent = [headers.join(','), ...rows.map((row) => row.join(','))].join('\n');
+    const blob = new Blob([csvContent], { type: 'text/csv;charset=utf-8;' });
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement('a');
+    a.href = url;
+    a.download = `IBVAP_ANPR_Registry_${new Date().toISOString().slice(0, 10)}.csv`;
+    a.click();
+    URL.revokeObjectURL(url);
+  };
+
+  const handleExportJSON = () => {
+    if (records.length === 0) return;
+    const jsonStr = JSON.stringify(records, null, 2);
+    const blob = new Blob([jsonStr], { type: 'application/json' });
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement('a');
+    a.href = url;
+    a.download = `IBVAP_ANPR_Registry_${new Date().toISOString().slice(0, 10)}.json`;
+    a.click();
+    URL.revokeObjectURL(url);
+  };
+
   const getStatusBadge = (status: PlateStatus, formatType?: string, isAiAssisted?: boolean) => {
     if (status === 'Plate not legible at this distance' || formatType === 'distance_gated') {
       return (
@@ -396,7 +548,48 @@ export const ANPRRegistryView: React.FC<ANPRRegistryViewProps> = ({
             </div>
           </div>
 
-          <div className="flex items-center gap-2">
+          <div className="flex flex-wrap items-center gap-2">
+            {/* Upload Image ANPR Button */}
+            <button
+              type="button"
+              id="upload-image-anpr-btn"
+              onClick={() => {
+                setImageAnprError(null);
+                setIsImageModalOpen(true);
+              }}
+              className="inline-flex items-center gap-1.5 rounded-lg border border-amber-500/60 bg-amber-500/10 px-3 py-1.5 text-xs font-semibold text-amber-300 hover:bg-amber-500/20 transition-colors shadow-sm"
+              title="Upload a static image to detect and extract number plates"
+            >
+              <UploadCloud className="h-3.5 w-3.5 text-amber-400" />
+              <span>Upload Image ANPR</span>
+            </button>
+
+            {/* Export CSV / JSON */}
+            {records.length > 0 && (
+              <div className="flex items-center gap-1">
+                <button
+                  type="button"
+                  id="export-csv-btn"
+                  onClick={handleExportCSV}
+                  className="inline-flex items-center gap-1 rounded-lg border border-neutral-800 bg-neutral-900 px-2.5 py-1.5 text-xs font-medium text-neutral-300 hover:bg-neutral-800 hover:text-white transition-colors"
+                  title="Export all records to CSV"
+                >
+                  <Download className="h-3.5 w-3.5 text-neutral-400" />
+                  <span>CSV</span>
+                </button>
+                <button
+                  type="button"
+                  id="export-json-btn"
+                  onClick={handleExportJSON}
+                  className="inline-flex items-center gap-1 rounded-lg border border-neutral-800 bg-neutral-900 px-2.5 py-1.5 text-xs font-medium text-neutral-300 hover:bg-neutral-800 hover:text-white transition-colors"
+                  title="Export all records to JSON"
+                >
+                  <Download className="h-3.5 w-3.5 text-neutral-400" />
+                  <span>JSON</span>
+                </button>
+              </div>
+            )}
+
             {records.length > 0 && onClearAllData && (
               <button
                 type="button"
@@ -716,6 +909,18 @@ export const ANPRRegistryView: React.FC<ANPRRegistryViewProps> = ({
                                   AI-assisted
                                 </span>
                               )}
+                              {record.isDualRow !== undefined && (
+                                <span className={`rounded border px-1.5 py-0.2 text-[9px] font-mono font-semibold ${
+                                  record.isDualRow
+                                    ? 'bg-purple-950/90 border-purple-700 text-purple-300'
+                                    : 'bg-blue-950/90 border-blue-700 text-blue-300'
+                                }`}>
+                                  {record.isDualRow ? '2-Row' : '1-Row'}
+                                </span>
+                              )}
+                              <span className="rounded bg-indigo-950/80 border border-indigo-700/60 px-1.5 py-0.2 text-[9px] font-bold text-indigo-300">
+                                {record.ocrModel || 'Awiros ANPR-OCR'}
+                              </span>
                               {record.attempts !== undefined && record.attempts > 0 && (
                                 <span className="rounded bg-neutral-800 border border-neutral-700 px-1.5 py-0.2 text-[9px] font-mono text-neutral-400">
                                   {record.attempts} attempt{record.attempts > 1 ? 's' : ''}
@@ -732,6 +937,11 @@ export const ANPRRegistryView: React.FC<ANPRRegistryViewProps> = ({
                                 </span>
                               )}
                             </div>
+                            {(record.stateName || record.stateCode) && (
+                              <span className="text-[11px] text-amber-400/90 font-medium block mt-0.5">
+                                {record.stateName || record.stateCode} {record.rtoOffice ? `• ${record.rtoOffice}` : (record.rtoCode ? `• RTO ${record.rtoCode}` : '')}
+                              </span>
+                            )}
                             <span className="text-xs text-neutral-400 block mt-0.5">
                               {record.dossier
                                 ? `${record.dossier.vehicleMake} ${record.dossier.vehicleModel} • ${record.dossier.registeredOwner}`
@@ -851,27 +1061,61 @@ export const ANPRRegistryView: React.FC<ANPRRegistryViewProps> = ({
                   <div>{getStatusBadge(activeRecord.status, activeRecord.formatType)}</div>
                 </div>
 
-                {/* Plate Display + Crop */}
-                <div className="my-4 flex flex-col sm:flex-row items-center justify-between gap-3 p-3 rounded-lg bg-neutral-950 border border-neutral-800">
-                  <div className="flex items-center rounded-md border-2 border-neutral-700 bg-white px-4 py-2 font-mono font-bold tracking-widest text-lg text-neutral-950 shadow-sm">
-                    <span className="text-[10px] text-blue-800 font-extrabold mr-2 border-r-2 border-black/20 pr-1.5">IND</span>
-                    <span>{activeRecord.plateNumber}</span>
+                {/* Visual Telemetry: Plate Display + Crops */}
+                <div className="my-4 p-3.5 rounded-xl bg-neutral-950 border border-neutral-800 space-y-3">
+                  <div className="flex items-center justify-between gap-2 flex-wrap">
+                    <span className="text-[11px] font-semibold text-neutral-400 uppercase tracking-wider flex items-center gap-1.5">
+                      <Camera className="h-3.5 w-3.5 text-amber-400" />
+                      Visual Camera & OCR Telemetry
+                    </span>
+                    <div className="flex items-center gap-1.5">
+                      {activeRecord.isDualRow !== undefined && (
+                        <span className={`rounded border px-1.5 py-0.5 text-[9px] font-mono font-semibold ${
+                          activeRecord.isDualRow
+                            ? 'bg-purple-950/90 border-purple-700 text-purple-300'
+                            : 'bg-blue-950/90 border-blue-700 text-blue-300'
+                        }`}>
+                          {activeRecord.isDualRow ? 'Dual-Row (2-Row)' : 'Single-Row (1-Row)'}
+                        </span>
+                      )}
+                      <span className="rounded bg-indigo-950/80 border border-indigo-700/60 px-1.5 py-0.5 text-[9px] font-bold text-indigo-300">
+                        {activeRecord.ocrModel || 'Awiros ANPR-OCR'}
+                      </span>
+                    </div>
                   </div>
 
-                  {activeRecord.cropUrl && (
-                    <div className="flex flex-col items-center">
-                      <span className="text-[10px] uppercase tracking-wider text-neutral-500 mb-1">
-                        Isolated Crop
-                      </span>
-                      <div className="h-12 max-w-[180px] rounded border border-neutral-700 bg-black overflow-hidden flex items-center justify-center">
-                        <img
-                          src={activeRecord.cropUrl}
-                          alt="Plate crop"
-                          className="max-h-full max-w-full object-contain"
-                        />
+                  <div className="flex flex-col sm:flex-row items-center justify-between gap-3 pt-1">
+                    <div className="flex flex-col gap-1">
+                      <div className="flex items-center rounded-md border-2 border-neutral-700 bg-white px-4 py-2 font-mono font-bold tracking-widest text-lg text-neutral-950 shadow-sm">
+                        <span className="text-[10px] text-blue-800 font-extrabold mr-2 border-r-2 border-black/20 pr-1.5">IND</span>
+                        <span>{activeRecord.plateNumber}</span>
                       </div>
+                      {(activeRecord.stateName || activeRecord.stateCode) && (
+                        <span className="text-xs text-amber-400 font-medium">
+                          {activeRecord.stateName || activeRecord.stateCode} {activeRecord.rtoOffice ? `• ${activeRecord.rtoOffice}` : (activeRecord.rtoCode ? `• RTO ${activeRecord.rtoCode}` : '')}
+                        </span>
+                      )}
                     </div>
-                  )}
+
+                    <div className="flex items-center gap-2">
+                      {activeRecord.vehicleThumbnailUrl && (
+                        <div className="flex flex-col items-center">
+                          <span className="text-[9px] uppercase tracking-wider text-neutral-500 mb-0.5">Vehicle</span>
+                          <div className="h-12 w-20 rounded border border-neutral-750 bg-black overflow-hidden flex items-center justify-center">
+                            <img src={activeRecord.vehicleThumbnailUrl} alt="Vehicle Crop" className="max-h-full max-w-full object-contain" />
+                          </div>
+                        </div>
+                      )}
+                      {activeRecord.cropUrl && (
+                        <div className="flex flex-col items-center">
+                          <span className="text-[9px] uppercase tracking-wider text-neutral-500 mb-0.5">Plate Crop</span>
+                          <div className="h-12 max-w-[140px] rounded border border-neutral-750 bg-black overflow-hidden flex items-center justify-center">
+                            <img src={activeRecord.cropUrl} alt="Plate crop" className="max-h-full max-w-full object-contain" />
+                          </div>
+                        </div>
+                      )}
+                    </div>
+                  </div>
                 </div>
 
                 {/* If plate is unreadable or needs review, NO fake dossier is displayed */}
@@ -886,6 +1130,19 @@ export const ANPRRegistryView: React.FC<ANPRRegistryViewProps> = ({
                         ? 'Plate was read and validated, but no matching record exists in the demo registry. No synthetic record is invented.'
                         : 'Registry data is never attached to unreadable or low-confidence reads. Simulated records are only returned for validated exact matches.'}
                     </p>
+
+                    {/* Statutory Parivahan / VAHAN Gateway Status Notice */}
+                    <div className="mt-3 p-3 rounded-lg bg-neutral-900 border border-neutral-800 text-left">
+                      <div className="flex items-center gap-1.5 text-xs font-semibold text-neutral-300 mb-1">
+                        <ShieldAlert className="h-3.5 w-3.5 text-amber-400 shrink-0" />
+                        <span>Official Parivahan / VAHAN Gateway Status</span>
+                      </div>
+                      <p className="text-[11px] text-neutral-400 leading-relaxed">
+                        Official VAHAN owner dossier requires configured <code className="text-amber-400">PARIVAHAN_API_KEY</code>.
+                        Under India's DPDP Act 2023, automated scraping of parivahan.gov.in is strictly prohibited.
+                        Optical camera recognition is independently verified above.
+                      </p>
+                    </div>
 
                     {/* Operator Quick Actions: Confirm Read, AI Read, Manual Correction */}
                     <div className="mt-4 pt-4 border-t border-neutral-800/80 flex flex-col gap-3">
@@ -1100,6 +1357,177 @@ export const ANPRRegistryView: React.FC<ANPRRegistryViewProps> = ({
                 )}
               </div>
             ) : null}
+          </div>
+        </div>
+      )}
+
+      {/* Static Image ANPR Inspection Modal */}
+      {isImageModalOpen && (
+        <div id="image-anpr-modal" className="fixed inset-0 z-50 flex items-center justify-center bg-black/80 p-4 backdrop-blur-sm overflow-y-auto">
+          <div className="max-w-3xl w-full rounded-2xl border border-neutral-700 bg-neutral-900 p-6 shadow-2xl my-8">
+            <div className="flex items-center justify-between pb-4 border-b border-neutral-800">
+              <div className="flex items-center gap-3">
+                <div className="p-2.5 rounded-xl bg-amber-500/10 border border-amber-500/30 text-amber-400">
+                  <UploadCloud className="h-6 w-6" />
+                </div>
+                <div>
+                  <h3 className="text-base font-bold text-neutral-100">
+                    Static Image ANPR & Plate Inspection
+                  </h3>
+                  <p className="text-xs text-neutral-400">
+                    Upload a vehicle photo to detect all vehicles, locate license plates, and run Awiros ANPR-OCR.
+                  </p>
+                </div>
+              </div>
+              <button
+                type="button"
+                onClick={() => setIsImageModalOpen(false)}
+                className="rounded-lg p-1 text-neutral-400 hover:text-white hover:bg-neutral-800 transition-colors"
+              >
+                <X className="h-5 w-5" />
+              </button>
+            </div>
+
+            {/* Hidden File Input */}
+            <input
+              type="file"
+              ref={fileInputRef}
+              onChange={handleImageFileChange}
+              accept="image/jpeg,image/png,image/webp"
+              className="hidden"
+            />
+
+            {/* Drop / Selector Area */}
+            <div
+              onClick={() => fileInputRef.current?.click()}
+              className="mt-5 border-2 border-dashed border-neutral-700 hover:border-amber-500 rounded-xl p-6 text-center cursor-pointer transition-colors bg-neutral-950/40 hover:bg-neutral-950/80"
+            >
+              <UploadCloud className="mx-auto h-10 w-10 text-neutral-500 mb-2" />
+              <p className="text-sm font-semibold text-neutral-200">
+                Click or drop an image file here to analyze
+              </p>
+              <p className="text-xs text-neutral-400 mt-1">
+                Supports JPEG, PNG, WebP (up to 15MB)
+              </p>
+            </div>
+
+            {/* Processing State */}
+            {isAnalyzingImage && (
+              <div className="mt-5 p-6 rounded-xl bg-neutral-950 border border-neutral-800 text-center animate-pulse">
+                <Sparkles className="mx-auto h-8 w-8 text-amber-400 animate-spin mb-2" />
+                <p className="text-sm font-semibold text-neutral-200">Running Multi-Scale FastALPR & Awiros OCR...</p>
+                <p className="text-xs text-neutral-500 mt-1">Localizing vehicle crops and validating Indian statutory formats</p>
+              </div>
+            )}
+
+            {/* Error Message */}
+            {imageAnprError && (
+              <div className="mt-4 p-3 rounded-lg bg-red-950/80 border border-red-800 text-xs text-red-300">
+                {imageAnprError}
+              </div>
+            )}
+
+            {/* Analysis Results */}
+            {imageAnprResults !== null && !isAnalyzingImage && (
+              <div className="mt-5 space-y-4">
+                <div className="flex items-center justify-between text-xs text-neutral-300 pb-2 border-b border-neutral-800">
+                  <span className="font-semibold">
+                    Detected {imageAnprResults.length} vehicle{imageAnprResults.length === 1 ? '' : 's'} / {imageAnprResults.filter((p) => p.isReadable).length} plate{imageAnprResults.filter((p) => p.isReadable).length === 1 ? '' : 's'}
+                  </span>
+                  {imageAnprLatency !== null && (
+                    <span className="font-mono text-neutral-400">Inference: {imageAnprLatency}ms</span>
+                  )}
+                </div>
+
+                {imageAnprResults.length === 0 ? (
+                  <div className="p-8 text-center text-xs text-neutral-400 bg-neutral-950 rounded-xl border border-neutral-800">
+                    No vehicles or readable license plates were localized in this image.
+                  </div>
+                ) : (
+                  <div className="space-y-3 max-h-[380px] overflow-y-auto pr-1">
+                    {imageAnprResults.map((item, idx) => (
+                      <div
+                        key={idx}
+                        className="p-3.5 rounded-xl border border-neutral-800 bg-neutral-950 flex flex-col sm:flex-row items-start sm:items-center justify-between gap-3"
+                      >
+                        <div className="flex items-center gap-3">
+                          {item.plateCropDataUrl && (
+                            <div className="h-12 w-28 rounded border border-neutral-700 bg-black overflow-hidden flex items-center justify-center shrink-0">
+                              <img src={item.plateCropDataUrl} alt="Crop" className="max-h-full max-w-full object-contain" />
+                            </div>
+                          )}
+                          <div>
+                            <div className="flex items-center gap-2 flex-wrap">
+                              <div className="flex items-center rounded border border-neutral-700 bg-white px-2 py-0.5 font-mono font-bold text-xs text-neutral-950">
+                                <span className="text-[8px] text-blue-800 font-extrabold mr-1 border-r border-neutral-300 pr-1">IND</span>
+                                <span>{item.plateText || 'Unreadable'}</span>
+                              </div>
+                              <span className={`rounded border px-1.5 py-0.2 text-[9px] font-mono font-semibold ${
+                                item.isDualRow
+                                  ? 'bg-purple-950/90 border-purple-700 text-purple-300'
+                                  : 'bg-blue-950/90 border-blue-700 text-blue-300'
+                              }`}>
+                                {item.isDualRow ? '2-Row' : '1-Row'}
+                              </span>
+                              <span className="rounded bg-indigo-950/80 border border-indigo-700/60 px-1.5 py-0.2 text-[9px] font-bold text-indigo-300">
+                                {item.ocrModel || 'Awiros ANPR-OCR'}
+                              </span>
+                              <span className={`rounded px-1.5 py-0.2 text-[10px] font-semibold ${
+                                item.isValidFormat
+                                  ? 'bg-emerald-950 border border-emerald-800 text-emerald-300'
+                                  : 'bg-amber-950 border border-amber-800 text-amber-300'
+                              }`}>
+                                {item.isValidFormat ? 'Valid Format' : 'Needs Review'}
+                              </span>
+                            </div>
+
+                            {(item.stateName || item.stateCode) && (
+                              <span className="text-xs text-amber-400 font-medium block mt-1">
+                                {item.stateName || item.stateCode} {item.rtoOffice ? `• ${item.rtoOffice}` : (item.rtoCode ? `• RTO ${item.rtoCode}` : '')}
+                              </span>
+                            )}
+
+                            <span className="text-[11px] text-neutral-400 block mt-0.5 font-mono">
+                              Confidence: {item.confidence}% | Vehicle: {item.vehicleClass || 'car'}
+                            </span>
+                          </div>
+                        </div>
+
+                        {onAddPlateRecord && (
+                          <button
+                            type="button"
+                            onClick={() => handleAddImageResultToRegistry(item)}
+                            className="inline-flex items-center gap-1 rounded-lg border border-neutral-700 bg-neutral-800 hover:bg-neutral-700 px-3 py-1.5 text-xs font-semibold text-neutral-200 transition-colors shrink-0"
+                          >
+                            <Plus className="h-3.5 w-3.5 text-amber-400" />
+                            <span>Add to Registry</span>
+                          </button>
+                        )}
+                      </div>
+                    ))}
+                  </div>
+                )}
+              </div>
+            )}
+
+            <div className="mt-6 flex items-center justify-end gap-3 border-t border-neutral-800 pt-4">
+              {imageAnprResults && imageAnprResults.length > 0 && onAddPlateRecord && (
+                <button
+                  type="button"
+                  onClick={handleAddAllImageResultsToRegistry}
+                  className="rounded-lg bg-amber-500 hover:bg-amber-400 px-4 py-2 text-xs font-semibold text-neutral-950 transition-colors shadow-md"
+                >
+                  Add All to Registry ({imageAnprResults.length})
+                </button>
+              )}
+              <button
+                type="button"
+                onClick={() => setIsImageModalOpen(false)}
+                className="rounded-lg border border-neutral-700 bg-neutral-800 px-4 py-2 text-xs font-semibold text-neutral-300 hover:bg-neutral-700 transition-colors"
+              >
+                Close
+              </button>
+            </div>
           </div>
         </div>
       )}

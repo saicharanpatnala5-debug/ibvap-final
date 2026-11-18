@@ -1,5 +1,5 @@
 import { createWorker, Worker } from 'tesseract.js';
-import { ANPRResult, BoundingBox, VehicleDossier } from '../types';
+import { ANPRResult, BoundingBox, VehicleDossier, ImageANPRResponse } from '../types';
 import seededRegistryJson from './seededDemoRegistry.json';
 
 let ocrWorkerPromise: Promise<Worker | null> | null = null;
@@ -485,6 +485,9 @@ export async function extractAndReadLicensePlate(
           formatType: data.formatType || 'invalid',
           validationStatus: vstatus,
           stateCode: data.stateCode,
+          stateName: data.stateName,
+          rtoCode: data.rtoCode,
+          rtoOffice: data.rtoOffice,
           plateNumber: data.plateNumber || text,
           cropDataUrl: data.plateCropDataUrl || cropDataUrl,
           plateCropDataUrl: data.plateCropDataUrl,
@@ -493,6 +496,9 @@ export async function extractAndReadLicensePlate(
           scaleUsed: data.scaleUsed,
           attempts: data.attempts || 1,
           isDistanceGated: isDistGated,
+          isDualRow: data.isDualRow,
+          ocrModel: data.ocrModel,
+          vehicleClass: data.vehicleClass,
           processedAt: data.processedAt || Date.now(),
         };
       }
@@ -744,4 +750,34 @@ export function lookupVehicleDossier(plateNumber: string, confidence = 95): Vehi
 
   // Exact match not in simulated database -> return null
   return null;
+}
+
+/**
+ * Static Image Upload ANPR:
+ * Sends uploaded vehicle image to backend multi-scale FastALPR + Awiros ANPR-OCR pipeline.
+ */
+export async function detectPlatesFromImage(imageBase64: string): Promise<ImageANPRResponse> {
+  const res = await fetch('/api/vision/anpr/detect-image', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ imageBase64 }),
+  });
+
+  if (!res.ok) {
+    throw new Error(`Server returned HTTP ${res.status}: ${res.statusText}`);
+  }
+
+  return (await res.json()) as ImageANPRResponse;
+}
+
+/**
+ * Official Parivahan / VAHAN statutory lookup.
+ */
+export async function lookupVahanRegistry(plateNumber: string): Promise<any> {
+  const clean = plateNumber.toUpperCase().replace(/[^A-Z0-9]/g, '');
+  const res = await fetch(`/api/registry/vahan/${encodeURIComponent(clean)}`);
+  if (!res.ok) {
+    throw new Error(`VAHAN lookup failed with HTTP ${res.status}`);
+  }
+  return await res.json();
 }

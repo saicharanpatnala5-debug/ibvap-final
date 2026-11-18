@@ -257,6 +257,7 @@ const PORT = parseInt(process.env.PORT || '3000', 10);
 const GEMINI_TIMEOUT_MS = 20000;
 const CORE_SERVICE_URL = process.env.CORE_SERVICE_URL || 'http://localhost:8080';
 const AI_SERVICE_URL = process.env.AI_SERVICE_URL || 'http://localhost:8000';
+const AWIROS_SERVICE_URL = process.env.AWIROS_SERVICE_URL || 'http://127.0.0.1:8001';
 
 // Basic security headers via helmet
 app.use(
@@ -1078,6 +1079,7 @@ export function generateGroundedFallbackResponse(
 app.get('/api/health', async (_req, res) => {
   let aiHealth: any = { status: 'offline', details: 'unreachable' };
   let coreHealth: any = { status: 'offline', details: 'unreachable' };
+  let awirosHealth: any = { status: 'offline', details: 'unreachable' };
 
   try {
     const aiRes = await fetch(`${AI_SERVICE_URL}/health`, { signal: AbortSignal.timeout(1500) });
@@ -1091,6 +1093,13 @@ app.get('/api/health', async (_req, res) => {
     if (coreRes.ok) coreHealth = await coreRes.json();
   } catch (err: any) {
     coreHealth = { status: 'offline', details: err.message };
+  }
+
+  try {
+    const awirosRes = await fetch(`${AWIROS_SERVICE_URL}/health`, { signal: AbortSignal.timeout(1500) });
+    if (awirosRes.ok) awirosHealth = await awirosRes.json();
+  } catch (err: any) {
+    awirosHealth = { status: 'offline', details: err.message };
   }
 
   const effectiveConfig = getEffectiveLLMConfig();
@@ -1111,9 +1120,28 @@ app.get('/api/health', async (_req, res) => {
       gateway: { status: 'online', port: PORT },
       aiService: { url: AI_SERVICE_URL, ...aiHealth },
       coreService: { url: CORE_SERVICE_URL, ...coreHealth },
+      awirosService: { url: AWIROS_SERVICE_URL, ...awirosHealth },
     },
     timestamp: Date.now(),
   });
+});
+
+// Official Parivahan / VAHAN vehicle registry lookup proxy
+app.get('/api/registry/vahan/:plateNumber', async (req, res) => {
+  const plateNumber = encodeURIComponent(req.params.plateNumber);
+  const targetUrl = `${AI_SERVICE_URL}/registry/vahan/${plateNumber}`;
+  try {
+    const upstreamRes = await fetch(targetUrl, { signal: AbortSignal.timeout(5000) });
+    const data = await upstreamRes.json();
+    res.status(upstreamRes.status).json(data);
+  } catch (err: any) {
+    res.status(502).json({
+      status: 'error',
+      lookupStatus: 'OFFLINE',
+      message: 'Vehicle registry lookup service is currently unreachable.',
+      error: err.message,
+    });
+  }
 });
 
 // Proxy routes to Java Core Service (System of Record)

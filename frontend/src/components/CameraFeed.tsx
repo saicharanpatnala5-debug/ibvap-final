@@ -675,6 +675,12 @@ export const CameraFeed: React.FC<CameraFeedProps> = ({
                   scaleUsed: anprResult.scaleUsed,
                   attempts: anprResult.attempts || 1,
                   bestGuessPlate: bestGuess,
+                  isDualRow: anprResult.isDualRow,
+                  stateCode: anprResult.stateCode,
+                  stateName: anprResult.stateName,
+                  rtoCode: anprResult.rtoCode,
+                  rtoOffice: anprResult.rtoOffice,
+                  ocrModel: anprResult.ocrModel,
                 });
               }
               if (anprResult.isValidFormat && !autoOpenedPlatesRef.current.has(anprResult.plateText)) {

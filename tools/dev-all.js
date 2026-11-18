@@ -10,6 +10,7 @@ const fs = require('fs');
 
 const ROOT_DIR = path.resolve(__dirname, '..');
 const AI_DIR = path.join(ROOT_DIR, 'ai-service');
+const AWIROS_DIR = path.join(ROOT_DIR, 'awiros-service');
 const CORE_DIR = path.join(ROOT_DIR, 'core-service');
 const GATEWAY_DIR = path.join(ROOT_DIR, 'gateway');
 const FRONTEND_DIR = path.join(ROOT_DIR, 'frontend');
@@ -138,6 +139,17 @@ function startProcess(name, cmd, args, cwd, env = {}) {
 
 // 2. Launch Services
 console.log('Starting services in background...');
+
+// Awiros ANPR-OCR Service (Port 8001)
+const awirosPython = process.platform === 'win32'
+  ? path.join(AWIROS_DIR, '.venv', 'Scripts', 'python.exe')
+  : path.join(AWIROS_DIR, '.venv', 'bin', 'python');
+
+if (fs.existsSync(awirosPython)) {
+  startProcess('awiros-service', awirosPython, ['-m', 'uvicorn', 'main:app', '--host', '0.0.0.0', '--port', '8001'], AWIROS_DIR);
+} else {
+  console.log('[Launcher] Note: awiros-service venv not found; running with fallback OCR.');
+}
 
 // AI-Service (Port 8000)
 const uvicornCmd = process.platform === 'win32'

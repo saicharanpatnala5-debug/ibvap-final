@@ -373,7 +373,128 @@ async def anpr_read_crop(request: Request):
         "isDistanceGated": res.isDistanceGated,
         "processedAt": res.processedAt,
         "track_id": track_id,
+        "isDualRow": res.isDualRow,
+        "stateName": res.stateName,
+        "rtoOffice": res.rtoOffice,
+        "ocrModel": res.ocrModel,
+        "vehicleClass": res.vehicleClass,
     }
+
+
+@app.post("/anpr/read-plate")
+async def anpr_read_plate(request: Request):
+    """
+    Direct cropped license plate OCR endpoint using Awiros Indian ANPR-OCR model
+    with Indian statutory registration format verification (single-row & dual-row).
+    """
+    body = {}
+    try:
+        body = await request.json()
+    except Exception:
+        pass
+
+    b64 = body.get("cropBase64") or body.get("image") or body.get("plateCrop")
+    if not b64:
+        raise HTTPException(status_code=400, detail="Missing plateCrop image.")
+
+    clean_b64 = b64.split(",")[-1]
+    decoded = base64.b64decode(clean_b64)
+    nparr = np.frombuffer(decoded, np.uint8)
+    plate_bgr = cv2.imdecode(nparr, cv2.IMREAD_COLOR)
+
+    if plate_bgr is None or plate_bgr.size == 0:
+        raise HTTPException(status_code=400, detail="Could not decode plate image.")
+
+    h, w = plate_bgr.shape[:2]
+    ar = float(w) / float(max(1, h))
+    is_dual = body.get("is_dual_row", ar < 2.1)
+
+    from app.services.anpr import query_awiros_ocr, PlateValidator, preprocess_plate_crop, bgr_to_base64_jpeg
+    awiros_res = query_awiros_ocr(plate_bgr, is_dual_row=is_dual)
+    if awiros_res is None or not awiros_res.get("text"):
+        prep = preprocess_plate_crop(plate_bgr)
+        awiros_res = query_awiros_ocr(prep, is_dual_row=is_dual)
+
+    text = awiros_res.get("text", "") if awiros_res else ""
+    conf = float(awiros_res.get("confidence", 0.0)) if awiros_res else 0.0
+    char_confs = awiros_res.get("char_confidences") if awiros_res else None
+    detected_dual = bool(awiros_res.get("is_dual_row", is_dual)) if awiros_res else is_dual
+
+    valid_info = PlateValidator.validate_indian_registration(text)
+    is_valid = valid_info["is_valid"] and (conf >= 50.0)
+    is_readable = bool(text and len(text) >= 4)
+
+    return {
+        "status": "ok",
+        "plateText": text if is_readable else "",
+        "confidence": round(conf, 1),
+        "isReadable": is_readable,
+        "isValidFormat": is_valid,
+        "formatType": valid_info["format_type"] if is_valid else "invalid",
+        "validationStatus": "Valid format" if is_valid else ("Uncertain / Needs Review" if is_readable else "Unreadable"),
+        "stateCode": valid_info.get("state_code"),
+        "stateName": valid_info.get("state_name"),
+        "rtoCode": valid_info.get("rto_code"),
+        "rtoOffice": valid_info.get("rto_office"),
+        "series": valid_info.get("series"),
+        "plateNumber": text if is_readable else "",
+        "plateCropDataUrl": bgr_to_base64_jpeg(plate_bgr, quality=90),
+        "charConfidences": char_confs,
+        "isDualRow": detected_dual,
+        "ocrModel": "Awiros ANPR-OCR (PP-OCRv5)",
+        "processedAt": int(time.time() * 1000),
+    }
+
+
+@app.post("/anpr/detect-image")
+async def anpr_detect_image(request: Request):
+    """
+    Image Upload ANPR endpoint:
+    Detects all vehicles and extracts all license plates from an uploaded static image.
+    Uses FastALPR localization + Awiros Indian ANPR-OCR + statutory format validation.
+    """
+    body = {}
+    try:
+        body = await request.json()
+    except Exception:
+        pass
+
+    b64 = body.get("imageBase64") or body.get("image") or body.get("frame")
+    if not b64:
+        raise HTTPException(status_code=400, detail="Missing imageBase64 data.")
+
+    clean_b64 = b64.split(",")[-1]
+    decoded = base64.b64decode(clean_b64)
+    nparr = np.frombuffer(decoded, np.uint8)
+    img_bgr = cv2.imdecode(nparr, cv2.IMREAD_COLOR)
+
+    if img_bgr is None or img_bgr.size == 0:
+        raise HTTPException(status_code=400, detail="Could not decode image.")
+
+    from app.services.anpr import detect_image_plates
+    t0 = time.time()
+    detector = get_shared_detector()
+    plate_items = detect_image_plates(img_bgr, detector=detector)
+    elapsed_ms = round((time.time() - t0) * 1000, 1)
+
+    return {
+        "status": "ok",
+        "totalVehicles": len(plate_items),
+        "platesDetected": len([p for p in plate_items if p.isReadable]),
+        "validFormatsCount": len([p for p in plate_items if p.isValidFormat]),
+        "latencyMs": elapsed_ms,
+        "results": [p.dict() for p in plate_items],
+    }
+
+
+@app.get("/registry/vahan/{plate_number}")
+async def lookup_vahan_registry(plate_number: str):
+    """
+    Official Parivahan / VAHAN vehicle registry lookup endpoint.
+    Strictly checks PARIVAHAN_API_KEY and DPDP Act compliance.
+    """
+    from app.services.parivahan import ParivahanRegistryService
+    return ParivahanRegistryService.lookup_vehicle(plate_number)
 
 
 @app.get("/weapons/status")

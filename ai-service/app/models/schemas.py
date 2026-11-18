@@ -37,6 +37,38 @@ class ANPRResult(BaseModel):
     attempts: Optional[int] = 1
     isDistanceGated: bool = False
     processedAt: int = 0
+    isDualRow: bool = False
+    stateName: Optional[str] = None
+    rtoOffice: Optional[str] = None
+    ocrModel: Optional[str] = "Awiros ANPR-OCR"
+    vehicleClass: Optional[str] = None
+
+
+class ImageANPRPlateItem(BaseModel):
+    plateText: str
+    confidence: float
+    isReadable: bool = True
+    isValidFormat: bool
+    formatType: str
+    validationStatus: str
+    stateCode: Optional[str] = None
+    stateName: Optional[str] = None
+    rtoCode: Optional[str] = None
+    rtoOffice: Optional[str] = None
+    isDualRow: bool = False
+    vehicleClass: Optional[str] = None
+    ocrModel: str = "Awiros ANPR-OCR"
+    charConfidences: Optional[list[float]] = None
+    plateCropDataUrl: Optional[str] = None
+    vehicleCropDataUrl: Optional[str] = None
+    bbox: Optional[BoundingBox] = None
+
+
+class ImageANPRResponse(BaseModel):
+    status: str
+    count: int
+    plates: list[ImageANPRPlateItem]
+    latencyMs: float
 
 
 class TrackedEntity(BaseModel):

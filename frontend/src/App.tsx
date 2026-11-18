@@ -213,6 +213,13 @@ export default function App() {
     trackId?: number;
     formatType?: 'standard' | 'bharat' | 'invalid' | 'distance_gated';
     validationStatus?: string;
+    isDualRow?: boolean;
+    stateCode?: string;
+    stateName?: string;
+    rtoCode?: string;
+    rtoOffice?: string;
+    ocrModel?: string;
+    vehicleClass?: string;
   }) => {
     // ANPR Fix 3 - Step 3: Reject pedestrian tracks; strictly vehicle classes only
     const rawClass = (plateInfo.objectClass || '').toLowerCase().trim();
@@ -303,6 +310,13 @@ export default function App() {
             isAiAssisted: plateInfo.isAiAssisted ?? existing.isAiAssisted,
             dossier: dossier || existing.dossier,
             videoTime: plateInfo.videoTime,
+            isDualRow: plateInfo.isDualRow ?? existing.isDualRow,
+            stateCode: plateInfo.stateCode || existing.stateCode,
+            stateName: plateInfo.stateName || existing.stateName,
+            rtoCode: plateInfo.rtoCode || existing.rtoCode,
+            rtoOffice: plateInfo.rtoOffice || existing.rtoOffice,
+            ocrModel: plateInfo.ocrModel || existing.ocrModel,
+            vehicleClass: plateInfo.objectClass || existing.vehicleClass,
           };
           saveStoredPlateRecords(updated);
           return updated;
@@ -331,6 +345,13 @@ export default function App() {
         bestGuessPlate: resolvedBestGuess,
         isAiAssisted: Boolean(plateInfo.isAiAssisted),
         dossier,
+        isDualRow: plateInfo.isDualRow,
+        stateCode: plateInfo.stateCode,
+        stateName: plateInfo.stateName,
+        rtoCode: plateInfo.rtoCode,
+        rtoOffice: plateInfo.rtoOffice,
+        ocrModel: plateInfo.ocrModel,
+        vehicleClass: plateInfo.objectClass,
       };
 
       const updated = [newRecord, ...prev].slice(0, 80);
@@ -700,6 +721,13 @@ export default function App() {
               onCorrectPlate={handleCorrectPlate}
               onUpgradeRecordWithAi={handleUpgradeRecordWithAi}
               onOpenAddCamera={() => setIsAddCameraOpen(true)}
+              onAddPlateRecord={(rec) => {
+                setPlateRecords((prev) => {
+                  const updated = [rec, ...prev];
+                  saveStoredPlateRecords(updated);
+                  return updated;
+                });
+              }}
             />
           </div>
         )}

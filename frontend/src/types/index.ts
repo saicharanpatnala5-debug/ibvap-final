@@ -61,7 +61,9 @@ export interface ANPRResult {
   formatType?: 'standard' | 'bharat' | 'invalid' | 'distance_gated';
   validationStatus?: string;
   stateCode?: string;
+  stateName?: string;
   rtoCode?: string;
+  rtoOffice?: string;
   series?: string;
   plateNumber?: string;
   cropDataUrl?: string;
@@ -73,6 +75,9 @@ export interface ANPRResult {
   scaleUsed?: string;
   bestGuessPlate?: string;
   processedAt: number;
+  isDualRow?: boolean;
+  ocrModel?: string;
+  vehicleClass?: string;
 }
 
 export interface EntityAppearance {
@@ -244,6 +249,47 @@ export interface PlateRegistryRecord {
   dossier?: VehicleDossier | null;
   manualCorrection?: string;
   isDemo?: boolean;
+  isDualRow?: boolean;
+  stateCode?: string;
+  stateName?: string;
+  rtoCode?: string;
+  rtoOffice?: string;
+  ocrModel?: string;
+  vehicleClass?: string;
+  officialLookupStatus?: string;
+}
+
+export interface ImageANPRPlateItem {
+  plateText: string;
+  confidence: number;
+  isReadable: boolean;
+  isValidFormat: boolean;
+  formatType: string;
+  validationStatus: string;
+  stateCode?: string;
+  stateName?: string;
+  rtoCode?: string;
+  rtoOffice?: string;
+  series?: string;
+  plateNumber?: string;
+  plateCropDataUrl?: string;
+  vehicleCropDataUrl?: string;
+  vehicleBbox?: { x: number; y: number; width: number; height: number };
+  plateBbox?: { x: number; y: number; width: number; height: number };
+  vehicleClass?: string;
+  charConfidences?: number[];
+  isDualRow?: boolean;
+  ocrModel?: string;
+  scaleUsed?: string;
+}
+
+export interface ImageANPRResponse {
+  status: string;
+  totalVehicles: number;
+  platesDetected: number;
+  validFormatsCount: number;
+  latencyMs: number;
+  results: ImageANPRPlateItem[];
 }
 
 export interface AccessibilitySettings {
