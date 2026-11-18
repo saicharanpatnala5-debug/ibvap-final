@@ -9,6 +9,7 @@ import json
 from typing import Optional, List, Dict, Tuple, Any
 from collections import Counter
 from app.models.schemas import ANPRResult, ImageANPRPlateItem, BoundingBox
+from app.services.appearance import extract_entity_appearance
 
 # Standard Indian License Plate Format: State Code (2) + District/RTO (1-2) + Series (1-3) + Number (4)
 # Example: DL01AB1234, MH12CD5678, KA04E9999, HR12AX8522, UP14BQ208
@@ -462,6 +463,11 @@ def preprocess_plate_crop(plate_crop_bgr: np.ndarray) -> np.ndarray:
     gaussian = cv2.GaussianBlur(enhanced_bgr, (0, 0), 2.0)
     unsharp = cv2.addWeighted(enhanced_bgr, 1.5, gaussian, -0.5, 0)
 
+    # Directional deblur for horizontal vehicle motion smear
+    kernel_h = np.array([[0, 0, 0], [-0.5, 2.0, -0.5], [0, 0, 0]], dtype=np.float32)
+    deblurred = cv2.filter2D(unsharp, -1, kernel_h)
+    unsharp = cv2.addWeighted(unsharp, 0.65, deblurred, 0.35, 0)
+
     gray = cv2.cvtColor(unsharp, cv2.COLOR_BGR2GRAY)
     deskewed_gray = deskew_plate(gray)
     return cv2.cvtColor(deskewed_gray, cv2.COLOR_GRAY2BGR)
@@ -512,6 +518,7 @@ class FastALPREngine:
     def __init__(self):
         self._alpr = None
         self._rapid_ocr = None
+        self.voting_tracker = PlateVotingTracker(required_votes=2)
         self._load_models()
 
     def _load_models(self):
@@ -532,11 +539,14 @@ class FastALPREngine:
         min_veh_w: int = 100,
         min_veh_h: int = 60,
         vehicle_class: Optional[str] = None,
+        track_id: Optional[int] = None,
     ) -> ANPRResult:
         """
         Executes end-to-end multi-scale plate localization and recognition on vehicle crop.
         No vehicle-size pre-gate: every vehicle undergoes multi-scale plate detection.
         Plate OCR is powered by Awiros Indian ANPR-OCR specialist model (1-row & 2-row).
+        Extracts visual vehicle appearance (color, category, body type, visual characteristics)
+        and accumulates multi-frame voting evidence when track_id is provided.
         """
         now_ms = int(time.time() * 1000)
         if vehicle_crop_bgr is None or vehicle_crop_bgr.size == 0:
@@ -556,6 +566,42 @@ class FastALPREngine:
         vh, vw = vehicle_crop_bgr.shape[:2]
         veh_crop_b64 = bgr_to_base64_jpeg(vehicle_crop_bgr, quality=80)
 
+        # Visual telemetry extraction (color, category, body type, visual characteristics)
+        appearance = extract_entity_appearance(vehicle_crop_bgr, vehicle_class or "car")
+        veh_color = appearance.primaryColor
+        veh_color_hex = appearance.colorHex
+
+        aspect = float(vw) / float(max(1, vh))
+        v_class_lower = (vehicle_class or "car").lower()
+        if "auto" in v_class_lower or "rickshaw" in v_class_lower:
+            v_category = "Three-Wheeler"
+            b_type = "Commercial Three-Wheeler Auto-rickshaw"
+            v_char = "Three-wheeled compact passenger carrier"
+        elif "truck" in v_class_lower:
+            v_category = "Commercial Heavy Vehicle"
+            b_type = "Freight Truck / Lorry"
+            v_char = "Heavy commercial logistics vehicle"
+        elif "bus" in v_class_lower:
+            v_category = "Public Transit"
+            b_type = "Passenger Transit Bus"
+            v_char = "Large multi-passenger transport bus"
+        elif "motorcycle" in v_class_lower or "two-wheeler" in v_class_lower:
+            v_category = "Two-Wheeler"
+            b_type = "Motorcycle / Scooter"
+            v_char = "Lightweight two-wheeled motorized vehicle"
+        elif "bicycle" in v_class_lower:
+            v_category = "Non-Motorized"
+            b_type = "Pedal Bicycle"
+            v_char = "Single-rider manual bicycle"
+        else:
+            v_category = "Light Motor Vehicle (LMV)"
+            if aspect >= 1.45:
+                b_type = "Passenger Sedan / Hatchback"
+                v_char = "Low-slung passenger vehicle with rear trunk / hatch"
+            else:
+                b_type = "Compact SUV / MPV"
+                v_char = "High-clearance passenger utility vehicle"
+
         # Microscopic fragment check (<30x15 px)
         if vw < 30 or vh < 15:
             return ANPRResult(
@@ -571,6 +617,11 @@ class FastALPREngine:
                 processedAt=now_ms,
                 ocrModel="Awiros ANPR-OCR",
                 vehicleClass=vehicle_class,
+                vehicleColor=veh_color,
+                vehicleColorHex=veh_color_hex,
+                vehicleCategory=v_category,
+                bodyType=b_type,
+                visualCharacteristics=v_char,
             )
 
         best_cand = None
@@ -762,7 +813,7 @@ class FastALPREngine:
             else:
                 vstatus = "Unreadable"
 
-            return ANPRResult(
+            single_result = ANPRResult(
                 plateText=chosen_text if is_readable else "",
                 confidence=round(chosen_conf, 1),
                 isReadable=is_readable,
@@ -786,12 +837,30 @@ class FastALPREngine:
                 rtoOffice=valid_info.get("rto_office"),
                 ocrModel=ocr_engine_used,
                 vehicleClass=vehicle_class,
+                vehicleColor=veh_color,
+                vehicleColorHex=veh_color_hex,
+                vehicleCategory=v_category,
+                bodyType=b_type,
+                visualCharacteristics=v_char,
             )
+
+            if track_id is not None:
+                consensus = self.voting_tracker.add_reading(track_id, single_result, vehicle_crop_bgr)
+                if consensus is not None:
+                    consensus.vehicleColor = veh_color
+                    consensus.vehicleColorHex = veh_color_hex
+                    consensus.vehicleCategory = v_category
+                    consensus.bodyType = b_type
+                    consensus.visualCharacteristics = v_char
+                    return consensus
+                single_result.attempts = self.voting_tracker.attempts.get(track_id, 1)
+
+            return single_result
 
         # Fallback: No plate localized at any scale.
         # "Distant" becomes an outcome ONLY when no plate is localized AND vehicle is genuinely below threshold.
         is_small_vehicle = (vw < min_veh_w or vh < min_veh_h)
-        return ANPRResult(
+        fallback_res = ANPRResult(
             plateText="",
             confidence=0.0,
             isReadable=False,
@@ -801,11 +870,19 @@ class FastALPREngine:
             isDistanceGated=is_small_vehicle,
             vehicleCropDataUrl=veh_crop_b64,
             cropDataUrl=veh_crop_b64,
-            attempts=1,
+            attempts=self.voting_tracker.attempts.get(track_id, 1) if track_id is not None else 1,
             processedAt=now_ms,
             ocrModel="Awiros ANPR-OCR",
             vehicleClass=vehicle_class,
+            vehicleColor=veh_color,
+            vehicleColorHex=veh_color_hex,
+            vehicleCategory=v_category,
+            bodyType=b_type,
+            visualCharacteristics=v_char,
         )
+        if track_id is not None and is_small_vehicle:
+            self.voting_tracker.set_distance_gated(track_id, fallback_res)
+        return fallback_res
 
     def detect_frame_plates(
         self,
@@ -1021,6 +1098,11 @@ def detect_image_plates(img_bgr: np.ndarray, detector=None) -> List[ImageANPRPla
                     rtoOffice=anpr_res.rtoOffice,
                     isDualRow=anpr_res.isDualRow,
                     vehicleClass=ent.class_name,
+                    vehicleColor=anpr_res.vehicleColor,
+                    vehicleColorHex=anpr_res.vehicleColorHex,
+                    vehicleCategory=anpr_res.vehicleCategory,
+                    bodyType=anpr_res.bodyType,
+                    visualCharacteristics=anpr_res.visualCharacteristics,
                     ocrModel=anpr_res.ocrModel or "Awiros ANPR-OCR",
                     charConfidences=anpr_res.charConfidences,
                     plateCropDataUrl=anpr_res.plateCropDataUrl or anpr_res.cropDataUrl,
@@ -1046,6 +1128,11 @@ def detect_image_plates(img_bgr: np.ndarray, detector=None) -> List[ImageANPRPla
                 rtoOffice=anpr_res.rtoOffice,
                 isDualRow=anpr_res.isDualRow,
                 vehicleClass="Vehicle",
+                vehicleColor=anpr_res.vehicleColor,
+                vehicleColorHex=anpr_res.vehicleColorHex,
+                vehicleCategory=anpr_res.vehicleCategory,
+                bodyType=anpr_res.bodyType,
+                visualCharacteristics=anpr_res.visualCharacteristics,
                 ocrModel=anpr_res.ocrModel or "Awiros ANPR-OCR",
                 charConfidences=anpr_res.charConfidences,
                 plateCropDataUrl=anpr_res.plateCropDataUrl or anpr_res.cropDataUrl,

@@ -118,6 +118,7 @@ export const CameraFeed: React.FC<CameraFeedProps> = ({
   const isDetectingRef = useRef<boolean>(false);
   const lastDetectionTimeRef = useRef<number>(0);
   const trackLastAnprTimeRef = useRef<Record<number, number>>({});
+  const trackLastBboxAreaRef = useRef<Record<number, number>>({});
   const inFlightAnprTracksRef = useRef<Set<number>>(new Set());
 
   // VMS Quality & Overlay State
@@ -647,12 +648,18 @@ export const CameraFeed: React.FC<CameraFeedProps> = ({
         const isAlreadyInFlight = inFlightAnprTracksRef.current.has(track.id);
         const isGlobalLimitReached = inFlightAnprTracksRef.current.size >= 2;
         const lastAttempt = trackLastAnprTimeRef.current[track.id] || 0;
-        const canAttemptAnpr = !hasConfirmedValidPlate && !isAlreadyInFlight && !isGlobalLimitReached && (nowMs - lastAttempt > 1200);
+        const currentBboxArea = (track.bbox?.width || 0) * (track.bbox?.height || 0);
+        const prevBboxArea = trackLastBboxAreaRef.current[track.id] || 0;
+        const hasSubstantialGrowth = prevBboxArea > 0 && currentBboxArea >= prevBboxArea * 1.20;
+        const isSignificantCloseUp = currentBboxArea >= 0.02 && prevBboxArea < 0.02;
+        const timeSinceLastAttempt = nowMs - lastAttempt;
+        const canAttemptAnpr = !hasConfirmedValidPlate && !isAlreadyInFlight && !isGlobalLimitReached && (timeSinceLastAttempt > 1200 || ((hasSubstantialGrowth || isSignificantCloseUp) && timeSinceLastAttempt > 350));
 
         if (isVehicle && canAttemptAnpr) {
           trackLastAnprTimeRef.current[track.id] = nowMs;
+          trackLastBboxAreaRef.current[track.id] = Math.max(prevBboxArea, currentBboxArea);
           inFlightAnprTracksRef.current.add(track.id);
-          extractAndReadLicensePlate(video, track.bbox, track.id)
+          extractAndReadLicensePlate(video, track.bbox, track.id, track.class)
             .then((anprResult) => {
               inFlightAnprTracksRef.current.delete(track.id);
               track.anpr = anprResult;
@@ -693,6 +700,13 @@ export const CameraFeed: React.FC<CameraFeedProps> = ({
                     rtoCode: anprResult.rtoCode,
                     rtoOffice: anprResult.rtoOffice,
                     ocrModel: anprResult.ocrModel,
+                    vehicleClass: anprResult.vehicleClass || track.class,
+                    vehicleColor: anprResult.vehicleColor,
+                    vehicleColorHex: anprResult.vehicleColorHex,
+                    vehicleCategory: anprResult.vehicleCategory,
+                    bodyType: anprResult.bodyType,
+                    visualCharacteristics: anprResult.visualCharacteristics,
+                    detectionConfidence: anprResult.detectionConfidence,
                   });
                 }
                 if (anprResult.isValidFormat && !autoOpenedPlatesRef.current.has(anprResult.plateText)) {
@@ -718,6 +732,13 @@ export const CameraFeed: React.FC<CameraFeedProps> = ({
                     scaleUsed: anprResult.scaleUsed,
                     attempts: anprResult.attempts || 1,
                     bestGuessPlate: bestGuess,
+                    vehicleClass: anprResult.vehicleClass || track.class,
+                    vehicleColor: anprResult.vehicleColor,
+                    vehicleColorHex: anprResult.vehicleColorHex,
+                    vehicleCategory: anprResult.vehicleCategory,
+                    bodyType: anprResult.bodyType,
+                    visualCharacteristics: anprResult.visualCharacteristics,
+                    detectionConfidence: anprResult.detectionConfidence,
                   });
                 }
               } else {
@@ -740,6 +761,13 @@ export const CameraFeed: React.FC<CameraFeedProps> = ({
                     scaleUsed: anprResult.scaleUsed,
                     attempts: anprResult.attempts || 1,
                     bestGuessPlate: bestGuess,
+                    vehicleClass: anprResult.vehicleClass || track.class,
+                    vehicleColor: anprResult.vehicleColor,
+                    vehicleColorHex: anprResult.vehicleColorHex,
+                    vehicleCategory: anprResult.vehicleCategory,
+                    bodyType: anprResult.bodyType,
+                    visualCharacteristics: anprResult.visualCharacteristics,
+                    detectionConfidence: anprResult.detectionConfidence,
                   });
                 }
               }

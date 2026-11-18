@@ -387,7 +387,8 @@ export function isolatePlateCharacterRegion(
 export async function extractAndReadLicensePlate(
   video: HTMLVideoElement,
   vehicleBbox: BoundingBox,
-  trackId?: number
+  trackId?: number,
+  vehicleClass?: string
 ): Promise<ANPRResult> {
   const vW = video.videoWidth;
   const vH = video.videoHeight;
@@ -463,6 +464,7 @@ export async function extractAndReadLicensePlate(
       body: JSON.stringify({
         cropBase64: cropDataUrl,
         track_id: trackId,
+        vehicle_class: vehicleClass,
         min_w: Math.max(35, Math.round(vW * 0.035)),
         min_h: Math.max(15, Math.round(vH * 0.02)),
       }),
@@ -498,7 +500,13 @@ export async function extractAndReadLicensePlate(
           isDistanceGated: isDistGated,
           isDualRow: data.isDualRow,
           ocrModel: data.ocrModel,
-          vehicleClass: data.vehicleClass,
+          vehicleClass: data.vehicleClass || vehicleClass,
+          vehicleColor: data.vehicleColor,
+          vehicleColorHex: data.vehicleColorHex,
+          vehicleCategory: data.vehicleCategory,
+          bodyType: data.bodyType,
+          visualCharacteristics: data.visualCharacteristics,
+          detectionConfidence: data.confidence,
           processedAt: data.processedAt || Date.now(),
         };
       }

@@ -71,6 +71,15 @@ export const ANPRRegistryView: React.FC<ANPRRegistryViewProps> = ({
   const [isEditingPlate, setIsEditingPlate] = useState(false);
   const [correctionInput, setCorrectionInput] = useState('');
 
+  // Processing mode: Accuracy, Balanced, Real-Time
+  const [processingMode, setProcessingMode] = useState<'accuracy' | 'balanced' | 'realtime'>(() => {
+    try {
+      return (localStorage.getItem('ibvap_anpr_processing_mode') as any) || 'accuracy';
+    } catch {
+      return 'accuracy';
+    }
+  });
+
   // Cloud-assisted plate reading settings & state
   const [cloudAnprEnabled, setCloudAnprEnabled] = useState<boolean>(() => {
     try {
@@ -648,6 +657,24 @@ export const ANPRRegistryView: React.FC<ANPRRegistryViewProps> = ({
               </button>
             )}
 
+            <div className="flex items-center gap-1.5 rounded-lg bg-neutral-950/80 border border-neutral-800 px-2.5 py-1 text-xs">
+              <span className="text-[10px] text-neutral-400 uppercase font-medium">Mode:</span>
+              <select
+                id="anpr-processing-mode-select"
+                value={processingMode}
+                onChange={(e) => {
+                  const mode = e.target.value as any;
+                  setProcessingMode(mode);
+                  try { localStorage.setItem('ibvap_anpr_processing_mode', mode); } catch {}
+                }}
+                className="bg-transparent text-amber-400 font-semibold text-xs focus:outline-none cursor-pointer"
+              >
+                <option value="accuracy" className="bg-neutral-900 text-neutral-200">Accuracy Priority</option>
+                <option value="balanced" className="bg-neutral-900 text-neutral-200">Balanced</option>
+                <option value="realtime" className="bg-neutral-900 text-neutral-200">Real-Time Priority</option>
+              </select>
+            </div>
+
             <div className="inline-flex items-center gap-2 rounded-lg bg-neutral-950/80 border border-neutral-800 px-3 py-1.5 text-xs text-neutral-400">
               <span className="h-2 w-2 rounded-full bg-emerald-400" />
               <span>Simulated Registry Integration</span>
@@ -1011,6 +1038,22 @@ export const ANPRRegistryView: React.FC<ANPRRegistryViewProps> = ({
                                 {record.stateName || record.stateCode} {record.rtoOffice ? `• ${record.rtoOffice}` : (record.rtoCode ? `• RTO ${record.rtoCode}` : '')}
                               </span>
                             )}
+                            <div className="flex items-center gap-1.5 flex-wrap mt-0.5">
+                              {record.vehicleColor && (
+                                <span className="inline-flex items-center gap-1 text-[11px] font-medium text-neutral-300">
+                                  <span
+                                    className="inline-block h-2 w-2 rounded-full border border-neutral-600 shrink-0"
+                                    style={{ backgroundColor: record.vehicleColorHex || '#888' }}
+                                  />
+                                  {record.vehicleColor}
+                                </span>
+                              )}
+                              {(record.bodyType || record.vehicleCategory || record.vehicleClass) && (
+                                <span className="text-[10px] text-neutral-400">
+                                  • {record.bodyType || record.vehicleCategory || record.vehicleClass}
+                                </span>
+                              )}
+                            </div>
                             <span className="text-xs text-neutral-400 block mt-0.5">
                               {record.dossier
                                 ? `${record.dossier.vehicleMake} ${record.dossier.vehicleModel} • ${record.dossier.registeredOwner}`
@@ -1185,6 +1228,44 @@ export const ANPRRegistryView: React.FC<ANPRRegistryViewProps> = ({
                       )}
                     </div>
                   </div>
+
+                  {/* Physical Vehicle Telemetry Attributes */}
+                  <div className="grid grid-cols-2 gap-2 text-xs pt-2 border-t border-neutral-850">
+                    <div className="p-2 rounded bg-neutral-900/80 border border-neutral-800">
+                      <span className="text-[10px] text-neutral-500 uppercase block font-medium">Estimated Color</span>
+                      <div className="flex items-center gap-1.5 mt-0.5 font-medium text-neutral-200">
+                        <span
+                          className="inline-block h-3 w-3 rounded-full border border-neutral-600 shrink-0"
+                          style={{ backgroundColor: activeRecord.vehicleColorHex || '#888' }}
+                        />
+                        <span className="truncate">{activeRecord.vehicleColor || 'Analyzing footage...'}</span>
+                      </div>
+                    </div>
+                    <div className="p-2 rounded bg-neutral-900/80 border border-neutral-800">
+                      <span className="text-[10px] text-neutral-500 uppercase block font-medium">Visual Category</span>
+                      <span className="font-medium text-neutral-200 block mt-0.5 truncate">
+                        {activeRecord.vehicleCategory || activeRecord.vehicleClass || 'Light Motor Vehicle (LMV)'}
+                      </span>
+                    </div>
+                    <div className="p-2 rounded bg-neutral-900/80 border border-neutral-800">
+                      <span className="text-[10px] text-neutral-500 uppercase block font-medium">Body Type</span>
+                      <span className="font-medium text-neutral-200 block mt-0.5 truncate">
+                        {activeRecord.bodyType || 'Sedan / SUV / Hatchback'}
+                      </span>
+                    </div>
+                    <div className="p-2 rounded bg-neutral-900/80 border border-neutral-800">
+                      <span className="text-[10px] text-neutral-500 uppercase block font-medium">Detection Confidence</span>
+                      <span className="font-medium text-emerald-400 font-mono block mt-0.5">
+                        {activeRecord.confidence > 0 ? `${activeRecord.confidence}% OCR` : (activeRecord.attempts ? `${activeRecord.attempts} multi-scale attempts` : 'Distant Target')}
+                      </span>
+                    </div>
+                  </div>
+                  {activeRecord.visualCharacteristics && (
+                    <div className="p-2 rounded bg-neutral-900/50 border border-neutral-800/70 text-[11px] text-neutral-400">
+                      <span className="text-[10px] text-neutral-500 uppercase block mb-0.5 font-medium">Visual Characteristics</span>
+                      {activeRecord.visualCharacteristics}
+                    </div>
+                  )}
                 </div>
 
                 {/* If plate is unreadable or needs review, NO fake dossier is displayed */}

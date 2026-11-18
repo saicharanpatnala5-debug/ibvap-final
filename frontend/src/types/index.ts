@@ -78,6 +78,12 @@ export interface ANPRResult {
   isDualRow?: boolean;
   ocrModel?: string;
   vehicleClass?: string;
+  vehicleColor?: string;
+  vehicleColorHex?: string;
+  vehicleCategory?: string;
+  bodyType?: string;
+  visualCharacteristics?: string;
+  detectionConfidence?: number;
 }
 
 export interface EntityAppearance {
@@ -256,6 +262,12 @@ export interface PlateRegistryRecord {
   rtoOffice?: string;
   ocrModel?: string;
   vehicleClass?: string;
+  vehicleColor?: string;
+  vehicleColorHex?: string;
+  vehicleCategory?: string;
+  bodyType?: string;
+  visualCharacteristics?: string;
+  detectionConfidence?: number;
   officialLookupStatus?: string;
 }
 
@@ -277,6 +289,11 @@ export interface ImageANPRPlateItem {
   vehicleBbox?: { x: number; y: number; width: number; height: number };
   plateBbox?: { x: number; y: number; width: number; height: number };
   vehicleClass?: string;
+  vehicleColor?: string;
+  vehicleColorHex?: string;
+  vehicleCategory?: string;
+  bodyType?: string;
+  visualCharacteristics?: string;
   charConfidences?: number[];
   isDualRow?: boolean;
   ocrModel?: string;

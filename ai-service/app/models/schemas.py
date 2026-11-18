@@ -42,6 +42,11 @@ class ANPRResult(BaseModel):
     rtoOffice: Optional[str] = None
     ocrModel: Optional[str] = "Awiros ANPR-OCR"
     vehicleClass: Optional[str] = None
+    vehicleColor: Optional[str] = None
+    vehicleColorHex: Optional[str] = None
+    vehicleCategory: Optional[str] = None
+    bodyType: Optional[str] = None
+    visualCharacteristics: Optional[str] = None
 
 
 class ImageANPRPlateItem(BaseModel):
@@ -57,6 +62,11 @@ class ImageANPRPlateItem(BaseModel):
     rtoOffice: Optional[str] = None
     isDualRow: bool = False
     vehicleClass: Optional[str] = None
+    vehicleColor: Optional[str] = None
+    vehicleColorHex: Optional[str] = None
+    vehicleCategory: Optional[str] = None
+    bodyType: Optional[str] = None
+    visualCharacteristics: Optional[str] = None
     ocrModel: str = "Awiros ANPR-OCR"
     charConfidences: Optional[list[float]] = None
     plateCropDataUrl: Optional[str] = None

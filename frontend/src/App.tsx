@@ -220,6 +220,12 @@ export default function App() {
     rtoOffice?: string;
     ocrModel?: string;
     vehicleClass?: string;
+    vehicleColor?: string;
+    vehicleColorHex?: string;
+    vehicleCategory?: string;
+    bodyType?: string;
+    visualCharacteristics?: string;
+    detectionConfidence?: number;
   }) => {
     // ANPR Fix 3 - Step 3: Reject pedestrian tracks; strictly vehicle classes only
     const rawClass = (plateInfo.objectClass || '').toLowerCase().trim();
@@ -227,11 +233,14 @@ export default function App() {
       return;
     }
 
-    const rawPlate = plateInfo.plate;
-    const cleanPlate = rawPlate.toUpperCase().replace(/[^A-Z0-9]/g, '');
     const isDistanceGated =
       plateInfo.formatType === 'distance_gated' ||
       plateInfo.validationStatus === 'Plate not legible at this distance';
+
+    const rawPlate = plateInfo.plate || '';
+    const cleanPlate = isDistanceGated || rawPlate.includes('not legible') || rawPlate.includes('not detected') || rawPlate === 'UNRESOLVED' || rawPlate === 'UNREADABLE'
+      ? ''
+      : rawPlate.toUpperCase().replace(/[^A-Z0-9]/g, '');
 
     let status: PlateStatus = 'Unreadable';
     let isValid = false;
@@ -255,8 +264,8 @@ export default function App() {
 
     const dossier = isValid ? lookupVehicleDossier(cleanPlate) : null;
     const cam = cameras.find((c) => c.id === plateInfo.cameraId);
-    const resolvedDisplayPlate = cleanPlate || (isDistanceGated ? 'Plate not legible at this distance' : 'Plate not detected');
-    const resolvedBestGuess = plateInfo.bestGuessPlate && plateInfo.bestGuessPlate !== 'UNRESOLVED'
+    const resolvedDisplayPlate = cleanPlate || (isDistanceGated ? 'Distant Target' : 'Plate not detected');
+    const resolvedBestGuess = (!isDistanceGated && plateInfo.bestGuessPlate && plateInfo.bestGuessPlate !== 'UNRESOLVED' && !plateInfo.bestGuessPlate.includes('not legible'))
       ? plateInfo.bestGuessPlate
       : resolvedDisplayPlate;
 
@@ -283,11 +292,12 @@ export default function App() {
       if (existingIdx >= 0) {
         const existing = prev[existingIdx];
         // Upgrade condition 1: New read is Valid format while existing was not
-        // Upgrade condition 2: Existing was distance-gated, new read is a candidate plate
+        // Upgrade condition 2: Existing was distance-gated/unresolved, new read is a candidate plate
         // Upgrade condition 3: New read has significantly higher confidence (+5%)
+        const isExistingUnresolved = existing.formatType === 'distance_gated' || existing.plateNumber === 'Distant Target' || existing.plateNumber === 'UNRESOLVED' || existing.plateNumber === 'Plate not detected';
         const shouldUpgrade =
           (isValid && !existing.isValidFormat) ||
-          (existing.formatType === 'distance_gated' && !isDistanceGated && cleanPlate.length >= 4) ||
+          (isExistingUnresolved && cleanPlate.length >= 4) ||
           (cleanPlate && plateInfo.confidence > existing.confidence + 5) ||
           ((plateInfo.attempts || 1) > (existing.attempts || 1));
 
@@ -317,6 +327,12 @@ export default function App() {
             rtoOffice: plateInfo.rtoOffice || existing.rtoOffice,
             ocrModel: plateInfo.ocrModel || existing.ocrModel,
             vehicleClass: plateInfo.objectClass || existing.vehicleClass,
+            vehicleColor: plateInfo.vehicleColor || existing.vehicleColor,
+            vehicleColorHex: plateInfo.vehicleColorHex || existing.vehicleColorHex,
+            vehicleCategory: plateInfo.vehicleCategory || existing.vehicleCategory,
+            bodyType: plateInfo.bodyType || existing.bodyType,
+            visualCharacteristics: plateInfo.visualCharacteristics || existing.visualCharacteristics,
+            detectionConfidence: plateInfo.detectionConfidence || existing.detectionConfidence,
           };
           saveStoredPlateRecords(updated);
           return updated;
@@ -352,6 +368,12 @@ export default function App() {
         rtoOffice: plateInfo.rtoOffice,
         ocrModel: plateInfo.ocrModel,
         vehicleClass: plateInfo.objectClass,
+        vehicleColor: plateInfo.vehicleColor,
+        vehicleColorHex: plateInfo.vehicleColorHex,
+        vehicleCategory: plateInfo.vehicleCategory,
+        bodyType: plateInfo.bodyType,
+        visualCharacteristics: plateInfo.visualCharacteristics,
+        detectionConfidence: plateInfo.detectionConfidence,
       };
 
       const updated = [newRecord, ...prev].slice(0, 80);

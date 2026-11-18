@@ -353,8 +353,9 @@ async def anpr_read_crop(request: Request):
     if crop_bgr is None or crop_bgr.size == 0:
         raise HTTPException(status_code=400, detail="Could not decode image.")
 
+    vehicle_class = body.get("vehicle_class") or body.get("class")
     engine = FastALPREngine.get_instance()
-    res = await asyncio.to_thread(engine.process_vehicle_crop, crop_bgr, min_w, min_h)
+    res = await asyncio.to_thread(engine.process_vehicle_crop, crop_bgr, min_w, min_h, vehicle_class, track_id)
 
     return {
         "status": "ok",
@@ -379,6 +380,11 @@ async def anpr_read_crop(request: Request):
         "rtoOffice": res.rtoOffice,
         "ocrModel": res.ocrModel,
         "vehicleClass": res.vehicleClass,
+        "vehicleColor": res.vehicleColor,
+        "vehicleColorHex": res.vehicleColorHex,
+        "vehicleCategory": res.vehicleCategory,
+        "bodyType": res.bodyType,
+        "visualCharacteristics": res.visualCharacteristics,
         "telemetry": get_shared_detector().async_anpr.get_telemetry(),
     }
 
