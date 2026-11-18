@@ -202,17 +202,18 @@ export function saveStoredAlerts(alerts: AlertIncident[], maxItems = 80) {
 // -------------------------------------------------------------
 
 export function loadStoredPlateRecords(): PlateRegistryRecord[] {
-  if (typeof window === 'undefined') return [];
-  return safeJsonParseVersioned<PlateRegistryRecord[]>(
-    localStorage.getItem(STORAGE_KEYS.PLATES),
-    [],
-    STORAGE_KEYS.PLATES
-  );
+  // Registry data must be tied to a loaded active video source.
+  // Never hydrate unlinked stale records on startup, refresh or when no video is active.
+  return [];
 }
 
 export function saveStoredPlateRecords(records: PlateRegistryRecord[], maxItems = 80) {
   if (typeof window === 'undefined') return;
   try {
+    if (!records || records.length === 0) {
+      localStorage.removeItem(STORAGE_KEYS.PLATES);
+      return;
+    }
     const sanitized = records.slice(0, maxItems).map((r) => ({
       ...r,
       cropUrl: typeof r.cropUrl === 'string' && r.cropUrl.length > 50000 ? undefined : r.cropUrl,

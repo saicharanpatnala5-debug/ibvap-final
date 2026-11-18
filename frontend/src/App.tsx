@@ -54,8 +54,8 @@ export default function App() {
   const [pendingCommandQuery, setPendingCommandQuery] = useState<string | null>(null);
   const [pendingCommandAttachment, setPendingCommandAttachment] = useState<any | null>(null);
 
-  // ANPR Plate Registry records collected from camera detections
-  const [plateRecords, setPlateRecords] = useState<PlateRegistryRecord[]>(() => loadStoredPlateRecords());
+  // ANPR Plate Registry records collected from active camera detections (never hydrated from stale storage)
+  const [plateRecords, setPlateRecords] = useState<PlateRegistryRecord[]>([]);
 
   // Append-only platform audit event log
   const [eventLog, setEventLog] = useState<PlatformEventLogEntry[]>(() => loadStoredEventLog());
@@ -110,18 +110,26 @@ export default function App() {
   // Handle adding a camera
   const handleAddCamera = (newCam: CameraFeedItem) => {
     setCameras((prev) => [...prev, newCam]);
+    // When new footage is uploaded, drop orphaned tracks that don't belong to any active camera
+    setPlateRecords((prev) => prev.filter((r) => r.cameraId === newCam.id || cameras.some((c) => c.id === r.cameraId)));
     // Switch to monitoring tab so user immediately sees their camera
     setActiveTab('monitoring');
   };
 
   // Handle updating camera
   const handleUpdateCamera = (updatedCam: CameraFeedItem) => {
+    const oldCam = cameras.find((c) => c.id === updatedCam.id);
+    if (oldCam && oldCam.sourceUrl !== updatedCam.sourceUrl) {
+      // Drop orphaned tracks from previous footage when new video source is assigned
+      setPlateRecords((prev) => prev.filter((r) => r.cameraId !== updatedCam.id));
+    }
     setCameras((prev) => prev.map((c) => (c.id === updatedCam.id ? updatedCam : c)));
   };
 
   // Handle removing camera
   const handleRemoveCamera = (cameraId: string) => {
     setCameras((prev) => prev.filter((c) => c.id !== cameraId));
+    setPlateRecords((prev) => prev.filter((r) => r.cameraId !== cameraId));
   };
 
   // Handle real-time alert generated from continuous detection pass
@@ -550,6 +558,9 @@ export default function App() {
   // Clear all platform data (1-click wipe)
   const handleClearAllData = () => {
     clearStoredPlatformData();
+    if (typeof window !== 'undefined') {
+      localStorage.removeItem('ibvap_plates_v8.0.0');
+    }
     setCameras([]);
     setAlerts([]);
     setPlateRecords([]);
