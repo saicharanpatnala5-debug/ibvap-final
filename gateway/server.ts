@@ -9,10 +9,49 @@ import { createServer as createViteServer } from 'vite';
 import { GoogleGenAI } from '@google/genai';
 import dotenv from 'dotenv';
 
-dotenv.config();
-
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
+
+// Load environment variables prioritizing gateway/.env then root .env fallback
+export function loadEnvironmentVariables(): boolean {
+  const gatewayEnvCandidates = [
+    path.resolve(__dirname, '.env'),
+    path.resolve(process.cwd(), 'gateway/.env'),
+  ];
+  for (const envPath of gatewayEnvCandidates) {
+    if (fs.existsSync(envPath)) {
+      dotenv.config({ path: envPath, override: true });
+      break;
+    }
+  }
+
+  const currentKey = process.env.GEMINI_API_KEY?.trim().replace(/^["']|["']$/g, '');
+  if (!currentKey) {
+    const rootEnvCandidates = [
+      path.resolve(__dirname, '../.env'),
+      path.resolve(process.cwd(), '.env'),
+    ];
+    for (const envPath of rootEnvCandidates) {
+      if (fs.existsSync(envPath)) {
+        dotenv.config({ path: envPath, override: false });
+        break;
+      }
+    }
+  }
+
+  if (process.env.GEMINI_API_KEY) {
+    process.env.GEMINI_API_KEY = process.env.GEMINI_API_KEY.trim().replace(/^["']|["']$/g, '');
+  }
+  if (process.env.GEMINI_MODEL) {
+    process.env.GEMINI_MODEL = process.env.GEMINI_MODEL.trim().replace(/^["']|["']$/g, '');
+  }
+
+  const hasKey = Boolean(process.env.GEMINI_API_KEY && process.env.GEMINI_API_KEY.length > 5);
+  console.log(`[IBVAP Gateway] Gemini key loaded: ${hasKey ? 'yes' : 'no'}`);
+  return hasKey;
+}
+
+loadEnvironmentVariables();
 
 const app = express();
 const PORT = parseInt(process.env.PORT || '3000', 10);
@@ -89,7 +128,7 @@ export let geminiLastErrorCode: string | null = null;
 let geminiClient: GoogleGenAI | null = null;
 
 export async function verifyAndSelectGeminiModel(): Promise<void> {
-  const apiKey = process.env.GEMINI_API_KEY?.trim();
+  const apiKey = process.env.GEMINI_API_KEY?.trim().replace(/^["']|["']$/g, '');
   if (!apiKey) {
     geminiReachable = false;
     geminiLastErrorCode = 'NO_API_KEY';

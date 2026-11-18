@@ -23,6 +23,7 @@ samples/debug_crops_round4/
 docs/anpr_review.html
 docs/detection_review.html
 docs/*review*.html
+docs/*audit*.html
 docs/pipeline_inspector.html
 docs/*inspector*.html
 docs/demo_video/
