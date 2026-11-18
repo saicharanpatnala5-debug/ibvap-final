@@ -29,6 +29,7 @@ import {
   CornerDownRight,
   X,
   FileText,
+  RotateCcw,
 } from 'lucide-react';
 import Markdown from 'react-markdown';
 import {
@@ -38,6 +39,7 @@ import {
   AISessionMemory,
   AlertIncident,
   CameraFeedItem,
+  PlateRegistryRecord,
 } from '../types';
 import {
   processAICommand,
@@ -46,7 +48,7 @@ import {
   generateInvestigationReport,
 } from '../services/aiCommandCenter';
 import { getActiveCameraFrameSnapshot } from '../services/cameraFrameRegistry';
-import { loadStoredChatHistory, saveStoredChatHistory } from '../services/storageService';
+import { loadStoredChatHistory, saveStoredChatHistory, loadStoredPlateRecords } from '../services/storageService';
 import { ExplainableRecommendationCard } from './ExplainableRecommendationCard';
 import { InvestigationReportCard } from './InvestigationReportCard';
 import { AIPredictiveCard, AnomalyCard } from './AIPredictiveCard';
@@ -54,6 +56,7 @@ import { AIPredictiveCard, AnomalyCard } from './AIPredictiveCard';
 interface AICommandCenterProps {
   cameras: CameraFeedItem[];
   alerts: AlertIncident[];
+  plateRecords?: PlateRegistryRecord[];
   onAcknowledgeAlert: (alertId: string) => void;
   onEscalateAlert: (alertId: string) => void;
   onCloseAlert: (alertId: string) => void;
@@ -68,6 +71,7 @@ interface AICommandCenterProps {
 export const AICommandCenter: React.FC<AICommandCenterProps> = ({
   cameras,
   alerts,
+  plateRecords,
   onAcknowledgeAlert,
   onEscalateAlert,
   onCloseAlert,
@@ -80,6 +84,37 @@ export const AICommandCenter: React.FC<AICommandCenterProps> = ({
 }) => {
   // Active Subtab inside Command Center: 'chat' | 'anomalies_predictions' | 'audit_log'
   const [activeSubTab, setActiveSubTab] = useState<'chat' | 'anomalies_predictions' | 'audit_log'>('chat');
+
+  // Copilot connection / model status state
+  const [copilotStatus, setCopilotStatus] = useState<{
+    online: boolean;
+    model?: string;
+    reason?: string;
+  }>({ online: false, reason: 'Checking copilot connection...' });
+
+  useEffect(() => {
+    let isMounted = true;
+    async function fetchCopilotStatus() {
+      try {
+        const res = await fetch('/api/health');
+        if (res.ok && isMounted) {
+          const data = await res.json();
+          if (data.geminiReachable) {
+            setCopilotStatus({ online: true, model: data.model });
+          } else {
+            const reason = data.lastErrorCode || (data.hasGeminiKey ? 'Gemini API unreachable' : 'no API key configured');
+            setCopilotStatus({ online: false, reason });
+          }
+        }
+      } catch {
+        if (isMounted) {
+          setCopilotStatus({ online: false, reason: 'gateway unreachable' });
+        }
+      }
+    }
+    fetchCopilotStatus();
+    return () => { isMounted = false; };
+  }, []);
 
   // Chat message state initialized from persistent storage
   const [messages, setMessages] = useState<AIChatMessage[]>(() => {
@@ -271,10 +306,16 @@ Ask me anything or pick a quick command to begin:`,
         }));
 
       // 3. Prepare structured telemetry context
+      const storedPlates = plateRecords || loadStoredPlateRecords();
+      const allZones = cameras.flatMap((c) => c.zones || []);
+
       const contextPayload = {
-        cameras: cameras.map((c) => ({ id: c.id, name: c.name, status: c.status })),
-        alerts: alerts.slice(0, 10),
+        cameras: cameras.map((c) => ({ id: c.id, name: c.name, status: c.status, zones: c.zones })),
+        alerts: alerts.slice(0, 20),
         entities: frameSnapshot?.trackedObjects || [],
+        plates: storedPlates.slice(0, 20),
+        zones: allZones,
+        videoTime: frameSnapshot?.currentTime || 0,
       };
 
       let aiMessageText = '';
@@ -564,14 +605,14 @@ Try clicking one of the suggested command actions above or retry your query.`,
   // Quick Prompt Chips
   const promptChips = [
     { label: "👁️ Explain what's going on in the footage", query: "Explain what's going on in the footage" },
+    { label: "🚗 How many vehicles & pedestrians were detected?", query: "How many vehicles and pedestrians were detected?" },
+    { label: "⚠️ Why did the alert fire?", query: "Why did the alert fire?" },
+    { label: "📋 Show plates read & review", query: "Show license plates read and needing review" },
+    { label: "🕒 What happened at 10 seconds?", query: "What happened at 10s?" },
+    { label: "📍 Which zone had security activity?", query: "Which zone had security activity?" },
+    { label: "Recommend action", query: "Recommend action" },
     { label: "Show today's critical events", query: "Show me today's critical events" },
-    { label: 'Which camera needs attention first?', query: 'Which camera needs attention first?' },
-    { label: 'Investigate event #1', query: 'Investigate event #1' },
-    { label: 'Recommend action', query: 'Recommend action' },
-    { label: 'Show unusual events & anomalies', query: "Show me today's unusual events" },
-    { label: 'Summarize last 24 hours', query: 'Summarize the last 24 hours' },
-    { label: 'Predictive intelligence scan', query: 'Run predictive intelligence scan' },
-    { label: 'What changed since yesterday?', query: 'What changed since yesterday?' },
+    { label: "Predictive intelligence scan", query: "Run predictive intelligence scan" },
   ];
 
   return (
@@ -605,24 +646,18 @@ Try clicking one of the suggested command actions above or retry your query.`,
         {/* Live Grounding & Network Indicator */}
         <div className="flex items-center gap-2.5">
           <div
-            className={`flex items-center gap-1.5 rounded-full px-2.5 py-1 text-[11px] font-medium border ${
-              isOnline
+            id="copilot-status-badge"
+            className={`flex items-center gap-1.5 rounded-full px-2.5 py-1 text-[11px] font-mono font-medium border ${
+              copilotStatus.online
                 ? 'bg-emerald-950/60 border-emerald-800 text-emerald-300'
                 : 'bg-amber-950/60 border-amber-800 text-amber-300'
             }`}
+            title={copilotStatus.online ? `Online: Connected to ${copilotStatus.model}` : `Offline mode: ${copilotStatus.reason}`}
           >
-            {isOnline ? (
-              <>
-                <div className="h-2 w-2 rounded-full bg-emerald-400 animate-ping" />
-                <Wifi className="h-3 w-3" />
-                <span>Live Grounded ({cameras.length} Cams, {alerts.length} Incidents)</span>
-              </>
-            ) : (
-              <>
-                <WifiOff className="h-3 w-3" />
-                <span>Offline • Core Intelligence Engine Active</span>
-              </>
-            )}
+            <span className={`h-2 w-2 rounded-full ${copilotStatus.online ? 'bg-emerald-400 animate-ping' : 'bg-amber-400'}`} />
+            <span id="copilot-status-text">
+              {copilotStatus.online ? `Online: ${copilotStatus.model}` : `Offline mode: ${copilotStatus.reason}`}
+            </span>
           </div>
 
           {onToggleDock && (
@@ -732,6 +767,7 @@ Try clicking one of the suggested command actions above or retry your query.`,
                     )}
 
                     <div
+                      data-testid={`chat-bubble-${msg.sender}`}
                       className={`max-w-[88%] sm:max-w-[80%] rounded-xl p-3.5 ${
                         isAi
                           ? 'border border-neutral-800 bg-neutral-900/90 text-neutral-100 shadow-sm'
@@ -844,16 +880,34 @@ Try clicking one of the suggested command actions above or retry your query.`,
                         </div>
                       )}
 
-                      {/* Timestamp */}
-                      <div
-                        className={`mt-2 text-[10px] ${
-                          isAi ? 'text-neutral-500' : 'text-neutral-900/80 font-mono'
-                        }`}
-                      >
-                        {new Date(msg.timestamp).toLocaleTimeString([], {
-                          hour: '2-digit',
-                          minute: '2-digit',
-                        })}
+                      {/* Timestamp & Retry Action */}
+                      <div className="mt-2 flex items-center justify-between gap-2">
+                        <div
+                          className={`text-[10px] ${
+                            isAi ? 'text-neutral-500' : 'text-neutral-900/80 font-mono'
+                          }`}
+                        >
+                          {new Date(msg.timestamp).toLocaleTimeString([], {
+                            hour: '2-digit',
+                            minute: '2-digit',
+                          })}
+                        </div>
+                        {isAi && msg.id !== 'welcome-msg' && (
+                          <button
+                            type="button"
+                            onClick={() => {
+                              const prevUserMsg = [...messages].slice(0, messages.indexOf(msg)).reverse().find((m) => m.sender === 'user');
+                              if (prevUserMsg) {
+                                handleExecuteQuery(prevUserMsg.text);
+                              }
+                            }}
+                            className="inline-flex items-center gap-1 rounded bg-neutral-800/80 hover:bg-neutral-800 border border-neutral-700/60 px-2 py-0.5 text-[10px] text-neutral-400 hover:text-amber-300 transition-colors"
+                            title="Retry query"
+                          >
+                            <RotateCcw className="h-2.5 w-2.5" />
+                            <span>Retry</span>
+                          </button>
+                        )}
                       </div>
                     </div>
 

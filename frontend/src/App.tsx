@@ -545,6 +545,7 @@ export default function App() {
             <AICommandCenter
               cameras={cameras}
               alerts={alerts}
+              plateRecords={plateRecords}
               onAcknowledgeAlert={handleAcknowledgeAlert}
               onEscalateAlert={handleEscalateAlert}
               onCloseAlert={handleCloseAlert}
