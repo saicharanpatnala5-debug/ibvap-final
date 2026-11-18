@@ -5,6 +5,7 @@ export interface CameraFrameSnapshot {
   width: number;
   height: number;
   trackedObjects: TrackedObject[];
+  clipTotalEntities?: TrackedObject[];
   isNightMode: boolean;
   currentTime: number;
   cameraId?: string;

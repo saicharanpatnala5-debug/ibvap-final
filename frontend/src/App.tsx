@@ -214,7 +214,7 @@ export default function App() {
     } else if (plateInfo.formatType === 'standard' || plateInfo.formatType === 'bharat') {
       status = 'Valid format';
       isValid = true;
-    } else if (plateInfo.validationStatus?.includes('needs review') || cleanPlate.length >= 4) {
+    } else if (plateInfo.validationStatus?.toLowerCase().includes('needs review') || cleanPlate.length >= 4) {
       status = 'Low confidence - needs review';
       isValid = false;
     } else {
@@ -228,13 +228,55 @@ export default function App() {
     const cam = cameras.find((c) => c.id === plateInfo.cameraId);
 
     setPlateRecords((prev) => {
-      // De-duplicate same track within 8 seconds video time
-      const existing = prev.find(
-        (r) =>
-          (r.trackId === plateInfo.trackId && Math.abs((r.videoTime || 0) - plateInfo.videoTime) < 8) ||
-          (!isDistanceGated && r.plateNumber === cleanPlate && Math.abs((r.videoTime || 0) - plateInfo.videoTime) < 8)
-      );
-      if (existing) return prev;
+      // Find matching record by track ID or near-identical plate text within 12s video time
+      const existingIdx = prev.findIndex((r) => {
+        const timeDiff = Math.abs((r.videoTime || 0) - plateInfo.videoTime);
+        if (plateInfo.trackId && r.trackId === plateInfo.trackId && timeDiff < 12) return true;
+        if (!isDistanceGated && cleanPlate && r.plateNumber && r.plateNumber !== 'UNRESOLVED' && r.plateNumber !== 'UNREADABLE') {
+          if (r.plateNumber === cleanPlate && timeDiff < 12) return true;
+          // Levenshtein distance <= 2 for optical OCR variations of the same plate
+          if (timeDiff < 12 && Math.abs(r.plateNumber.length - cleanPlate.length) <= 2) {
+            let diff = 0;
+            const minLen = Math.min(r.plateNumber.length, cleanPlate.length);
+            for (let i = 0; i < minLen; i++) {
+              if (r.plateNumber[i] !== cleanPlate[i]) diff++;
+            }
+            if (diff <= 2) return true;
+          }
+        }
+        return false;
+      });
+
+      if (existingIdx >= 0) {
+        const existing = prev[existingIdx];
+        // Upgrade condition 1: New read is Valid format while existing was not
+        // Upgrade condition 2: Existing was distance-gated, new read is a candidate plate
+        // Upgrade condition 3: New read has significantly higher confidence (+5%)
+        const shouldUpgrade =
+          (isValid && !existing.isValidFormat) ||
+          (existing.formatType === 'distance_gated' && !isDistanceGated && cleanPlate.length >= 4) ||
+          (cleanPlate && plateInfo.confidence > existing.confidence + 5);
+
+        if (shouldUpgrade) {
+          const updated = [...prev];
+          updated[existingIdx] = {
+            ...existing,
+            plateNumber: cleanPlate || existing.plateNumber,
+            status,
+            formatValidationStatus: plateInfo.validationStatus || status,
+            isValidFormat: isValid || existing.isValidFormat,
+            formatType: formatType !== 'invalid' ? formatType : existing.formatType,
+            confidence: Math.max(existing.confidence, plateInfo.confidence),
+            cropUrl: plateInfo.cropUrl || existing.cropUrl,
+            vehicleThumbnailUrl: plateInfo.cropUrl || existing.vehicleThumbnailUrl,
+            dossier: dossier || existing.dossier,
+            videoTime: plateInfo.videoTime,
+          };
+          saveStoredPlateRecords(updated);
+          return updated;
+        }
+        return prev;
+      }
 
       const newRecord: PlateRegistryRecord = {
         id: `rec-${cleanPlate || 'plate'}-${Date.now()}-${Math.random().toString(36).slice(2, 6)}`,
@@ -253,7 +295,10 @@ export default function App() {
         vehicleThumbnailUrl: plateInfo.cropUrl,
         dossier,
       };
-      return [newRecord, ...prev];
+
+      const updated = [newRecord, ...prev].slice(0, 80);
+      saveStoredPlateRecords(updated);
+      return updated;
     });
   };
 

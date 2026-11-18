@@ -43,6 +43,7 @@ import {
 } from '../services/detectionEngine';
 import { extractAndReadLicensePlate } from '../services/anprEngine';
 import { createAlertIncident } from '../services/riskEngine';
+import { entityStore } from '../services/entityStore';
 import {
   registerCameraFrameProvider,
   unregisterCameraFrameProvider,
@@ -101,6 +102,7 @@ export const CameraFeed: React.FC<CameraFeedProps> = ({
   const lastMotionCheckRef = useRef<number>(0);
   const isDetectingRef = useRef<boolean>(false);
   const lastDetectionTimeRef = useRef<number>(0);
+  const trackLastAnprTimeRef = useRef<Record<number, number>>({});
 
   // VMS Quality & Overlay State
   const [qualityMode, setQualityMode] = useState<'fast' | 'balanced' | 'high'>('fast');
@@ -306,6 +308,7 @@ export const CameraFeed: React.FC<CameraFeedProps> = ({
         width: snapCanvas.width,
         height: snapCanvas.height,
         trackedObjects: targetTracksRef.current,
+        clipTotalEntities: trackerRef.current.getCumulativeUniqueTracks(),
         isNightMode,
         currentTime: video.currentTime,
       };
@@ -517,7 +520,17 @@ export const CameraFeed: React.FC<CameraFeedProps> = ({
       // 3. Multi-object tracker update with persistent IDs, provisional reconciliation & trajectories
       const updatedTracks = trackerRef.current.update(rawDetections, Date.now());
 
+      // Update central shared entity store for HUD, Copilot, and Registry
+      entityStore.setCameraState(
+        camera.id,
+        camera.name,
+        video.currentTime,
+        updatedTracks,
+        trackerRef.current.getCumulativeUniqueTracks()
+      );
+
       // 4. Automatic ANPR on vehicles in the same background detection pass
+      const nowMs = Date.now();
       for (const track of updatedTracks) {
         const isVehicle = [
           'car',
@@ -529,10 +542,16 @@ export const CameraFeed: React.FC<CameraFeedProps> = ({
           'truck/bus',
           'motorcycle',
         ].includes(track.class);
-        if (isVehicle && !track.anpr) {
-          extractAndReadLicensePlate(video, track.bbox).then((anprResult) => {
-            track.anpr = anprResult;
-            if (anprResult.isReadable && anprResult.plateText && anprResult.plateText !== 'Unreadable') {
+
+        const hasConfirmedValidPlate = Boolean(track.anpr?.isValidFormat);
+        const lastAttempt = trackLastAnprTimeRef.current[track.id] || 0;
+        const canAttemptAnpr = !hasConfirmedValidPlate && (nowMs - lastAttempt > 500);
+
+        if (isVehicle && canAttemptAnpr) {
+          trackLastAnprTimeRef.current[track.id] = nowMs;
+          extractAndReadLicensePlate(video, track.bbox, track.id).then((anprResult) => {
+            if (anprResult.isValidFormat || (anprResult.isReadable && anprResult.plateText && anprResult.plateText.length >= 4)) {
+              track.anpr = anprResult;
               const bestCrop = anprResult.plateCropDataUrl || anprResult.cropDataUrl;
               setLatestReadPlate({
                 plate: anprResult.plateText,
@@ -556,7 +575,7 @@ export const CameraFeed: React.FC<CameraFeedProps> = ({
                   validationStatus: anprResult.validationStatus,
                 });
               }
-              if (!autoOpenedPlatesRef.current.has(anprResult.plateText)) {
+              if (anprResult.isValidFormat && !autoOpenedPlatesRef.current.has(anprResult.plateText)) {
                 autoOpenedPlatesRef.current.add(anprResult.plateText);
                 onSelectPlate(anprResult.plateText, bestCrop);
               }

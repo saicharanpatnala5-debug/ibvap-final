@@ -30,6 +30,7 @@ import time
 import cv2
 import numpy as np
 from app.services.detector import SurveillanceDetector
+from app.services.anpr import FastALPREngine
 from app.services.video_source import VideoSourceManager
 from app.services.core_client import CoreServiceClient
 
@@ -311,4 +312,54 @@ async def detect_frame(
         "detections": detections,
         "count": len(detections),
     }
+
+
+@app.post("/anpr/read-crop")
+async def anpr_read_crop(request: Request):
+    """
+    Server-side ANPR endpoint: localizes and reads license plate from vehicle crop
+    using Fast-ALPR (YOLOv9) + RapidOCR fallback + CLAHE upscaling + PlateValidator.
+    """
+    body = {}
+    try:
+        body = await request.json()
+    except Exception:
+        pass
+
+    b64 = body.get("cropBase64") or body.get("image") or body.get("frame")
+    track_id = body.get("track_id")
+    min_w = int(body.get("min_w", 35))
+    min_h = int(body.get("min_h", 12))
+
+    if not b64:
+        raise HTTPException(status_code=400, detail="Missing cropBase64 image.")
+
+    clean_b64 = b64.split(",")[-1]
+    decoded = base64.b64decode(clean_b64)
+    nparr = np.frombuffer(decoded, np.uint8)
+    crop_bgr = cv2.imdecode(nparr, cv2.IMREAD_COLOR)
+
+    if crop_bgr is None or crop_bgr.size == 0:
+        raise HTTPException(status_code=400, detail="Could not decode image.")
+
+    engine = FastALPREngine.get_instance()
+    res = engine.process_vehicle_crop(crop_bgr, min_veh_w=min_w, min_veh_h=min_h)
+
+    return {
+        "status": "ok",
+        "plateText": res.plateText,
+        "confidence": res.confidence,
+        "isReadable": res.isReadable,
+        "isValidFormat": res.isValidFormat,
+        "formatType": res.formatType,
+        "validationStatus": res.validationStatus,
+        "stateCode": res.stateCode,
+        "plateNumber": res.plateNumber,
+        "plateCropDataUrl": res.plateCropDataUrl or res.cropDataUrl,
+        "vehicleCropDataUrl": res.vehicleCropDataUrl,
+        "isDistanceGated": res.isDistanceGated,
+        "processedAt": res.processedAt,
+        "track_id": track_id,
+    }
+
 

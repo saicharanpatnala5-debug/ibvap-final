@@ -1033,6 +1033,7 @@ export class ObjectTracker {
   private nextId = 101;
   private trackedObjects: TrackedObject[] = [];
   private inactiveTracks: TrackedObject[] = []; // Inactive track pool for occlusion & re-entry Re-ID
+  private cumulativeTracksMap = new Map<number, TrackedObject>(); // Unique tracks seen across the entire clip
   private maxHistoryLength = 24; // Number of trajectory points
   private maxDisappearedMs = 2800; // Drop active tracks after 2.8s of no detection
   private maxInactiveRetainMs = 6500; // Retain inactive tracks up to 6.5s for occlusion Re-ID
@@ -1328,14 +1329,31 @@ export class ObjectTracker {
       (t) => timestamp - t.lastSeenTimestamp < this.maxInactiveRetainMs
     );
 
+    // Record all confirmed tracks in cumulative map
+    for (const track of this.trackedObjects) {
+      if (!track.isProvisional) {
+        this.cumulativeTracksMap.set(track.id, { ...track });
+      }
+    }
+
     // Return tracks currently detected or confirmed in this frame
     return this.trackedObjects.filter(
       (t) => currentFrameTrackIds.has(t.id) || (t.isProvisional && timestamp - t.lastSeenTimestamp < 600)
     );
   }
 
+  public getCumulativeUniqueTracks(): TrackedObject[] {
+    return Array.from(this.cumulativeTracksMap.values());
+  }
+
+  public getActiveTracks(): TrackedObject[] {
+    return [...this.trackedObjects];
+  }
+
   public reset() {
     this.trackedObjects = [];
     this.inactiveTracks = [];
+    this.cumulativeTracksMap.clear();
+    this.nextId = 101;
   }
 }

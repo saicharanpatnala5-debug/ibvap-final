@@ -48,6 +48,7 @@ import {
   generateInvestigationReport,
 } from '../services/aiCommandCenter';
 import { getActiveCameraFrameSnapshot } from '../services/cameraFrameRegistry';
+import { entityStore } from '../services/entityStore';
 import { loadStoredChatHistory, saveStoredChatHistory, loadStoredPlateRecords } from '../services/storageService';
 import { ExplainableRecommendationCard } from './ExplainableRecommendationCard';
 import { InvestigationReportCard } from './InvestigationReportCard';
@@ -280,15 +281,23 @@ Ask me anything or pick a quick command to begin:`,
       // 1. Check for live camera frame snapshot (optical ground truth)
       const frameSnapshot = getActiveCameraFrameSnapshot(sessionMemory.focusedCameraId);
       const targetCamName = frameSnapshot?.cameraName || cameras[0]?.name || 'Primary Surveillance Feed';
+      const targetCamId = frameSnapshot?.cameraId || sessionMemory.focusedCameraId || cameras[0]?.id;
       
+      const lower = text.toLowerCase();
       const shouldIncludeFrame =
         currentAttachment?.type === 'image' ||
-        text.toLowerCase().includes('scene') ||
-        text.toLowerCase().includes('explain') ||
-        text.toLowerCase().includes('footage') ||
-        text.toLowerCase().includes('look') ||
-        text.toLowerCase().includes('who') ||
-        text.toLowerCase().includes('vehicle');
+        lower.includes('scene') ||
+        lower.includes('explain') ||
+        lower.includes('footage') ||
+        lower.includes('look') ||
+        lower.includes('who') ||
+        lower.includes('vehicle') ||
+        lower.includes('pedestrian') ||
+        lower.includes('how many') ||
+        lower.includes('count') ||
+        lower.includes('breakdown') ||
+        lower.includes('plate') ||
+        lower.includes('what');
 
       const frameBase64 = currentAttachment?.type === 'image'
         ? currentAttachment.url
@@ -309,13 +318,19 @@ Ask me anything or pick a quick command to begin:`,
       const storedPlates = plateRecords || loadStoredPlateRecords();
       const allZones = cameras.flatMap((c) => c.zones || []);
 
+      const sharedState = entityStore.getCameraState(targetCamId);
+      const visibleNow = frameSnapshot?.trackedObjects || sharedState?.visibleEntitiesNow || [];
+      const clipTotal = frameSnapshot?.clipTotalEntities || sharedState?.cumulativeUniqueEntities || [];
+      const currentTime = frameSnapshot?.currentTime ?? sharedState?.videoTime ?? 0;
+
       const contextPayload = {
         cameras: cameras.map((c) => ({ id: c.id, name: c.name, status: c.status, zones: c.zones })),
         alerts: alerts.slice(0, 20),
-        entities: frameSnapshot?.trackedObjects || [],
+        entities: visibleNow,
+        clipTotalEntities: clipTotal,
         plates: storedPlates.slice(0, 20),
         zones: allZones,
-        videoTime: frameSnapshot?.currentTime || 0,
+        videoTime: currentTime,
       };
 
       let aiMessageText = '';
@@ -332,7 +347,9 @@ Ask me anything or pick a quick command to begin:`,
             message: text,
             history: historyPayload,
             frameBase64,
+            cameraId: targetCamId,
             cameraName: targetCamName,
+            currentTime,
             context: contextPayload,
           }),
         });

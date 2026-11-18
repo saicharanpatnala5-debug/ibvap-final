@@ -36,8 +36,7 @@ describe('Grounded Local Heuristic Fallback Engine', () => {
 
   it('includes honest disclaimer stating it summarizes detections without raw image processing', () => {
     const res = generateGroundedFallbackResponse('explain scene', sampleContext);
-    expect(res).toContain('IBVAP local heuristic engine');
-    expect(res).toContain('does not perform optical/visual image analysis');
+    expect(res).toContain('Tracker data, not visually verified');
   });
 
   it('triggers scene analysis on "explain" and "scene" and "what is happening"', () => {
@@ -47,7 +46,7 @@ describe('Grounded Local Heuristic Fallback Engine', () => {
 
     const res2 = generateGroundedFallbackResponse('what is happening right now', sampleContext);
     expect(res2).toContain('Scene Analysis');
-    expect(res2).toContain('Observed Entities');
+    expect(res2).toContain('Telemetry Counts');
   });
 
   it('uses word-boundary matching so "who" does not match "whole"', () => {
@@ -85,10 +84,11 @@ describe('Grounded Local Heuristic Fallback Engine', () => {
   // 10 Question Patterns Verification Tests
   it('Pattern 1: answers entity counts by class accurately', () => {
     const res = generateGroundedFallbackResponse('how many vehicles and pedestrians were detected?', sampleContext);
-    expect(res).toContain('Tracked Entity Counts by Class');
-    expect(res).toContain('Pedestrians / Persons');
-    expect(res).toContain('Cars / Sedans');
-    expect(res).toContain('Total Vehicles');
+    expect(res).toContain('Tracked Entity Counts');
+    expect(res).toContain('Pedestrians');
+    expect(res).toContain('Vehicles');
+    expect(res).toContain('Visible in Current Frame');
+    expect(res).toContain('Cumulative Unique Tracked');
   });
 
   it('Pattern 2: answers why an alert fired with root-cause analysis', () => {

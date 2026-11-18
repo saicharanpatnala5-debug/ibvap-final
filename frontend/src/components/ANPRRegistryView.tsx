@@ -49,6 +49,55 @@ export const ANPRRegistryView: React.FC<ANPRRegistryViewProps> = ({
   const [isEditingPlate, setIsEditingPlate] = useState(false);
   const [correctionInput, setCorrectionInput] = useState('');
 
+  // AI-assisted plate reading state
+  const [isAiReading, setIsAiReading] = useState(false);
+  const [showAiWarning, setShowAiWarning] = useState(false);
+  const [aiReadError, setAiReadError] = useState<string | null>(null);
+
+  const handleAiReadClick = () => {
+    setShowAiWarning(true);
+    setAiReadError(null);
+  };
+
+  const executeAiPlateRead = async () => {
+    setShowAiWarning(false);
+    if (!activeRecord) return;
+    const crop = activeRecord.cropUrl || activeRecord.vehicleThumbnailUrl;
+    if (!crop) {
+      setAiReadError('No image crop available for this target.');
+      return;
+    }
+
+    setIsAiReading(true);
+    setAiReadError(null);
+
+    try {
+      const res = await fetch('/api/anpr/ai-read', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ cropBase64: crop }),
+      });
+
+      if (res.ok) {
+        const data = await res.json();
+        if (data.plateText && data.plateText !== 'UNREADABLE') {
+          // Pre-populate correction input with AI-extracted text for operator review and confirmation
+          setCorrectionInput(data.plateText);
+          setIsEditingPlate(true);
+        } else {
+          setAiReadError('AI Vision could not extract a distinct license plate from this crop.');
+        }
+      } else {
+        const err = await res.json().catch(() => ({}));
+        setAiReadError(err.error || `AI plate read failed (${res.status})`);
+      }
+    } catch {
+      setAiReadError('Network error calling AI plate read.');
+    } finally {
+      setIsAiReading(false);
+    }
+  };
+
   const formatVideoTimestamp = (sec?: number) => {
     if (sec === undefined || sec === null) return '00:00.0s';
     const m = Math.floor(sec / 60);
@@ -553,23 +602,88 @@ export const ANPRRegistryView: React.FC<ANPRRegistryViewProps> = ({
                       Registry data is never attached to unreadable or low-confidence reads. Simulated records are only returned for validated exact matches.
                     </p>
 
-                    {/* Operator Manual Correction Form */}
-                    <div className="mt-4 pt-4 border-t border-neutral-800/80">
-                      {!isEditingPlate ? (
+                    {/* Operator Quick Actions: Confirm Read, AI Read, Manual Correction */}
+                    <div className="mt-4 pt-4 border-t border-neutral-800/80 flex flex-col gap-3">
+                      <div className="flex flex-wrap items-center justify-center gap-2">
+                        {activeRecord.plateNumber && activeRecord.plateNumber !== 'UNREADABLE' && activeRecord.plateNumber !== 'UNRESOLVED' && onCorrectPlate && (
+                          <button
+                            type="button"
+                            id="confirm-plate-read-btn"
+                            onClick={() => onCorrectPlate(activeRecord.id, activeRecord.plateNumber)}
+                            className="inline-flex items-center gap-1.5 rounded-lg bg-emerald-600 hover:bg-emerald-500 px-3 py-1.5 text-xs font-semibold text-white shadow-sm transition-colors"
+                            title="Confirm candidate read as verified"
+                          >
+                            <CheckCircle2 className="h-3.5 w-3.5" />
+                            <span>Confirm Read</span>
+                          </button>
+                        )}
+
                         <button
                           type="button"
-                          id="open-plate-correction-btn"
-                          onClick={() => {
-                            setIsEditingPlate(true);
-                            setCorrectionInput(activeRecord.plateNumber === 'UNREADABLE' ? '' : activeRecord.plateNumber);
-                          }}
-                          className="inline-flex items-center gap-1.5 rounded-lg border border-neutral-700 bg-neutral-800 px-3 py-1.5 text-xs font-medium text-amber-400 hover:bg-neutral-700"
+                          id="ai-plate-read-btn"
+                          disabled={isAiReading || (!activeRecord.cropUrl && !activeRecord.vehicleThumbnailUrl)}
+                          onClick={handleAiReadClick}
+                          className="inline-flex items-center gap-1.5 rounded-lg border border-cyan-500/60 bg-cyan-950/60 hover:bg-cyan-900/80 px-3 py-1.5 text-xs font-semibold text-cyan-300 transition-colors disabled:opacity-50"
+                          title="Optical plate reading with server-side Gemini Vision"
                         >
-                          <Edit3 className="h-3.5 w-3.5" />
-                          <span>Operator Manual Plate Correction</span>
+                          <Sparkles className="h-3.5 w-3.5 text-cyan-400" />
+                          <span>{isAiReading ? 'Analyzing Crop...' : 'Read plate with AI'}</span>
                         </button>
-                      ) : (
-                        <form onSubmit={handleApplyCorrection} className="flex items-center gap-2">
+
+                        {!isEditingPlate && (
+                          <button
+                            type="button"
+                            id="open-plate-correction-btn"
+                            onClick={() => {
+                              setIsEditingPlate(true);
+                              setCorrectionInput(activeRecord.plateNumber === 'UNREADABLE' ? '' : activeRecord.plateNumber);
+                            }}
+                            className="inline-flex items-center gap-1.5 rounded-lg border border-neutral-700 bg-neutral-800 px-3 py-1.5 text-xs font-medium text-amber-400 hover:bg-neutral-700 transition-colors"
+                          >
+                            <Edit3 className="h-3.5 w-3.5" />
+                            <span>Manual Correction</span>
+                          </button>
+                        )}
+                      </div>
+
+                      {showAiWarning && (
+                        <div className="p-3 rounded-lg bg-neutral-900 border border-amber-500/60 text-left">
+                          <div className="flex items-start gap-2">
+                            <AlertTriangle className="h-4 w-4 text-amber-400 shrink-0 mt-0.5" />
+                            <div className="text-xs text-neutral-300">
+                              <strong className="text-amber-300 block mb-1">External Optical Inference Warning</strong>
+                              Vehicle crop image will be sent to the Gemini Vision API for optical extraction.
+                              Candidate text will be labelled <em>"AI-assisted - needs confirmation"</em> and no vehicle registry data will be attached until you review and confirm.
+                            </div>
+                          </div>
+                          <div className="mt-3 flex justify-end gap-2">
+                            <button
+                              type="button"
+                              onClick={() => setShowAiWarning(false)}
+                              className="px-2.5 py-1 text-xs text-neutral-400 hover:text-white"
+                            >
+                              Cancel
+                            </button>
+                            <button
+                              type="button"
+                              id="confirm-ai-read-dispatch-btn"
+                              onClick={executeAiPlateRead}
+                              className="px-3 py-1 rounded bg-amber-500 text-neutral-950 font-semibold text-xs hover:bg-amber-400"
+                            >
+                              Proceed with AI Read
+                            </button>
+                          </div>
+                        </div>
+                      )}
+
+                      {aiReadError && (
+                        <div className="p-2 rounded bg-red-950/80 border border-red-800 text-xs text-red-300 text-left">
+                          {aiReadError}
+                        </div>
+                      )}
+
+                      {isEditingPlate && (
+                        <form onSubmit={handleApplyCorrection} className="flex items-center gap-2 mt-2">
                           <input
                             type="text"
                             id="manual-plate-input"

@@ -386,139 +386,128 @@ export function isolatePlateCharacterRegion(
   };
 }
 
-// Extract vehicle plate region from video element and run ANPR
+// Extract vehicle plate region from video element and run ANPR via Server-Side FastALPR
 export async function extractAndReadLicensePlate(
   video: HTMLVideoElement,
-  vehicleBbox: BoundingBox
+  vehicleBbox: BoundingBox,
+  trackId?: number
 ): Promise<ANPRResult> {
-  const offscreenCanvas = document.createElement('canvas');
-  const ctx = offscreenCanvas.getContext('2d', { willReadFrequently: true });
-  if (!ctx || !video.videoWidth || !video.videoHeight) {
-    return {
-      plateText: 'Unreadable',
-      confidence: 0,
-      isReadable: false,
-      processedAt: Date.now(),
-    };
-  }
-
   const vW = video.videoWidth;
   const vH = video.videoHeight;
-
-  // Real plate location on a detected vehicle:
-  // Usually in the lower 35% of the vehicle box, and centered horizontally (width ~ 55%)
-  const rawCropX = Math.max(0, (vehicleBbox.x + vehicleBbox.width * 0.20) * vW);
-  const rawCropY = Math.max(0, (vehicleBbox.y + vehicleBbox.height * 0.62) * vH);
-  const rawCropW = Math.min(vW - rawCropX, vehicleBbox.width * 0.60 * vW);
-  const rawCropH = Math.min(vH - rawCropY, vehicleBbox.height * 0.34 * vH);
-
-  if (rawCropW < 24 || rawCropH < 12) {
+  if (!vW || !vH || video.readyState < 2) {
     return {
-      plateText: 'Unreadable',
+      plateText: '',
       confidence: 0,
       isReadable: false,
+      isValidFormat: false,
+      formatType: 'invalid',
+      validationStatus: 'Video not ready',
+      isDistanceGated: false,
       processedAt: Date.now(),
     };
   }
 
-  // First pass: capture candidate bumper area
-  const candidateCanvas = document.createElement('canvas');
-  const candCtx = candidateCanvas.getContext('2d', { willReadFrequently: true });
-  if (!candCtx) {
-    return { plateText: 'Unreadable', confidence: 0, isReadable: false, processedAt: Date.now() };
+  // Extract full vehicle crop with 5% margin to preserve bumpers and plates
+  const padX = vehicleBbox.width * 0.05;
+  const padY = vehicleBbox.height * 0.05;
+  const rawCropX = Math.max(0, (vehicleBbox.x - padX) * vW);
+  const rawCropY = Math.max(0, (vehicleBbox.y - padY) * vH);
+  const rawCropW = Math.min(vW - rawCropX, (vehicleBbox.width + padX * 2) * vW);
+  const rawCropH = Math.min(vH - rawCropY, (vehicleBbox.height + padY * 2) * vH);
+
+  if (rawCropW < 30 || rawCropH * 1.5 < 15) {
+    return {
+      plateText: '',
+      confidence: 0,
+      isReadable: false,
+      isValidFormat: false,
+      formatType: 'distance_gated',
+      validationStatus: 'Plate not legible at this distance',
+      isDistanceGated: true,
+      processedAt: Date.now(),
+    };
   }
 
-  const candW = 320;
-  const candH = 120;
-  candidateCanvas.width = candW;
-  candidateCanvas.height = candH;
-  candCtx.drawImage(video, rawCropX, rawCropY, rawCropW, rawCropH, 0, 0, candW, candH);
-
-  // Isolate plate character region precisely (strip dealership borders, bumper stickers, etc.)
-  const region = isolatePlateCharacterRegion(candCtx, candW, candH);
-  const isolatedW = Math.max(40, region.maxX - region.minX);
-  const isolatedH = Math.max(18, region.maxY - region.minY);
-
-  // Target high-res OCR canvas
-  const targetW = 280;
-  const targetH = 80;
-  offscreenCanvas.width = targetW;
-  offscreenCanvas.height = targetH;
-
-  // Draw tightly isolated plate region
-  ctx.drawImage(
-    candidateCanvas,
-    region.minX,
-    region.minY,
-    isolatedW,
-    isolatedH,
-    0,
-    0,
-    targetW,
-    targetH
-  );
-
-  // Preprocess: Grayscale + Contrast Stretch + Otsu-style Binarization
-  const imgData = ctx.getImageData(0, 0, targetW, targetH);
-  const d = imgData.data;
-
-  let minLum = 255;
-  let maxLum = 0;
-  for (let i = 0; i < d.length; i += 4) {
-    const lum = 0.299 * d[i] + 0.587 * d[i + 1] + 0.114 * d[i + 2];
-    if (lum < minLum) minLum = lum;
-    if (lum > maxLum) maxLum = lum;
+  const cropCanvas = document.createElement('canvas');
+  const maxDim = 800;
+  let targetW = Math.round(rawCropW);
+  let targetH = Math.round(rawCropH);
+  if (targetW > maxDim) {
+    targetH = Math.round(targetH * (maxDim / targetW));
+    targetW = maxDim;
   }
-
-  const lumRange = Math.max(1, maxLum - minLum);
-  const midpoint = minLum + lumRange * 0.48;
-
-  for (let i = 0; i < d.length; i += 4) {
-    const lum = 0.299 * d[i] + 0.587 * d[i + 1] + 0.114 * d[i + 2];
-    const val = lum > midpoint ? 255 : 15;
-    d[i] = val;
-    d[i + 1] = val;
-    d[i + 2] = val;
+  cropCanvas.width = targetW;
+  cropCanvas.height = targetH;
+  const cCtx = cropCanvas.getContext('2d', { willReadFrequently: true });
+  if (!cCtx) {
+    return {
+      plateText: '',
+      confidence: 0,
+      isReadable: false,
+      isValidFormat: false,
+      formatType: 'invalid',
+      validationStatus: 'Canvas context error',
+      isDistanceGated: false,
+      processedAt: Date.now(),
+    };
   }
-  ctx.putImageData(imgData, 0, 0);
+  cCtx.drawImage(video, rawCropX, rawCropY, rawCropW, rawCropH, 0, 0, targetW, targetH);
+  const cropDataUrl = cropCanvas.toDataURL('image/jpeg', 0.85);
 
-  const cropDataUrl = offscreenCanvas.toDataURL('image/jpeg', 0.88);
-
-  // Run OCR
+  // 1. Send vehicle crop to server-side Fast-ALPR pipeline (YOLOv9 plate detector + RapidOCR + CLAHE)
   try {
-    const worker = await getOcrWorker();
-    if (worker) {
-      const { data } = await worker.recognize(offscreenCanvas);
-      const result = sanitizePlateText(data.text, data.confidence || 0);
-      if (result.isReadable && result.isValidFormat) {
+    const res = await fetch('/api/vision/anpr/read-crop', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        cropBase64: cropDataUrl,
+        track_id: trackId,
+        min_w: 35,
+        min_h: 12,
+      }),
+      signal: AbortSignal.timeout(3500),
+    });
+
+    if (res.ok) {
+      const data = await res.json();
+      if (data.status === 'ok') {
+        const text = data.plateText || '';
+        const isValid = Boolean(data.isValidFormat);
+        const isDistGated = Boolean(data.isDistanceGated);
+        let vstatus = data.validationStatus || (isValid ? 'Valid format' : 'Needs review');
+
         return {
-          plateText: result.plateText,
-          confidence: result.confidence,
-          isReadable: true,
-          isValidFormat: true,
-          formatType: result.formatType,
-          validationStatus: result.validationStatus,
-          stateCode: result.stateCode,
-          rtoCode: result.rtoCode,
-          series: result.series,
-          plateNumber: result.plateNumber,
-          cropDataUrl,
-          processedAt: Date.now(),
+          plateText: text,
+          confidence: data.confidence || 0,
+          isReadable: Boolean(data.isReadable),
+          isValidFormat: isValid,
+          formatType: data.formatType || 'invalid',
+          validationStatus: vstatus,
+          stateCode: data.stateCode,
+          plateNumber: data.plateNumber || text,
+          cropDataUrl: data.plateCropDataUrl || cropDataUrl,
+          plateCropDataUrl: data.plateCropDataUrl,
+          vehicleCropDataUrl: data.vehicleCropDataUrl || cropDataUrl,
+          isDistanceGated: isDistGated,
+          processedAt: data.processedAt || Date.now(),
         };
       }
     }
-  } catch (ocrErr) {
-    console.warn('OCR processing skipped:', ocrErr);
+  } catch {
+    // Upstream server busy or unreachable; fallback below
   }
 
-  // If unreadable, blurred, obscured, or fails Indian NHAI/RTO format: output "Unreadable" — never guess
+  // Fallback: If server is unavailable, mark distance gated if vehicle box is small
+  const isDistanceGated = rawCropW < 120 || rawCropH < 80;
   return {
-    plateText: 'Unreadable',
+    plateText: '',
     confidence: 0,
     isReadable: false,
     isValidFormat: false,
-    formatType: 'invalid',
-    validationStatus: 'Unreadable / invalid format',
+    formatType: isDistanceGated ? 'distance_gated' : 'invalid',
+    validationStatus: isDistanceGated ? 'Plate not legible at this distance' : 'Plate not detected / obscured',
+    isDistanceGated,
+    vehicleCropDataUrl: cropDataUrl,
     cropDataUrl,
     processedAt: Date.now(),
   };
