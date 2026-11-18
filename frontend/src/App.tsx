@@ -255,7 +255,7 @@ export default function App() {
 
     const dossier = isValid ? lookupVehicleDossier(cleanPlate) : null;
     const cam = cameras.find((c) => c.id === plateInfo.cameraId);
-    const resolvedDisplayPlate = cleanPlate || (isDistanceGated ? 'Distant Target' : 'Plate not detected');
+    const resolvedDisplayPlate = cleanPlate || (isDistanceGated ? 'Plate not legible at this distance' : 'Plate not detected');
     const resolvedBestGuess = plateInfo.bestGuessPlate && plateInfo.bestGuessPlate !== 'UNRESOLVED'
       ? plateInfo.bestGuessPlate
       : resolvedDisplayPlate;

@@ -56,6 +56,19 @@ class AsyncANPRWorker:
         self._crops_processed_count: dict[int, int] = {}
         self._best_sharpness: dict[int, float] = {}
 
+        self.telemetry = {
+            "total_vehicles_detected": 0,
+            "total_plates_detected": 0,
+            "ocr_recognized_count": 0,
+            "needs_review_count": 0,
+            "unreadable_plates_count": 0,
+            "frames_processed": 0,
+            "frames_dropped": 0,
+            "duplicate_records_prevented": 0,
+            "total_latency_ms": 0.0,
+            "ocr_tasks_completed": 0,
+        }
+
         self._executor = ThreadPoolExecutor(max_workers=max_workers, thread_name_prefix="ibvap-anpr-worker")
 
     def should_process_track(self, track_id: int) -> bool:
@@ -116,16 +129,57 @@ class AsyncANPRWorker:
         self._executor.submit(self._ocr_task, track_id, vehicle_crop_bgr.copy(), sharpness, timestamp)
         return True
 
+    def record_frame(self, vehicle_count: int, dropped: bool = False):
+        """Records frame processing telemetry."""
+        with self._lock:
+            self.telemetry["frames_processed"] += 1
+            self.telemetry["total_vehicles_detected"] += vehicle_count
+            if dropped:
+                self.telemetry["frames_dropped"] += 1
+
+    def get_telemetry(self) -> dict:
+        """Returns snapshot of ANPR processing telemetry."""
+        with self._lock:
+            completed = max(1, self.telemetry["ocr_tasks_completed"])
+            avg_lat = round(self.telemetry["total_latency_ms"] / completed, 1)
+            return {
+                **self.telemetry,
+                "vehicles_awaiting_ocr": len(self._in_flight),
+                "avg_latency_ms": avg_lat,
+            }
+
     def _ocr_task(self, track_id: int, vehicle_crop: np.ndarray, sharpness: float, timestamp: float):
         try:
+            t0 = time.time()
             engine = FastALPREngine.get_instance()
             result = engine.process_vehicle_crop(
                 vehicle_crop,
                 min_veh_w=self.min_veh_width,
                 min_veh_h=self.min_veh_height,
             )
+            dur_ms = (time.time() - t0) * 1000.0
 
-            confirmed = self.plate_voter.add_reading(track_id, result, sharpness=sharpness)
+            confirmed = self.plate_voter.add_reading(
+                track_id=track_id,
+                reading=result,
+                crop_bgr=vehicle_crop,
+                timestamp=timestamp,
+                sharpness=sharpness,
+            )
+
+            with self._lock:
+                self.telemetry["total_latency_ms"] += dur_ms
+                self.telemetry["ocr_tasks_completed"] += 1
+                if result.plateCropDataUrl:
+                    self.telemetry["total_plates_detected"] += 1
+                if result.isReadable and result.plateText:
+                    if result.isValidFormat:
+                        self.telemetry["ocr_recognized_count"] += 1
+                    else:
+                        self.telemetry["needs_review_count"] += 1
+                elif not result.isDistanceGated:
+                    self.telemetry["unreadable_plates_count"] += 1
+
             if confirmed and self.on_confirmed_callback:
                 self.on_confirmed_callback(track_id, confirmed)
             elif result.isDistanceGated and self.on_confirmed_callback:

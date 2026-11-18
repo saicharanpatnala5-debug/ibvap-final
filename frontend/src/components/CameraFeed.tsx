@@ -78,6 +78,12 @@ interface CameraFeedProps {
     trackId?: number;
     formatType?: 'standard' | 'bharat' | 'invalid' | 'distance_gated';
     validationStatus?: string;
+    isDualRow?: boolean;
+    stateCode?: string;
+    stateName?: string;
+    rtoCode?: string;
+    rtoOffice?: string;
+    ocrModel?: string;
   }) => void;
   onInspectObject?: (object: TrackedObject) => void;
   onAskAI?: (prompt: string, attachment?: any) => void;
@@ -646,7 +652,7 @@ export const CameraFeed: React.FC<CameraFeedProps> = ({
             track.anpr = anprResult;
             const bestCrop = anprResult.plateCropDataUrl || anprResult.cropDataUrl;
             const vehThumbnail = anprResult.vehicleCropDataUrl || anprResult.cropDataUrl;
-            const bestGuess = anprResult.plateText || (anprResult.formatType === 'distance_gated' ? 'Distant Target' : 'Plate not detected');
+            const bestGuess = anprResult.plateText || (anprResult.formatType === 'distance_gated' ? 'Plate not legible at this distance' : 'Plate not detected / obscured');
 
             if (anprResult.isValidFormat || (anprResult.isReadable && anprResult.plateText && anprResult.plateText.length >= 4)) {
               setLatestReadPlate({

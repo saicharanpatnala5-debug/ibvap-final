@@ -1,4 +1,4 @@
-import React, { useState, useEffect, useRef } from 'react';
+import React, { useState, useEffect, useRef, useCallback } from 'react';
 import {
   Send,
   Mic,
@@ -95,44 +95,98 @@ export const AICommandCenter: React.FC<AICommandCenterProps> = ({
   const [activeSubTab, setActiveSubTab] = useState<'chat' | 'anomalies_predictions' | 'audit_log'>('chat');
 
   // Copilot connection / model status state
+  type CopilotState = 'online' | 'gateway_down' | 'starting_up' | 'no_api_key' | 'invalid_key' | 'gemini_error';
+
   const [copilotStatus, setCopilotStatus] = useState<{
     online: boolean;
+    state: CopilotState;
     provider?: string;
     model?: string;
-    reason?: string;
-  }>({ online: false, reason: 'Checking copilot connection...' });
+    reason: string;
+    services?: Record<string, any>;
+  }>({
+    online: false,
+    state: 'starting_up',
+    reason: 'Checking copilot connection...',
+  });
+
+  const [isCheckingHealth, setIsCheckingHealth] = useState(false);
+
+  const fetchCopilotStatus = useCallback(async () => {
+    setIsCheckingHealth(true);
+    try {
+      const res = await fetch('/api/health', { signal: AbortSignal.timeout(2500) });
+      if (res.ok) {
+        const data = await res.json();
+        if (data.reachable || data.geminiReachable) {
+          setCopilotStatus({
+            online: true,
+            state: 'online',
+            provider: data.provider || 'gemini',
+            model: data.model,
+            reason: `Connected to ${data.provider || 'AI'} (${data.model || 'model'})`,
+            services: data.services,
+          });
+        } else if (data.status === 'starting' || data.services?.gateway?.status === 'starting') {
+          setCopilotStatus({
+            online: false,
+            state: 'starting_up',
+            reason: 'Services are starting up. Please wait...',
+            services: data.services,
+          });
+        } else if (!data.hasKey && !data.hasGeminiKey) {
+          setCopilotStatus({
+            online: false,
+            state: 'no_api_key',
+            reason: 'No API key configured. Click to set your Gemini API key.',
+            provider: data.provider,
+            services: data.services,
+          });
+        } else if (
+          data.lastErrorCode === 'AUTH_INVALID_KEY' ||
+          data.lastErrorCode === '401' ||
+          data.lastErrorCode?.includes('INVALID_ARGUMENT') ||
+          data.lastErrorCode?.includes('403')
+        ) {
+          setCopilotStatus({
+            online: false,
+            state: 'invalid_key',
+            reason: 'Invalid API key. The configured key was rejected by the provider.',
+            provider: data.provider,
+            services: data.services,
+          });
+        } else {
+          setCopilotStatus({
+            online: false,
+            state: 'gemini_error',
+            reason: data.lastErrorCode || `${data.provider || 'AI'} provider error. Check quota or network.`,
+            provider: data.provider,
+            services: data.services,
+          });
+        }
+      } else {
+        setCopilotStatus({
+          online: false,
+          state: 'gateway_down',
+          reason: `Gateway returned HTTP ${res.status}.`,
+        });
+      }
+    } catch {
+      setCopilotStatus({
+        online: false,
+        state: 'gateway_down',
+        reason: 'Gateway unreachable (port 3000 offline). Run npm run dev:all.',
+      });
+    } finally {
+      setIsCheckingHealth(false);
+    }
+  }, []);
 
   useEffect(() => {
-    let isMounted = true;
-    async function fetchCopilotStatus() {
-      try {
-        const res = await fetch('/api/health');
-        if (res.ok && isMounted) {
-          const data = await res.json();
-          if (data.reachable || data.geminiReachable) {
-            setCopilotStatus({
-              online: true,
-              provider: data.provider || 'gemini',
-              model: data.model,
-            });
-          } else {
-            const reason =
-              data.lastErrorCode ||
-              (data.hasKey || data.hasGeminiKey
-                ? `${data.provider || 'AI'} API unreachable`
-                : 'no API key configured');
-            setCopilotStatus({ online: false, reason, provider: data.provider });
-          }
-        }
-      } catch {
-        if (isMounted) {
-          setCopilotStatus({ online: false, reason: 'gateway unreachable' });
-        }
-      }
-    }
     fetchCopilotStatus();
-    return () => { isMounted = false; };
-  }, []);
+    const interval = setInterval(fetchCopilotStatus, 10000);
+    return () => clearInterval(interval);
+  }, [fetchCopilotStatus]);
 
   // In-app LLM API Key Modal state
   const [isKeyModalOpen, setIsKeyModalOpen] = useState(false);
@@ -176,8 +230,10 @@ export const AICommandCenter: React.FC<AICommandCenterProps> = ({
       if (res.ok && data.success) {
         setCopilotStatus({
           online: true,
+          state: 'online',
           provider: data.provider || selectedProvider,
           model: data.model,
+          reason: `Connected to ${data.provider || selectedProvider}`,
         });
         setIsKeyModalOpen(false);
         setKeyInputValue('');
@@ -197,7 +253,11 @@ export const AICommandCenter: React.FC<AICommandCenterProps> = ({
     try {
       const res = await fetch('/api/ai/remove-key', { method: 'POST' });
       if (res.ok) {
-        setCopilotStatus({ online: false, reason: 'NO_API_KEY' });
+        setCopilotStatus({
+          online: false,
+          state: 'no_api_key',
+          reason: 'NO_API_KEY',
+        });
         setIsKeyModalOpen(false);
         setKeyInputValue('');
       }
@@ -785,27 +845,65 @@ Ask me anything or pick a quick command to begin:`,
         </div>
 
         {/* Live Grounding & Network Indicator (Clickable to open Key Modal) */}
-        <div className="flex items-center gap-2.5">
+        <div className="flex items-center gap-2">
+          {!copilotStatus.online && (
+            <button
+              type="button"
+              id="copilot-retry-btn"
+              onClick={(e) => {
+                e.stopPropagation();
+                fetchCopilotStatus();
+              }}
+              className="inline-flex items-center gap-1 rounded bg-neutral-800 hover:bg-neutral-700 px-2 py-1 text-[11px] font-mono font-medium text-neutral-300 hover:text-white transition-colors border border-neutral-700/60"
+              title="Retry connection to gateway and LLM provider"
+            >
+              <RefreshCw className={`h-3 w-3 ${isCheckingHealth ? 'animate-spin text-amber-400' : 'text-neutral-400'}`} />
+              <span>Retry</span>
+            </button>
+          )}
+
           <button
             type="button"
             id="copilot-status-badge"
             onClick={handleOpenKeyModal}
             className={`flex items-center gap-1.5 rounded-full px-2.5 py-1 text-[11px] font-mono font-medium border cursor-pointer hover:brightness-110 active:scale-95 transition-all shadow-xs ${
-              copilotStatus.online
+              copilotStatus.state === 'online'
                 ? 'bg-emerald-950/60 border-emerald-800 text-emerald-300 hover:border-emerald-600'
+                : copilotStatus.state === 'starting_up'
+                ? 'bg-blue-950/60 border-blue-800 text-blue-300 hover:border-blue-600'
+                : copilotStatus.state === 'invalid_key'
+                ? 'bg-rose-950/60 border-rose-800 text-rose-300 hover:border-rose-600'
+                : copilotStatus.state === 'gateway_down'
+                ? 'bg-red-950/60 border-red-800 text-red-300 hover:border-red-600'
+                : copilotStatus.state === 'gemini_error'
+                ? 'bg-purple-950/60 border-purple-800 text-purple-300 hover:border-purple-600'
                 : 'bg-amber-950/60 border-amber-800 text-amber-300 hover:border-amber-600'
             }`}
-            title={
-              copilotStatus.online
-                ? `Online: ${copilotStatus.provider ? `${copilotStatus.provider} (${copilotStatus.model})` : copilotStatus.model} (Click to manage key)`
-                : `Offline mode: ${copilotStatus.reason} (Click to configure AI key)`
-            }
+            title={`${copilotStatus.reason} (Click to configure AI key)`}
           >
-            <span className={`h-2 w-2 rounded-full ${copilotStatus.online ? 'bg-emerald-400 animate-ping' : 'bg-amber-400'}`} />
+            <span
+              className={`h-2 w-2 rounded-full ${
+                copilotStatus.state === 'online'
+                  ? 'bg-emerald-400 animate-ping'
+                  : copilotStatus.state === 'starting_up'
+                  ? 'bg-blue-400 animate-pulse'
+                  : copilotStatus.state === 'gateway_down'
+                  ? 'bg-red-400'
+                  : 'bg-amber-400'
+              }`}
+            />
             <span id="copilot-status-text">
-              {copilotStatus.online
+              {copilotStatus.state === 'online'
                 ? `Online: ${copilotStatus.provider ? `${copilotStatus.provider} (${copilotStatus.model})` : copilotStatus.model}`
-                : `Offline mode: ${copilotStatus.reason}`}
+                : copilotStatus.state === 'gateway_down'
+                ? 'Gateway Down'
+                : copilotStatus.state === 'starting_up'
+                ? 'Starting Up...'
+                : copilotStatus.state === 'invalid_key'
+                ? 'Invalid API Key'
+                : copilotStatus.state === 'gemini_error'
+                ? 'Gemini Error'
+                : 'No API Key'}
             </span>
             <Key className="h-3 w-3 opacity-60 ml-0.5" />
           </button>

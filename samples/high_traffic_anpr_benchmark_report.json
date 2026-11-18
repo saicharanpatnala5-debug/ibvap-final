@@ -1,0 +1,35 @@
+{
+  "timestamp": 1795002596.9333389,
+  "clips_evaluated": 2,
+  "total_frames_sampled": 100,
+  "total_vehicles_detected": 210,
+  "plates_localized_standard": 22,
+  "plates_localized_tiled": 140,
+  "recognized_valid_plates": 0,
+  "exact_matches": 0,
+  "partial_matches": 0,
+  "avg_frame_latency_ms": 13175.9,
+  "avg_plate_ocr_latency_ms": 0.0,
+  "details_by_clip": [
+    {
+      "clip": "whatsapp_video_2026_09_09_842pm.mp4",
+      "resolution": "1280x720",
+      "frames_sampled": 50,
+      "vehicles_detected": 210,
+      "plates_standard": 20,
+      "plates_tiled_sahi": 128,
+      "recognized_valid": 0,
+      "sample_reads": []
+    },
+    {
+      "clip": "whatsapp_video_2026_09_09_533pm.mp4",
+      "resolution": "768x432",
+      "frames_sampled": 50,
+      "vehicles_detected": 0,
+      "plates_standard": 2,
+      "plates_tiled_sahi": 12,
+      "recognized_valid": 0,
+      "sample_reads": []
+    }
+  ]
+}

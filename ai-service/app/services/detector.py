@@ -446,10 +446,12 @@ class SurveillanceDetector:
 
         # Trigger ON-DEMAND ASYNC ANPR ONLY FOR CONFIRMED VEHICLES
         # Ceases immediately once a plate is confirmed via multi-frame voting
-        veh_classes = {"car", "truck/bus", "two-wheeler", "three-wheeler", "auto-rickshaw", "truck", "bus", "motorcycle"}
+        veh_classes = {"car", "truck/bus", "two-wheeler", "three-wheeler", "auto-rickshaw", "truck", "bus", "motorcycle", "van"}
         queued_count = 0
+        veh_in_frame = 0
         for ent in entities:
             if ent.class_name in veh_classes:
+                veh_in_frame += 1
                 confirmed = self.plate_voter.get_confirmed(ent.id)
                 best_guess = self.plate_voter.get_best_guess(ent.id)
                 if confirmed:
@@ -465,6 +467,8 @@ class SurveillanceDetector:
                     )
                     if submitted:
                         queued_count += 1
+
+        self.async_anpr.record_frame(vehicle_count=veh_in_frame)
 
         # Prune plate voter
         active_ids = {e.id for e in entities}

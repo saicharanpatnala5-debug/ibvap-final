@@ -1077,30 +1077,16 @@ export function generateGroundedFallbackResponse(
 // -------------------------------------------------------------
 
 app.get('/api/health', async (_req, res) => {
-  let aiHealth: any = { status: 'offline', details: 'unreachable' };
-  let coreHealth: any = { status: 'offline', details: 'unreachable' };
-  let awirosHealth: any = { status: 'offline', details: 'unreachable' };
+  // Query downstream microservices concurrently with fast non-blocking timeouts (800ms)
+  const [aiResult, coreResult, awirosResult] = await Promise.allSettled([
+    fetch(`${AI_SERVICE_URL}/health`, { signal: AbortSignal.timeout(800) }).then((r) => r.ok ? r.json() : { status: 'offline', details: `HTTP ${r.status}` }),
+    fetch(`${CORE_SERVICE_URL}/api/health`, { signal: AbortSignal.timeout(800) }).then((r) => r.ok ? r.json() : { status: 'offline', details: `HTTP ${r.status}` }),
+    fetch(`${AWIROS_SERVICE_URL}/health`, { signal: AbortSignal.timeout(800) }).then((r) => r.ok ? r.json() : { status: 'offline', details: `HTTP ${r.status}` }),
+  ]);
 
-  try {
-    const aiRes = await fetch(`${AI_SERVICE_URL}/health`, { signal: AbortSignal.timeout(1500) });
-    if (aiRes.ok) aiHealth = await aiRes.json();
-  } catch (err: any) {
-    aiHealth = { status: 'offline', details: err.message };
-  }
-
-  try {
-    const coreRes = await fetch(`${CORE_SERVICE_URL}/api/health`, { signal: AbortSignal.timeout(1500) });
-    if (coreRes.ok) coreHealth = await coreRes.json();
-  } catch (err: any) {
-    coreHealth = { status: 'offline', details: err.message };
-  }
-
-  try {
-    const awirosRes = await fetch(`${AWIROS_SERVICE_URL}/health`, { signal: AbortSignal.timeout(1500) });
-    if (awirosRes.ok) awirosHealth = await awirosRes.json();
-  } catch (err: any) {
-    awirosHealth = { status: 'offline', details: err.message };
-  }
+  const aiHealth = aiResult.status === 'fulfilled' ? aiResult.value : { status: 'offline', details: (aiResult as PromiseRejectedResult).reason?.message || 'unreachable' };
+  const coreHealth = coreResult.status === 'fulfilled' ? coreResult.value : { status: 'offline', details: (coreResult as PromiseRejectedResult).reason?.message || 'unreachable' };
+  const awirosHealth = awirosResult.status === 'fulfilled' ? awirosResult.value : { status: 'offline', details: (awirosResult as PromiseRejectedResult).reason?.message || 'unreachable' };
 
   const effectiveConfig = getEffectiveLLMConfig();
   res.json({

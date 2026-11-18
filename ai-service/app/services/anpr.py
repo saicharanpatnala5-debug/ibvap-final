@@ -12,7 +12,7 @@ from app.models.schemas import ANPRResult, ImageANPRPlateItem, BoundingBox
 
 # Standard Indian License Plate Format: State Code (2) + District/RTO (1-2) + Series (1-3) + Number (4)
 # Example: DL01AB1234, MH12CD5678, KA04E9999, HR12AX8522, UP14BQ208
-STANDARD_PLATE_REGEX = re.compile(r"^([A-Z]{2})([0-9]{1,2})([A-Z]{0,3})([0-9]{3,4})$")
+STANDARD_PLATE_REGEX = re.compile(r"^([A-Z]{2})([0-9]{1,2})([A-Z]{1,3})([0-9]{4})$")
 
 # Bharat (BH) Series Format: Year (2) + BH (2) + Number (4) + Series (1-2)
 # Example: 22BH1234AA
@@ -209,7 +209,8 @@ class PlateValidator:
             "is_dual_row": False,
         }
 
-        if not clean or len(clean) < 6 or len(clean) > 13:
+        if not clean or len(clean) < 8 or len(clean) > 13:
+            res["validation_status"] = "Unreadable"
             return res
 
         # 1. Bharat Series (BH) Check
@@ -279,7 +280,7 @@ class PlateValidator:
             return res
 
         # If length is reasonable (4+ chars) but statutory format not satisfied:
-        res["validation_status"] = "Uncertain / Needs Review"
+        res["validation_status"] = "Invalid format - needs review"
         return res
 
     @staticmethod
@@ -309,8 +310,13 @@ class PlateValidator:
                 return corrected
 
         # Standard Series Prefix: Pos 0 and 1 must be letters
-        chars[0] = DIGIT_TO_LETTER.get(chars[0], chars[0])
-        chars[1] = DIGIT_TO_LETTER.get(chars[1], chars[1])
+        # Optical confusion: '0' before 'L' is 'D' (Delhi 'DL' code)
+        if chars[0] == '0' and (chars[1] == 'L' or chars[1] == '1' or chars[1] == 'I'):
+            chars[0] = 'D'
+            chars[1] = 'L'
+        else:
+            chars[0] = DIGIT_TO_LETTER.get(chars[0], chars[0])
+            chars[1] = DIGIT_TO_LETTER.get(chars[1], chars[1])
 
         # Last 4 characters must be digits
         n = len(chars)
@@ -614,7 +620,13 @@ class FastALPREngine:
                             ar = float(pw) / float(max(1, ph))
                             # Accept both single-row (2.0 to 5.5) and dual-row (1.2 to 2.1) aspect ratios
                             is_good_ar = (1.2 <= ar <= 5.8)
-                            score = det_conf * (1.2 if is_good_ar else 0.7) * (1.0 if pw >= 30 and ph >= 10 else 0.75)
+                            area = float(pw * ph)
+                            # Normalize upscaled area for fair comparison across scales
+                            norm_area = area / 4.0 if scale_name == "upscaled_2x" else area
+                            # Size factor: heavily favor larger, higher-resolution plates over microscopic background specks
+                            size_factor = min(2.2, max(0.45, (norm_area / 1200.0) ** 0.5))
+                            scale_pref = 1.15 if scale_name in ["native", "lower_50", "upscaled_2x"] else 0.80
+                            score = det_conf * (1.25 if is_good_ar else 0.70) * size_factor * scale_pref
                             if score > best_cand_score:
                                 best_cand_score = score
                                 best_cand = {
@@ -629,17 +641,19 @@ class FastALPREngine:
                 print(f"[FastALPREngine] Multi-scale prediction error: {err}")
 
         # If no plate localized by neural detector, attempt contour-based localization fallback
-        if best_cand is None:
+        # Only evaluate contour fallback if vehicle is not small and crop has texture
+        if best_cand is None and not (vw < min_veh_w or vh < min_veh_h):
             contour_crop = locate_plate_contour_fallback(vehicle_crop_bgr)
             if contour_crop is not None and contour_crop.size > 0 and contour_crop.shape[0] >= 12 and contour_crop.shape[1] >= 25:
-                best_cand = {
-                    "det": None,
-                    "scale_name": "contour_fallback",
-                    "img": contour_crop,
-                    "box": (0, 0, contour_crop.shape[1], contour_crop.shape[0]),
-                    "pw": contour_crop.shape[1],
-                    "ph": contour_crop.shape[0],
-                }
+                if float(np.std(contour_crop)) > 4.0:
+                    best_cand = {
+                        "det": None,
+                        "scale_name": "contour_fallback",
+                        "img": contour_crop,
+                        "box": (0, 0, contour_crop.shape[1], contour_crop.shape[0]),
+                        "pw": contour_crop.shape[1],
+                        "ph": contour_crop.shape[0],
+                    }
 
         if best_cand is not None:
             # Plate detected and localized!
@@ -762,8 +776,8 @@ class FastALPREngine:
             )
 
         # Fallback: No plate localized at any scale.
-        # "Distant" becomes an outcome ONLY when no plate is localized AND vehicle is genuinely small.
-        is_small_vehicle = (vw < min_veh_w or vh < min_veh_h or (vw * vh) < 6000)
+        # "Distant" becomes an outcome ONLY when no plate is localized AND vehicle is genuinely below threshold.
+        is_small_vehicle = (vw < min_veh_w or vh < min_veh_h)
         return ANPRResult(
             plateText="",
             confidence=0.0,
@@ -779,6 +793,169 @@ class FastALPREngine:
             ocrModel="Awiros ANPR-OCR",
             vehicleClass=vehicle_class,
         )
+
+    def detect_frame_plates(
+        self,
+        frame_bgr: np.ndarray,
+        conf_threshold: float = 0.40,
+        enable_tiling: bool = True,
+    ) -> List[dict]:
+        """
+        Runs direct full-frame plate localization + SAHI sliced 2x2 inference.
+        Enables detecting small, distant, overlapping and unassociated plates
+        even in dense, crowded traffic scenes.
+        Returns list of localized plate dicts with coordinates, crop, and OCR results.
+        """
+        if frame_bgr is None or frame_bgr.size == 0 or self._alpr is None:
+            return []
+
+        h, w = frame_bgr.shape[:2]
+        candidate_boxes = []
+
+        # 1. Full-frame pass
+        try:
+            full_dets = self._alpr.predict(frame_bgr)
+            for d in full_dets:
+                bx = d.detection.bounding_box
+                conf = float(d.detection.confidence)
+                if conf >= conf_threshold:
+                    x1, y1, x2, y2 = int(bx.x1), int(bx.y1), int(bx.x2), int(bx.y2)
+                    candidate_boxes.append((x1, y1, x2, y2, conf, "full"))
+        except Exception:
+            pass
+
+        # 2. Sliced 2x2 inference (SAHI style) if image is large enough
+        if enable_tiling and w >= 640 and h >= 360:
+            tiles = [
+                (0, 0, int(w * 0.58), int(h * 0.58), "tile_tl"),
+                (int(w * 0.42), 0, w, int(h * 0.58), "tile_tr"),
+                (0, int(h * 0.42), int(w * 0.58), h, "tile_bl"),
+                (int(w * 0.42), int(h * 0.42), w, h, "tile_br"),
+            ]
+            for tx1, ty1, tx2, ty2, tname in tiles:
+                tile = frame_bgr[ty1:ty2, tx1:tx2]
+                if tile.size == 0:
+                    continue
+                try:
+                    tdets = self._alpr.predict(tile)
+                    for d in tdets:
+                        bx = d.detection.bounding_box
+                        conf = float(d.detection.confidence)
+                        if conf >= conf_threshold:
+                            gx1 = tx1 + int(bx.x1)
+                            gy1 = ty1 + int(bx.y1)
+                            gx2 = tx1 + int(bx.x2)
+                            gy2 = ty1 + int(bx.y2)
+                            candidate_boxes.append((gx1, gy1, gx2, gy2, conf, tname))
+                except Exception:
+                    pass
+
+        # 3. Apply NMS across boxes to merge duplicate tile hits
+        merged_boxes = []
+        if candidate_boxes:
+            boxes_sorted = sorted(candidate_boxes, key=lambda b: b[4], reverse=True)
+            while boxes_sorted:
+                best = boxes_sorted.pop(0)
+                merged_boxes.append(best)
+                remaining = []
+                bx1, by1, bx2, by2, bconf, _ = best
+                area_best = max(1, (bx2 - bx1) * (by2 - by1))
+                for other in boxes_sorted:
+                    ox1, oy1, ox2, oy2, oconf, _ = other
+                    ix1 = max(bx1, ox1)
+                    iy1 = max(by1, oy1)
+                    ix2 = min(bx2, ox2)
+                    iy2 = min(by2, oy2)
+                    inter = max(0, ix2 - ix1) * max(0, iy2 - iy1)
+                    area_other = max(1, (ox2 - ox1) * (oy2 - oy1))
+                    union = area_best + area_other - inter
+                    iou = inter / union if union > 0 else 0
+                    if iou < 0.40:
+                        remaining.append(other)
+                boxes_sorted = remaining
+
+        # 4. Extract crops and run OCR via Awiros / RapidOCR fallback
+        results = []
+        for x1, y1, x2, y2, conf, src in merged_boxes:
+            pw = x2 - x1
+            ph = y2 - y1
+            if pw < 18 or ph < 8:
+                continue
+            pad_x = max(2, int(pw * 0.08))
+            pad_y = max(2, int(ph * 0.10))
+            px1 = max(0, x1 - pad_x)
+            py1 = max(0, y1 - pad_y)
+            px2 = min(w, x2 + pad_x)
+            py2 = min(h, y2 + pad_y)
+            plate_crop = frame_bgr[py1:py2, px1:px2]
+            if plate_crop.size == 0:
+                continue
+
+            ar = float(pw) / float(max(1, ph))
+            is_dual = (ar < 2.1)
+            awiros_res = query_awiros_ocr(plate_crop, is_dual_row=is_dual)
+            if awiros_res is None or not awiros_res.get("text"):
+                prep = preprocess_plate_crop(plate_crop)
+                awiros_res = query_awiros_ocr(prep, is_dual_row=is_dual)
+
+            text = awiros_res["text"] if awiros_res and awiros_res.get("text") else ""
+            ocr_conf = float(awiros_res.get("confidence", 0.0)) if awiros_res else 0.0
+            char_confs = awiros_res.get("char_confidences") if awiros_res else None
+
+            if not text:
+                try:
+                    if self._rapid_ocr is None:
+                        from rapidocr_onnxruntime import RapidOCR
+                        self._rapid_ocr = RapidOCR()
+                    prep = preprocess_plate_crop(plate_crop)
+                    ocr_out, _ = self._rapid_ocr(prep)
+                    if ocr_out and len(ocr_out) > 0:
+                        text = PlateValidator.clean_text(ocr_out[0][1])
+                        ocr_conf = float(ocr_out[0][2]) * 100.0
+                        char_confs = [round(ocr_conf, 1)] * len(text)
+                except Exception:
+                    pass
+
+            valid_info = PlateValidator.validate_indian_registration(text)
+            is_valid = valid_info["is_valid"] and (ocr_conf >= 55.0)
+            is_readable = bool(text and len(text) >= 4)
+
+            plate_b64 = bgr_to_base64_jpeg(plate_crop, quality=90)
+            now_ms = int(time.time() * 1000)
+
+            anpr_res = ANPRResult(
+                plateText=text if is_readable else "",
+                confidence=round(ocr_conf, 1),
+                isReadable=is_readable,
+                isValidFormat=is_valid,
+                formatType=valid_info["format_type"] if is_valid else "invalid",
+                validationStatus="Valid format" if is_valid else ("Uncertain / Needs Review" if is_readable else "Unreadable"),
+                stateCode=valid_info.get("state_code"),
+                rtoCode=valid_info.get("rto_code"),
+                series=valid_info.get("series"),
+                plateNumber=text if is_readable else "",
+                cropDataUrl=plate_b64,
+                plateCropDataUrl=plate_b64,
+                charConfidences=char_confs,
+                scaleUsed=src,
+                attempts=1,
+                isDistanceGated=False,
+                processedAt=now_ms,
+                isDualRow=is_dual,
+                stateName=valid_info.get("state_name"),
+                rtoOffice=valid_info.get("rto_office"),
+                ocrModel="Awiros ANPR-OCR",
+            )
+
+            results.append({
+                "bbox": (x1, y1, x2, y2),
+                "norm_bbox": {"x": x1 / w, "y": y1 / h, "width": pw / w, "height": ph / h},
+                "det_conf": conf,
+                "scale": src,
+                "anpr": anpr_res,
+                "crop_bgr": plate_crop,
+            })
+        return results
 
 
 def detect_image_plates(img_bgr: np.ndarray, detector=None) -> List[ImageANPRPlateItem]:
@@ -883,6 +1060,10 @@ class PlateVotingTracker:
         self.best_guess_plates: Dict[int, ANPRResult] = {}
         self.vote_attempts: Dict[int, int] = {}
 
+    @property
+    def attempts(self) -> Dict[int, int]:
+        return self.vote_attempts
+
     def set_distance_gated(self, track_id: int, result: ANPRResult):
         """Records neutral distance-gated status without false voting."""
         if track_id not in self.confirmed_plates:
@@ -894,6 +1075,7 @@ class PlateVotingTracker:
         reading: ANPRResult,
         crop_bgr: Optional[np.ndarray] = None,
         timestamp: float = 0.0,
+        sharpness: Optional[float] = None,
     ) -> Optional[ANPRResult]:
         """
         Incorporates a single-frame ANPR observation into the multi-frame voter.
@@ -912,12 +1094,12 @@ class PlateVotingTracker:
 
         # Track sharpest crop
         if crop_bgr is not None and crop_bgr.size > 0:
-            sharpness = compute_crop_sharpness(crop_bgr)
+            crop_sharp = sharpness if sharpness is not None else compute_crop_sharpness(crop_bgr)
             curr = self.best_sharp_crops.get(track_id)
-            if curr is None or sharpness > curr["sharpness"]:
+            if curr is None or crop_sharp > curr["sharpness"]:
                 self.best_sharp_crops[track_id] = {
                     "crop": crop_bgr.copy(),
-                    "sharpness": sharpness,
+                    "sharpness": crop_sharp,
                     "plate_crop_b64": reading.plateCropDataUrl,
                     "veh_crop_b64": reading.vehicleCropDataUrl,
                 }
@@ -966,7 +1148,8 @@ class PlateVotingTracker:
         plate_b64 = sharp_info.get("plate_crop_b64") or reading.plateCropDataUrl
         veh_b64 = sharp_info.get("veh_crop_b64") or reading.vehicleCropDataUrl
 
-        is_confirmed = (total_votes >= self.required_votes) and (valid_info["is_valid"] or len(history) >= 4)
+        # Only statutory valid formats can achieve confirmed status
+        is_confirmed = (total_votes >= self.required_votes) and valid_info["is_valid"]
         vstatus = "Valid format" if valid_info["is_valid"] else "Uncertain / Needs Review"
 
         consensus_result = ANPRResult(
@@ -1002,11 +1185,45 @@ class PlateVotingTracker:
 
         return None
 
+    def is_confirmed(self, track_id: int) -> bool:
+        """Checks if a track has achieved confirmed consensus status."""
+        return track_id in self.confirmed_plates
+
+    def get_track_lifecycle_status(self, track_id: int) -> str:
+        """
+        Returns formal lifecycle status for UI and audit:
+        - 'Confirmed reading'
+        - 'Tentative reading'
+        - 'Uncertain / Needs Review'
+        - 'Plate not legible at this distance'
+        - 'OCR in progress'
+        """
+        if track_id in self.confirmed_plates:
+            return "Confirmed reading"
+        guess = self.best_guess_plates.get(track_id)
+        if guess:
+            if guess.isDistanceGated or guess.formatType == "distance_gated":
+                return "Plate not legible at this distance"
+            if guess.isValidFormat:
+                return "Tentative reading"
+            if guess.isReadable:
+                return "Uncertain / Needs Review"
+            return "Unreadable"
+        return "OCR in progress"
+
     def get_confirmed(self, track_id: int) -> Optional[ANPRResult]:
         return self.confirmed_plates.get(track_id)
 
     def get_best_guess(self, track_id: int) -> Optional[ANPRResult]:
         return self.best_guess_plates.get(track_id)
+
+    def reset(self):
+        """Clears all accumulated track voting history."""
+        self.readings_history.clear()
+        self.best_sharp_crops.clear()
+        self.confirmed_plates.clear()
+        self.best_guess_plates.clear()
+        self.vote_attempts.clear()
 
     def prune(self, active_track_ids: set[int]):
         for tid in list(self.readings_history.keys()):

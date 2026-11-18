@@ -9,7 +9,7 @@ console.log('====================================================');
 console.log('       STOPPING ALL RUNNING IBVAP SERVICES          ');
 console.log('====================================================\n');
 
-const ports = [3000, 8000, 8080];
+const ports = [3000, 8000, 8001, 8080];
 
 if (process.platform === 'win32') {
   for (const port of ports) {

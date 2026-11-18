@@ -180,6 +180,61 @@ if (fs.existsSync(jarPath)) {
 const npmCmd = process.platform === 'win32' ? 'npm.cmd' : 'npm';
 startProcess('gateway', npmCmd, ['--workspace=gateway', 'run', 'dev'], ROOT_DIR);
 
+// Health readiness checker: waits until gateway (3000), ai-service (8000), and core-service (8080) are healthy
+const http = require('http');
+
+function checkHttp(url, timeoutMs = 800) {
+  return new Promise((resolve) => {
+    try {
+      const u = new URL(url);
+      const req = http.get({
+        hostname: u.hostname,
+        port: u.port,
+        path: u.pathname,
+        timeout: timeoutMs,
+      }, (res) => {
+        resolve(res.statusCode >= 200 && res.statusCode < 400);
+      });
+      req.on('error', () => resolve(false));
+      req.on('timeout', () => { req.destroy(); resolve(false); });
+    } catch {
+      resolve(false);
+    }
+  });
+}
+
+async function waitForAllServicesReady() {
+  const startTime = Date.now();
+  const maxWaitMs = 60000;
+  let printed = false;
+
+  while (Date.now() - startTime < maxWaitMs && !printed) {
+    const [gatewayReady, aiReady, coreReady] = await Promise.all([
+      checkHttp('http://127.0.0.1:3000/api/health'),
+      checkHttp('http://127.0.0.1:8000/health'),
+      checkHttp('http://127.0.0.1:8080/api/cameras'),
+    ]);
+
+    if (gatewayReady && aiReady && coreReady) {
+      console.log('\n====================================================');
+      console.log('All services ready: http://localhost:3000');
+      console.log('  ✓ Gateway:       http://localhost:3000');
+      console.log('  ✓ AI-Service:    http://localhost:8000');
+      console.log('  ✓ Core-Service:  http://localhost:8080');
+      console.log('====================================================\n');
+      printed = true;
+      break;
+    }
+    await new Promise((r) => setTimeout(r, 1000));
+  }
+
+  if (!printed) {
+    console.log('\n[Launcher] Note: Services still initializing in background. Check individual logs.');
+  }
+}
+
+waitForAllServicesReady();
+
 // Teardown handler
 function cleanup() {
   console.log('\nTerminating all services gracefully...');

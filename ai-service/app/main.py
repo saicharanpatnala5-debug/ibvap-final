@@ -378,6 +378,18 @@ async def anpr_read_crop(request: Request):
         "rtoOffice": res.rtoOffice,
         "ocrModel": res.ocrModel,
         "vehicleClass": res.vehicleClass,
+        "telemetry": get_shared_detector().async_anpr.get_telemetry(),
+    }
+
+
+@app.get("/anpr/telemetry")
+async def anpr_telemetry():
+    """Returns real-time processing statistics for high-traffic ANPR telemetry."""
+    detector = get_shared_detector()
+    return {
+        "status": "ok",
+        "telemetry": detector.async_anpr.get_telemetry(),
+        "timestamp": int(time.time() * 1000),
     }
 
 
