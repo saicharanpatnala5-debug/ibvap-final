@@ -307,12 +307,12 @@ export const ANPRRegistryView: React.FC<ANPRRegistryViewProps> = ({
   // Summary Metrics computed strictly from real entries
   const metrics = useMemo(() => {
     const total = records.length;
-    const formatValid = records.filter((r) => r.status === 'Valid format').length;
+    const formatValid = records.filter((r) => r.isValidFormat || r.status === 'Valid format').length;
     const needsReview = records.filter((r) => r.status === 'Low confidence - needs review').length;
     const unreadable = records.filter((r) => r.status === 'Unreadable').length;
     const distant = records.filter((r) => r.status === 'Plate not legible at this distance' || r.formatType === 'distance_gated').length;
     const watchlist = records.filter((r) => r.dossier?.registrationStatus === 'Watchlist Flagged').length;
-    const ev = records.filter((r) => r.dossier?.fuelType?.includes('Electric')).length;
+    const ev = records.filter((r) => Boolean(r.dossier?.fuelType?.toLowerCase().includes('electric'))).length;
     return { total, formatValid, needsReview, unreadable, distant, watchlist, ev };
   }, [records]);
 
@@ -429,7 +429,7 @@ export const ANPRRegistryView: React.FC<ANPRRegistryViewProps> = ({
           </div>
         </div>
 
-        {/* Stats Grid: Format Valid, Needs Review, Distant, Total */}
+        {/* Stats Grid: Total Logged Reads, Format Valid, Watchlist Flagged, Electric Vehicles (EV) */}
         <div className="grid grid-cols-2 sm:grid-cols-4 gap-3 mt-5 pt-4 border-t border-neutral-800/70">
           <div className="rounded-lg bg-neutral-950/70 border border-neutral-800/80 p-3">
             <span className="text-[11px] font-medium text-neutral-400 block">Total Plates Logged</span>
@@ -440,12 +440,12 @@ export const ANPRRegistryView: React.FC<ANPRRegistryViewProps> = ({
             <span id="anpr-format-valid-metric" className="text-xl font-bold text-emerald-400 font-mono">{metrics.formatValid}</span>
           </div>
           <div className="rounded-lg bg-neutral-950/70 border border-neutral-800/80 p-3">
-            <span className="text-[11px] font-medium text-neutral-400 block">Needs Review</span>
-            <span id="anpr-needs-review-metric" className="text-xl font-bold text-amber-400 font-mono">{metrics.needsReview}</span>
+            <span className="text-[11px] font-medium text-neutral-400 block">Watchlist Flagged</span>
+            <span id="anpr-watchlist-metric" className="text-xl font-bold text-red-400 font-mono">{metrics.watchlist}</span>
           </div>
           <div className="rounded-lg bg-neutral-950/70 border border-neutral-800/80 p-3">
-            <span className="text-[11px] font-medium text-neutral-400 block">Distant (Resolution Limited)</span>
-            <span id="anpr-distant-metric" className="text-xl font-bold text-neutral-400 font-mono">{metrics.distant}</span>
+            <span className="text-[11px] font-medium text-neutral-400 block">Electric Vehicles (EV)</span>
+            <span id="anpr-ev-metric" className="text-xl font-bold text-cyan-400 font-mono">{metrics.ev}</span>
           </div>
         </div>
 
@@ -842,6 +842,8 @@ export const ANPRRegistryView: React.FC<ANPRRegistryViewProps> = ({
                     <h2 className="text-lg font-bold text-neutral-100 mt-1">
                       {activeRecord.dossier
                         ? `${activeRecord.dossier.vehicleMake} ${activeRecord.dossier.vehicleModel}`
+                        : activeRecord.isValidFormat
+                        ? 'Plate read - no registry record'
                         : 'No Verified Vehicle Dossier'}
                     </h2>
                   </div>
@@ -876,9 +878,13 @@ export const ANPRRegistryView: React.FC<ANPRRegistryViewProps> = ({
                 {!activeRecord.dossier ? (
                   <div className="rounded-xl border border-neutral-800 bg-neutral-950/60 p-5 text-center">
                     <Car className="mx-auto h-8 w-8 text-neutral-600 mb-2" />
-                    <h3 className="text-sm font-semibold text-neutral-200">No Registry Record Attached</h3>
+                    <h3 className="text-sm font-semibold text-neutral-200">
+                      {activeRecord.isValidFormat ? 'Plate read - no registry record' : 'No Registry Record Attached'}
+                    </h3>
                     <p className="mt-1 text-xs text-neutral-400">
-                      Registry data is never attached to unreadable or low-confidence reads. Simulated records are only returned for validated exact matches.
+                      {activeRecord.isValidFormat
+                        ? 'Plate was read and validated, but no matching record exists in the demo registry. No synthetic record is invented.'
+                        : 'Registry data is never attached to unreadable or low-confidence reads. Simulated records are only returned for validated exact matches.'}
                     </p>
 
                     {/* Operator Quick Actions: Confirm Read, AI Read, Manual Correction */}

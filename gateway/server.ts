@@ -1613,7 +1613,7 @@ export function validateStrictIndianPlate(plateText: string): {
 
 // Curated mock vehicle database: Only lookup against pre-existing records.
 // Under NO circumstances generate, hallucinate, or mock a registration dossier for an unknown plate.
-const MOCK_REGISTRY_DATABASE: Record<string, any> = {
+let MOCK_REGISTRY_DATABASE: Record<string, any> = {
   'DL01AB1234': {
     registeredOwner: 'Simulated Citizen 01 (Test)',
     vehicleMake: 'Hyundai',
@@ -1645,6 +1645,16 @@ const MOCK_REGISTRY_DATABASE: Record<string, any> = {
     registrationStatus: 'Valid',
   },
 };
+
+try {
+  const seededFile = path.resolve(__dirname, 'seededDemoRegistry.json');
+  if (fs.existsSync(seededFile)) {
+    const seeded = JSON.parse(fs.readFileSync(seededFile, 'utf8'));
+    MOCK_REGISTRY_DATABASE = { ...MOCK_REGISTRY_DATABASE, ...seeded };
+  }
+} catch {
+  // fallback
+}
 
 // POST /api/anpr/ai-read - Assisted optical plate reading using server-side Gemini Vision
 app.post(

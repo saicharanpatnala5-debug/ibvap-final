@@ -1,5 +1,6 @@
 import { createWorker, Worker } from 'tesseract.js';
 import { ANPRResult, BoundingBox, VehicleDossier } from '../types';
+import seededRegistryJson from './seededDemoRegistry.json';
 
 let ocrWorkerPromise: Promise<Worker | null> | null = null;
 
@@ -559,7 +560,8 @@ export const ANPR_CONF_MIN = 40;
 
 // Curated simulated records with explicitly fake names and reserved test numbers
 // Never shares the same owner across vehicles.
-export const SIMULATED_VEHICLE_DATABASE: Record<string, Omit<VehicleDossier, 'isSimulatedDemo'>> = {
+export const SIMULATED_VEHICLE_DATABASE: Record<string, any> = {
+  ...(seededRegistryJson as Record<string, any>),
   'DL01AB1234': {
     plateNumber: 'DL01AB1234',
     registeredOwner: 'Simulated Citizen 01 (Test)',
