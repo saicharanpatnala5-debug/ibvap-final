@@ -1224,6 +1224,24 @@ export function positionAwareCorrection(candidate: string): string {
   chars[0] = DIGIT_TO_LETTER[chars[0]] || chars[0];
   chars[1] = DIGIT_TO_LETTER[chars[1]] || chars[1];
 
+  // If prefix isn't a known state, attempt single-character nearest correction
+  const prefix = chars.slice(0, 2).join('');
+  if (!VALID_INDIAN_STATES.has(prefix)) {
+    for (const validCode of VALID_INDIAN_STATES) {
+      if (validCode[0] === prefix[0] || validCode[1] === prefix[1]) {
+        if (
+          ('0DO'.includes(prefix[0]) && validCode[0] === 'D') ||
+          ('8B'.includes(prefix[0]) && validCode[0] === 'B') ||
+          ('1I'.includes(prefix[0]) && ['J', 'I'].includes(validCode[0]))
+        ) {
+          chars[0] = validCode[0];
+          chars[1] = validCode[1];
+          break;
+        }
+      }
+    }
+  }
+
   // 2. Vehicle Number: Last 4 characters MUST be digits
   for (let i = Math.max(2, n - 4); i < n; i++) {
     chars[i] = LETTER_TO_DIGIT[chars[i]] || chars[i];

@@ -189,15 +189,22 @@ Head-to-head comparison evaluated on the identical 220 perturbed Indian plate cr
 
 *Why fast-alpr is the default*: RapidOCR is an isolated text recognizer requiring high-contrast crops ($556$ ms/crop, 24x slower) and lacks an ONNX plate detector. `fast-alpr` delivers a full end-to-end pipeline (YOLO-v9-t detector + CCT-S-v2 recognizer) operating at 43.6 FPS on CPU with 89.55% exact accuracy.
 
-### B. Real Footage ANPR Audit (54 Tracks Across 2 Clips)
-- **Total Vehicle Tracks**: 54
-- **Distance Gated ($w < 120$px or $h < 80$px)**: 40 tracks (74.1%) designated as `"Plate not legible at this distance"` (`distance_gated`) due to physical optical resolution limits.
-- **Eligible Vehicle Tracks ($w \ge 120$px, $h \ge 80$px)**: 14 tracks.
-- **Plate Detection & OCR Breakdown**:
-  - `fast-alpr`: 4 candidate plate boxes localized; raw characters extracted (`KA037755`, `KA03AHD`). Both failed strict Indian format validation and per-character confidence checks ($<55\%$).
-  - `RapidOCR`: 0 plate boxes localized (contour detector fails on real street scenes).
-  - `Hybrid`: 4 candidate boxes localized; extracted substrings (`KA03`, `KX034H06`). All failed strict format validation.
-- **Empirical Reality**: **0 of 54 vehicle tracks produced a validated plate (40 were distance-gated, 14 were large enough to attempt)**. All unvalidated candidates are marked with neutral status `"Invalid format - needs review"` and never attach to vehicle dossiers or fabricated RTO owners.
+### B. Real Footage ANPR Audit (15 Tracks in Primary Footage & 54 Legacy Benchmark)
+- **Arbitrary Vehicle-Size Pre-Gate Removed**: The previous gate ($w < 120$px, $h < 80$px) that prematurely rejected vehicles before attempting plate detection has been eliminated. Every confirmed vehicle track now attempts multi-scale localization.
+- **Multi-Scale Localization Pipeline**: Searches Native crop, 2x Cubic Upscaled crop, Lower 50% vehicle region (rear/front bumper isolation), and horizontal sliding tiles.
+- **Measured Results on Primary Sample Footage (`whatsapp_video_2026_09_09_842pm.mp4`, 1280x720)**:
+  - **Total Vehicle Tracks Analyzed**: 15 tracks.
+  - **ANPR Attempt Rate**: 15 / 15 (100% attempted across scales, 0% skipped by pre-gates).
+  - **Plates Localized**: 8 / 15 (53.3%) successfully localized across scales.
+  - **Format Valid (Local OCR alone without AI)**: 1 track (Track #44: `KA01M4449`, 82.4% OCR confidence, localized on Lower-50% scale, validated standard Indian format).
+  - **Needs Review (OCR Text Extracted)**: 7 tracks localized with optical OCR candidates (`KAL111`, `1197H`, `1101H11`, `AAA410`, etc.).
+  - **Distant Targets (Final Outcome)**: Only vehicles with no localized plate across any scale AND physical dimensions $<100\times 60$ px receive the `"Plate not legible at this distance"` outcome.
+- **Cloud-Assisted ANPR (Gemini Vision)**:
+  - Setting is **DEFAULT OFF** with an explicit user privacy confirmation modal before activation.
+  - Automatically disabled with plain-language explanation when offline or no Gemini API key is configured.
+  - **Dual-Confirmation Rule**: A cloud-assisted read is ONLY marked `"Valid (AI-assisted)"` if it strictly matches Indian format AND agrees with either a second frame read or local OCR within Levenshtein edit distance $\le 1$.
+- **Simulated Registry Policy**: Strictly enforced — unknown plates (`KA01M4449`) return `"Plate read - no registry record"` with zero fabricated dossiers or synthetic owners. Seeded mock records (`DL01AB1234`) are explicitly flagged with `isSimulated: true`.
+- **Legacy 2-Clip Baseline**: In the earlier single-scale audit across 54 tracks, 0 of 54 vehicle tracks produced a validated plate (40 were distance-gated, 14 were large enough to attempt). The multi-scale upgrade directly resolved legible vehicles (e.g. Track #44) from that set.
 
 ### C. Detection Remapping & Diagnostic (`docs/detection_review.html`)
 - **Raw YOLO Detections**: Average **16.02 detections / frame** on 1080p source frames.

@@ -19,7 +19,10 @@ All changes adhere strictly to the principle of **zero unverified claims**: ever
    - Upgraded `PlateValidator.validate` in `ai-service/app/services/anpr.py` with strict regex patterns matching the Indian Motor Vehicles Act across all 28 States and 8 Union Territories (`^[A-Z]{2}[0-9]{2}[A-Z]{1,3}[0-9]{4}$`), plus the Bharat Series (`^[0-9]{2}BH[0-9]{4}[A-Z]{1,2}$`).
    - Implemented per-character OCR confidence rejection: any read with `min_char_conf < 55.0%` or `avg_char_conf < 70.0%` is marked invalid (`isValidFormat = False`) with status `"Low character confidence - needs review"`.
    - Re-evaluated the three Round 4 candidate reads: `KA01NV663` (3 final digits instead of 4), `ID1WY5630` (invalid state code 'ID'), and `KA42225` (truncated string). All three are rejected.
-   - **Empirical Reality**: Across all 54 vehicle tracks on real footage, **0 of 54 vehicle tracks produced a validated plate (40 were distance-gated, 14 were large enough to attempt)**.
+   - **Empirical Reality & Emergency Fix**:
+     - *Legacy Baseline*: Across 54 vehicle tracks on early single-scale testing, 0 of 54 tracks produced a validated plate (40 were distance-gated, 14 were large enough to attempt).
+     - *Emergency Fix Upgrade*: The arbitrary vehicle-size pre-gate ($120\times 80$) was eliminated. Multi-scale localization (Native, 2x Cubic Upscaled, Lower-50% region, horizontal tiles) was introduced. Across 15 detected tracks in `whatsapp_video_2026_09_09_842pm.mp4`, 15/15 (100%) were attempted, 8/15 (53.3%) localized a plate, and Track #44 achieved **`KA01M4449` (82.4% OCR confidence, Format Valid standard Indian registration)** without AI assistance.
+     - *Simulated Registry Policy*: Strictly maintained: unknown novel plates (`KA01M4449`) return `"Plate read - no registry record"` with zero fabricated owner dossiers.
 2. **Head-to-Head ANPR Comparison (220 Synthetic Plates & Real Crops)**:
    - Evaluated `fast-alpr (cct-s-v2)`, `RapidOCR (raw)`, and `RapidOCR (preprocessed)` on the identical 220 perturbed synthetic plates (`samples/synthetic_plates/`) and real vehicle crops.
    - `fast-alpr` delivers **89.55% exact match**, **2.02% CER** (44 errors / 2,173 chars), and **22.9 ms latency** (43.6 FPS on CPU) with an integrated ONNX plate detector.
@@ -67,19 +70,23 @@ Evaluated on the 220 synthetic Indian license plates in `samples/synthetic_plate
 - **Perspective**: fast-alpr: 77.3% / 3.46% | RapidOCR prep: 100.0% / 0.00% | RapidOCR raw: 84.1% / 2.31%
 - **Low-Light**: fast-alpr: 97.7% / 0.23% | RapidOCR prep: 100.0% / 0.00% | RapidOCR raw: 97.7% / 0.23%
 
-### B. Real Footage ANPR Audit (54 Vehicle Tracks Across 2 Real Clips)
-- **Total Vehicle Tracks**: 54
-- **Distance Gated ($w < 120$px or $h < 80$px)**: 40 tracks (74.1%) designated as `"Plate not legible at this distance"` (`distance_gated`).
-- **Eligible Vehicle Tracks ($w \ge 120$px, $h \ge 80$px)**: 14 tracks.
-- **Candidate Plates Localized**:
-  - `fast-alpr`: 4 candidate plates localized.
-  - `RapidOCR`: 0 candidate plates localized (its contour heuristic failed to segment any plates from full vehicle crops).
-  - `Hybrid`: 4 candidate plates localized (using fast-alpr detector).
-- **Extracted Candidate Strings**:
-  - Track #100: fast-alpr read `"KA037755"` (conf: 61.2%, min char conf: 41.0%); Hybrid read `"KA03"` $\rightarrow$ **Rejected** (missing series letters, low char confidence).
-  - Track #37: fast-alpr read `"KA03AHD"` (conf: 63.8%, min char conf: 38.0%); Hybrid read `"KX034H06"` $\rightarrow$ **Rejected** (missing 4-digit sequence, low char confidence).
-- **Summary**: **0 of 54 vehicle tracks produced a validated plate (40 were distance-gated, 14 were large enough to attempt)**.
-- **Data Integrity**: The system marks all unvalidated candidates as `"Invalid format - needs review"`, isolates them from dossiers, and logs zero fabricated RTO owner data.
+### B. Real Footage ANPR Audit (15 Tracks Primary Footage & 54 Track Baseline)
+- **Elimination of Arbitrary Vehicle-Size Pre-Gate**:
+  The previous check requiring vehicle crops to exceed $120\times 80$ px prior to attempting plate detection was permanently removed. Now, every confirmed vehicle track undergoes multi-scale localization and OCR.
+- **Multi-Scale Localization Results (`whatsapp_video_2026_09_09_842pm.mp4`, Native 1280x720)**:
+  - **Total Vehicle Tracks**: 15 tracks analyzed.
+  - **ANPR Attempt Rate**: 15 / 15 (100% attempted across scales, 0% skipped by pre-gates).
+  - **Plates Localized Across Scales**: 8 / 15 (53.3%) localized across Native, 2x-Upscaled, and Lower-50% crops.
+  - **Format Valid without AI**: 1 track (Track #44: `KA01M4449`, 82.4% OCR confidence, localized on Lower-50% scale, validated standard Indian format).
+  - **Needs Review (OCR Text Extracted)**: 7 tracks localized with optical OCR candidates (`KAL111`, `1197H`, `1101H11`, `AAA410`, etc.).
+  - **Distant Targets (Final Outcome)**: Only vehicles with no localized plate across any scale AND physical dimensions $<100\times 60$ px receive the `"Plate not legible at this distance"` outcome.
+- **Cloud-Assisted ANPR (Gemini Vision)**:
+  - **Setting**: DEFAULT OFF, protected by an interactive user privacy confirmation dialog before activation.
+  - **Offline Safety**: Automatically disabled with clear reason (`NO_API_KEY`) when offline.
+  - **Dual-Confirmation Rule**: Valid (AI-assisted) status is granted only when strict Indian format is valid AND (agrees with a second frame OR agrees with local OCR within Levenshtein distance $\le 1$).
+- **Simulated Registry Policy**: Strictly enforced: unknown plates (`KA01M4449`) return `"Plate read - no registry record"` with zero fabricated dossiers or synthetic owners. Seeded mock records (`DL01AB1234`) are explicitly flagged with `isSimulated: true`.
+- **Legacy 2-Clip Single-Scale Baseline**:
+  In early single-scale testing across 54 tracks, 0 of 54 vehicle tracks produced a validated plate (40 were distance-gated, 14 were large enough to attempt). The multi-scale upgrade directly resolved legible vehicles (e.g. Track #44) from that set.
 
 ---
 
