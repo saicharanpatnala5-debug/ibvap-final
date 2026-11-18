@@ -66,12 +66,15 @@ Measured on local CPU across both evaluation CCTV video clips (`samples/whatsapp
 
 ### Minute 5: AI Copilot Offline Reasoning & Platform Reset (04:00 - 05:00)
 - **What to Click**:
-  - Press `Ctrl+K` (or click **"AI Copilot"** tab). Type: `Summarize active sector threats and monitored cameras`.
-  - Then click **"Reset"** in the top navbar.
+  - Press `Ctrl+K` (or click **"AI Copilot"** tab). Note the status indicator in the top right (`#copilot-status-badge` showing `Offline mode: NO_API_KEY` or `Online: <model>`).
+  - Click any suggested question chip (e.g., *"Explain what's going on in the footage"* or *"Why did the loitering alert fire?"*), or type a custom question.
+  - Test the inline **"Retry"** button on the assistant response.
+  - Finally, click **"Reset"** in the top navbar.
 - **What to Explain**:
-  - Even with zero internet and no Google Gemini API key configured, the AI Copilot provides deterministic, grounded reasoning summarizing monitored cameras, active zone breaches, and entity telemetry.
+  - Even with zero internet and no Google Gemini API key configured, the AI Copilot operates via deterministic, grounded reasoning that queries live camera telemetry, alerts, entity counts, and ANPR plate records.
+  - When a Gemini API key is configured, the system automatically checks and adopts the best supported model (prioritizing `gemini-3.8-flash`, `gemini-3.5-flash`, `gemini-3.5-flash-lite`, and `gemini-2.5-flash-lite`).
   - Clicking **"Reset"** executes an instant, one-click purge of all loaded feeds, active alerts, and registry records, returning the system to its pristine clean empty state.
-- **What the Audience Sees**: Grounded tactical AI response, followed by immediate return to the 0-state ready for the next evaluator.
+- **What the Audience Sees**: Grounded tactical AI response with live status badge, followed by immediate return to the 0-state ready for the next evaluator.
 
 ---
 

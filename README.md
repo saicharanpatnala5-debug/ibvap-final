@@ -137,7 +137,7 @@ IBVAP is designed to run in air-gapped environments without external internet co
 
 ---
 
-## 🧪 Comprehensive Automated Testing (102 / 102 Passing)
+## 🧪 Comprehensive Automated Testing (114 / 114 Passing)
 
 All test suites pass with a 100% success rate:
 
@@ -145,7 +145,7 @@ All test suites pass with a 100% success rate:
 # Frontend Unit & State Tests (Vitest: 26/26 passed)
 npm --workspace=frontend run test
 
-# Gateway Tests (Vitest: 11/11 passed)
+# Gateway Tests & Validation (Vitest: 21/21 passed)
 npm --workspace=gateway run test
 
 # Python AI-Service Tests (Pytest: 36/36 passed, including Golden Cases)
@@ -154,9 +154,12 @@ cd ai-service && .venv\Scripts\pytest tests/ -v
 # Java Core-Service Tests (Maven Surefire: 13/13 passed)
 cd core-service && ./mvnw test
 
-# Playwright E2E & Stale Data Purge (Playwright: 16/16 passed)
+# Playwright E2E, Offline Proof, Stale Purge & Copilot (Playwright: 18/18 passed)
 npx playwright test
 ```
+
+> [!NOTE]
+> **Gemini API Key Disclosure**: In this demonstration environment, no private `GEMINI_API_KEY` was committed (protecting credentials from leakage). The AI Copilot was rigorously verified in offline grounded heuristic mode across 5 query patterns and tested against an API-compliant Gemini mock server in automated Playwright E2E tests (`frontend/tests/copilotChatbot.spec.ts`). Dynamic model selection automatically prefers `gemini-3.8-flash`, `gemini-3.5-flash`, `gemini-3.5-flash-lite`, and `gemini-2.5-flash-lite`.
 
 ---
 

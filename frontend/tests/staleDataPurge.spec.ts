@@ -101,7 +101,7 @@ test.describe('IBVAP Step 1 - Stale Data Eviction & Schema Versioning', () => {
     await resetBtn.click();
 
     // Verify backend /api/demo/clear was called
-    expect(clearApiCalled).toBe(true);
+    await expect.poll(() => clearApiCalled, { timeout: 5000 }).toBe(true);
 
     // Verify UI state is reset to empty
     await expect(page.locator('text=Upload footage or connect a camera to begin')).toBeVisible();

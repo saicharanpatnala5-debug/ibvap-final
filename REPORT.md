@@ -146,21 +146,21 @@ By scanning `whatsapp_video_2026_09_09_842pm.mp4` via `find_pedestrian_dwell.py`
 
 ---
 
-## 7. Comprehensive Automated Test Suite (102 / 102 Passing)
+## 7. Comprehensive Automated Test Suite (114 / 114 Passing)
 
-All 5 test suites pass with a 100% success rate (including offline network isolation test and golden cases):
+All 5 test suites pass with a 100% success rate (including offline network isolation test, golden cases, and AI Copilot chatbot verification):
 
 ```
 ================================================================================
 Test Suite                     | Framework         | Passed | Failed | Duration
 ================================================================================
-Python AI-Service              | Pytest 9.2.0      |   36   |    0   |  21.47s
-Frontend Unit & State Tests    | Vitest 5.1.0      |   26   |    0   |   0.55s
-API Gateway Tests              | Vitest 5.1.0      |   11   |    0   |   1.32s
-Java Core-Service Tests        | JUnit 5 / Maven   |   13   |    0   |  10.22s
-Playwright E2E & Offline Proof | Playwright 1.65   |   16   |    0   |  29.70s
+Python AI-Service              | Pytest 9.2.0      |   36   |    0   |  23.20s
+Frontend Unit & State Tests    | Vitest 5.1.0      |   26   |    0   |   0.53s
+API Gateway Tests              | Vitest 5.1.0      |   21   |    0   |   1.42s
+Java Core-Service Tests        | JUnit 5 / Maven   |   13   |    0   |  30.58s
+Playwright E2E & Offline Proof | Playwright 1.65   |   18   |    0   |  42.10s
 ================================================================================
-TOTAL                          |                   |  102   |    0   |  63.26s
+TOTAL                          |                   |  114   |    0   |  97.83s
 ================================================================================
 ```
 
@@ -191,7 +191,8 @@ To eliminate the gap between automated test fixtures and visual runtime reality,
 - Navigation and VMS UI are verified responsive across 5 viewports (390px to 1920px).
 - Offline UI operation verified with 0 external network requests via Playwright.
 - Stale data automatically evicted with schema envelope `v8.0.0`.
-- All 102 tests pass across the entire polyglot stack.
+- AI Copilot Chatbot verified end-to-end: operates with dynamic model selection (`gemini-3.8-flash` primary) when keys are configured, and falls back seamlessly to grounded local heuristics when offline, passing 5-question automated E2E tests and mock server verification (`frontend/tests/copilotChatbot.spec.ts`).
+- All 114 tests pass across the entire polyglot stack.
 
 ### Known Limitations
 1. **Extreme Distance ANPR**: Low-resolution footage ($768 \times 432$) cannot optically resolve plate characters at distances $>15$m where plate height is $<10$px. In such conditions, IBVAP suppresses unresolvable guesses or tags them with `"Needs review"` rather than hallucinating false plates. Operational deployment requires dedicated 1080p/4K surveillance cameras with optical zoom.
