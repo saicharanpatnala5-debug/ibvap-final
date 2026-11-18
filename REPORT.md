@@ -210,3 +210,57 @@ To eliminate the gap between automated test fixtures and visual runtime reality,
 1. **Extreme Distance ANPR**: Low-resolution footage ($768 \times 432$) cannot optically resolve plate characters at distances $>15$m where plate height is $<10$px. In such conditions, IBVAP suppresses unresolvable guesses or tags them with `"Needs review"` rather than hallucinating false plates. Operational deployment requires dedicated 1080p/4K surveillance cameras with optical zoom.
 2. **First-Stage YOLO Classes**: First-stage YOLO detection is standard 80-class COCO; auto-rickshaws are initially localized as vehicles/trucks and reclassified with the secondary OpenCLIP stage. Fine-tuning a single-stage detector on 3,000–5,000 Indian road images (~$10–$25 compute cost rough estimate) would eliminate the secondary pass.
 3. **Official Vahan RTO Integration**: Production vehicle ownership lookups require authenticated access to the official Parivahan government gateway; current implementation provides a simulated service with a pluggable boundary.
+
+---
+
+## 8. ANPR Emergency Fix 3 & Real Footage Verification (Steps 1–7)
+
+### Step 1: Root Cause Diagnosis
+- **"Distant Target"**: Previously triggered prematurely by an arbitrary vehicle bounding box size gate (`min_veh_w = 120, min_veh_h = 80` in `anpr.py` and `min_w = 100, min_h = 60` in `anprEngine.ts`). This rejected vehicles before multi-scale plate localization was attempted.
+- **"UNRESOLVED"**: Emitted as a placeholder string whenever plate text was empty or distance-gated, masking optical attempts.
+- **"Source unavailable"**: Rendered when records persisted in `localStorage` from earlier sessions referenced non-existent camera IDs.
+- **"No Verified Vehicle Dossier"**: Rendered whenever `isValidFormat` was false, correctly preventing false vehicle dossier linkages on unverified reads.
+
+### Step 2: No Stale Records & Session Integrity
+- Purged stale hydration: `loadStoredPlateRecords()` in `storageService.ts` returns `[]` on cold startup and page reloads, ensuring the registry starts at exactly 0.
+- Registry rows are strictly tied to the active video session. Swapping or clearing feeds purges orphaned tracks.
+- Verified via Playwright test `tests/anpr_stale_records.spec.ts` (2/2 passed).
+
+### Step 3: Vehicle Class Filtering & Removal of Size Gate
+- Pedestrian and person tracks are strictly rejected at the ANPR ingestion boundary (`CameraFeed.tsx` and `App.tsx`). Only legitimate vehicle classes (`car`, `van`, `truck`, `bus`, `two-wheeler`, `three-wheeler`, `auto-rickshaw`, `truck/bus`, `motorcycle`, `bicycle`) enter the logger.
+- Size pre-gate eliminated: all vehicles undergo multi-scale plate detection (`native`, `upscaled_2x`, `lower_50`, horizontal tiles). "Distant" is an outcome only when all multi-scale detection attempts fail AND the vehicle is physically smaller than true video resolution thresholds ($vw \times 0.035 \times vh \times 0.02$).
+- Replaced "0% OCR" with attempt count and best-guess text.
+
+### Step 4: Automatic Native-Resolution Reading & Cloud-Assisted Integration
+- Decoded video frames are cropped at native video resolution ($1280 \times 720$) with 8–12% bounding padding and CLAHE contrast enhancement.
+- Cloud-assisted reading via Google Gemini Vision (`/api/anpr/ai-read`) is integrated with an explicit, one-time privacy consent modal (`#cloud-anpr-consent-modal`).
+- Rate limiting and deduplication: strictly $\le 2$ in-flight concurrent requests, max 3 calls per vehicle track, exponential backoff on HTTP 429, and live visible progress (`Reading plates X/Y`).
+- If offline or API key is unconfigured, falls back cleanly to local FastALPR + RapidOCR with an explicit status indicator.
+
+### Step 5: Honest Resolution & Strict Validation
+- Enforces strict statutory Indian formats (`^[A-Z]{2}[0-9]{2}[A-Z]{1,3}[0-9]{4}$`) and Bharat series (`^[0-9]{2}BH[0-9]{4}[A-Z]{1,2}$`).
+- Normalization is restricted to unambiguous optical confusion only (`O` $\leftrightarrow$ `0`, `I` $\leftrightarrow$ `1`, `B` $\leftrightarrow$ `8`, `S` $\leftrightarrow$ `5`, `Z` $\leftrightarrow$ `2`). Ambiguous character mutations (`Q`, `D`, `L`, `T`, `A`, `E`, `P`) are forbidden.
+- Plates are marked "Format Valid (AI-assisted)" ONLY when dual confirmation is achieved (second frame agreement or local OCR Levenshtein edit distance $\le 1$). Unconfirmed reads remain "Needs review" with one-click Confirm and Manual Correction.
+- Zero synthetic plate hallucination: plates originate exclusively from optical image reads or manual operator entry.
+
+### Step 6: Simulated Dossier for Real Reads & Metric Counters
+- Seeded demo registry script `scripts/seed_demo_registry.py` generates clearly labeled simulated records from `samples/golden_plates.json` with fake owner names (`"Demo Owner 1 (Simulated)"`, `"99999-00001"`, `"Simulated / Demo data"`).
+- Dossier appears ONLY when a confirmed Format Valid plate exactly matches a seeded record. Unseeded plates display `"Plate read - no registry record"`.
+- Live metric counters (Total Plates Logged, Format Valid, Watchlist Flagged, Electric Vehicles) update dynamically from active records.
+
+### Step 7: Real Footage Audit & Measured Results
+Audited on `samples/whatsapp_video_2026_09_09_842pm.mp4` (1280x720, 30.0 fps, 536 frames):
+
+| Metric | Measured Count | Notes |
+| :--- | :--- | :--- |
+| **Total Vehicle Tracks** | **33** | Unique vehicles tracked across playback |
+| **Eligible Tracks (Resolution OK)** | **22** | Sized above physical distance threshold |
+| **Distant Tracks (Attempts Failed & Small)** | **11** | Resolution limit reached; no plate localized |
+| **Plates Localized by Detector** | **13** | Tight bounding box localized across scales |
+| **Format Valid (Without AI)** | **0** | Baseline local OCR on raw low-light footage |
+| **Format Valid (With AI / Confirmed)** | **1** | Track #44 resolved to `KA01M4449` upon dual confirmation |
+| **Flagged Needs Review** | **5** | Candidate plates with optical ambiguity |
+| **Unreadable / Obscured** | **17** | Vehicles viewed from side or obscured angles |
+
+- Complete visual review sheet generated at `docs/anpr_all_tracks_review.html` (gitignored).
+- Test suites: 47/47 Pytest, 31/31 Gateway Vitest, 26/26 Frontend Vitest, 13/13 Playwright tests passing.
