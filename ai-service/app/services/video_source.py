@@ -146,6 +146,7 @@ class ActiveVideoSource:
                     entities=entities,
                     zone_events=zone_events,
                     plates=plates,
+                    weapons=getattr(self.detector, 'latest_weapons', []),
                 )
 
                 # Encode frame to JPEG

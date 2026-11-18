@@ -12,6 +12,7 @@ import {
   Moon,
   Sun,
   Shield,
+  ShieldAlert,
   Layers,
   Sparkles,
   Info,
@@ -28,6 +29,7 @@ import {
   VirtualZone,
   ZoneType,
   CrossingDirection,
+  PossibleWeaponEntity,
 } from '../types';
 import {
   analyzeFrameLuminance,
@@ -197,6 +199,29 @@ export const CameraFeed: React.FC<CameraFeedProps> = ({
   const [isAnalyzingVideo, setIsAnalyzingVideo] = useState<boolean>(() => videoAnalysisService.isAnalyzing(camera.id));
   const [analysisProgress, setAnalysisProgress] = useState<number>(() => videoAnalysisService.getProgress(camera.id));
 
+  // Weapon Detection (Beta) state
+  const [weaponDetectionActive, setWeaponDetectionActive] = useState<boolean>(Boolean(camera.weaponDetectionEnabled));
+  const detectedWeaponsRef = useRef<PossibleWeaponEntity[]>([]);
+  const lastWeaponAlertTimeRef = useRef<number>(0);
+
+  const handleToggleWeaponDetection = async () => {
+    const nextState = !weaponDetectionActive;
+    setWeaponDetectionActive(nextState);
+    onUpdateCamera({ ...camera, weaponDetectionEnabled: nextState });
+    try {
+      await fetch('/api/vision/weapons/toggle', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ enabled: nextState }),
+      });
+    } catch (e) {
+      console.warn('Failed to toggle weapon detector in backend:', e);
+    }
+    if (!nextState) {
+      detectedWeaponsRef.current = [];
+    }
+  };
+
   const handleTogglePreAnalysis = async () => {
     if (isPreAnalyzed) {
       setIsPreAnalyzed(false);
@@ -271,6 +296,9 @@ export const CameraFeed: React.FC<CameraFeedProps> = ({
               setTrackedObjects(mappedTracks);
               lastUiUpdateRef.current = now;
             }
+          }
+          if (weaponDetectionActive && payload.weapons && Array.isArray(payload.weapons)) {
+            detectedWeaponsRef.current = payload.weapons;
           }
         } catch {
           // Ignore malformed ws frame
@@ -512,6 +540,11 @@ export const CameraFeed: React.FC<CameraFeedProps> = ({
       const model = await getDetectionModel();
 
       const ladderResult = await performLadderSurveillanceInference(model, video, isNightMode);
+      if (weaponDetectionActive && ladderResult.weapons) {
+        detectedWeaponsRef.current = ladderResult.weapons;
+      } else if (!weaponDetectionActive) {
+        detectedWeaponsRef.current = [];
+      }
       const rawDetections = ladderResult.detections;
       setCurrentEngine(ladderResult.engine);
       setInferenceFps(Math.round(1000 / Math.max(1, ladderResult.latencyMs)));
@@ -625,6 +658,55 @@ export const CameraFeed: React.FC<CameraFeedProps> = ({
 
       for (const alert of evaluatedAlerts) {
         onAlertGenerated(alert);
+      }
+
+      // Weapon detection alert evaluation with cooldown & operator verification status
+      if (weaponDetectionActive && detectedWeaponsRef.current.length > 0) {
+        const now = Date.now();
+        for (const w of detectedWeaponsRef.current) {
+          if (w.isConsecutiveConfirmed && !w.isFriendlyZoneSuppressed) {
+            if (now - lastWeaponAlertTimeRef.current > 15000) {
+              lastWeaponAlertTimeRef.current = now;
+              const weaponAlert: AlertIncident = {
+                id: `alert-weapon-${now}-${w.id || 'candidate'}`,
+                cameraId: camera.id,
+                cameraName: camera.name,
+                timestamp: now,
+                videoTime: video.currentTime,
+                title: w.subclass === 'firearm' ? 'Possible firearm candidate - needs review' : 'Possible weapon candidate - needs review',
+                severity: 'high',
+                riskScore: 85,
+                status: 'active',
+                ruleType: 'possible_weapon',
+                weaponCandidate: w,
+                verificationStatus: 'Needs operator verification',
+                objectClass: 'person',
+                objectId: w.nearestPersonTrackId ?? 0,
+                confidence: Math.round(w.confidence * 100),
+                entityCropUrl: w.cropDataUrl,
+                snapshotUrl: snapshotUrl,
+                riskFactors: [
+                  {
+                    id: `rf-weapon-${now}`,
+                    label: 'Weapon Candidate Detected (Beta)',
+                    score: 85,
+                    description: `${w.label} (${w.subclass}, conf: ${Math.round(w.confidence * 100)}%, consecutive hits: ${w.consecutiveHits}) - Needs operator verification. No automatic escalation.`,
+                  },
+                ],
+                auditTrail: [
+                  {
+                    id: `audit-${now}`,
+                    action: 'generated',
+                    actor: 'AI Weapon Detector (Beta)',
+                    timestamp: now,
+                    note: 'Status: Needs operator verification. Decision-support only.',
+                  },
+                ],
+              };
+              onAlertGenerated(weaponAlert);
+            }
+          }
+        }
       }
 
       // Store in ref for smooth 60fps interpolation rendering without waiting for React re-render
@@ -1035,6 +1117,56 @@ export const CameraFeed: React.FC<CameraFeedProps> = ({
 
             ctx.restore();
           }
+
+          // 4b. Render Weapon Candidate Boxes in distinct violet/purple (#a855f7)
+          if (showDetectionsOverlay && weaponDetectionActive && detectedWeaponsRef.current.length > 0) {
+            for (const w of detectedWeaponsRef.current) {
+              const wx = Math.max(1, Math.min(cW - 4, Math.round(w.bbox.x * cW)));
+              const wy = Math.max(1, Math.min(cH - 4, Math.round(w.bbox.y * cH)));
+              const ww = Math.max(4, Math.min(cW - wx - 1, Math.round(w.bbox.width * cW)));
+              const wh = Math.max(4, Math.min(cH - wy - 1, Math.round(w.bbox.height * cH)));
+
+              ctx.save();
+              ctx.lineWidth = 2;
+              ctx.strokeStyle = '#a855f7'; // Distinct violet/purple
+              ctx.strokeRect(wx, wy, ww, wh);
+
+              // Proximity linkage line to nearest person
+              if (w.nearestPersonTrackId !== undefined && w.nearestPersonTrackId !== null) {
+                const nearestTrack = displayMap.get(w.nearestPersonTrackId);
+                if (nearestTrack) {
+                  ctx.lineWidth = 1;
+                  ctx.setLineDash([3, 3]);
+                  ctx.strokeStyle = 'rgba(168, 85, 247, 0.7)';
+                  ctx.beginPath();
+                  ctx.moveTo(wx + ww / 2, wy + wh / 2);
+                  ctx.lineTo(
+                    Math.round((nearestTrack.bbox.x + nearestTrack.bbox.width / 2) * cW),
+                    Math.round((nearestTrack.bbox.y + nearestTrack.bbox.height / 2) * cH)
+                  );
+                  ctx.stroke();
+                  ctx.setLineDash([]);
+                }
+              }
+
+              // Label badge
+              const tagText = `Possible ${w.subclass} (${Math.round(w.confidence * 100)}%) - ${w.label}`;
+              ctx.font = '600 10px system-ui, -apple-system, sans-serif';
+              const textWidth = ctx.measureText(tagText).width;
+              const badgeH = 16;
+              const badgeY = Math.max(2, wy - badgeH - 2);
+
+              ctx.fillStyle = 'rgba(88, 28, 135, 0.92)'; // Deep purple
+              ctx.fillRect(wx, badgeY, textWidth + 10, badgeH);
+              ctx.strokeStyle = '#c084fc';
+              ctx.lineWidth = 1;
+              ctx.strokeRect(wx, badgeY, textWidth + 10, badgeH);
+
+              ctx.fillStyle = '#f3e8ff';
+              ctx.fillText(tagText, wx + 5, badgeY + 11);
+              ctx.restore();
+            }
+          }
         }
 
           // 5. In-Canvas Debug Telemetry HUD when ?debug=1 is enabled
@@ -1368,6 +1500,22 @@ export const CameraFeed: React.FC<CameraFeedProps> = ({
           >
             <Layers className="h-3.5 w-3.5" />
             <span>Overlay {showDetectionsOverlay ? 'ON' : 'OFF'}</span>
+          </button>
+
+          {/* Weapon Detection (Beta) Toggle */}
+          <button
+            type="button"
+            id={`toggle-weapon-btn-${camera.id}`}
+            onClick={handleToggleWeaponDetection}
+            className={`flex items-center gap-1 rounded-lg px-2.5 py-1 text-xs font-medium border transition-colors ${
+              weaponDetectionActive
+                ? 'border-purple-500/60 bg-purple-950/50 text-purple-300 shadow-sm shadow-purple-900/30'
+                : 'border-neutral-800 bg-neutral-900 text-neutral-400 hover:text-neutral-200'
+            }`}
+            title="Toggle weapon detection candidate scanner (Beta)"
+          >
+            <ShieldAlert className="h-3.5 w-3.5" />
+            <span>Weapons (Beta) {weaponDetectionActive ? 'ON' : 'OFF'}</span>
           </button>
 
           {/* Events Drawer Toggle */}

@@ -346,6 +346,7 @@ function buildTelemetryDataBlock(context: any, cameraName?: string): string {
   const alerts = Array.isArray(context?.alerts) ? context.alerts : [];
   const entities = Array.isArray(context?.entities) ? context.entities : [];
   const clipTotalEntities = Array.isArray(context?.clipTotalEntities) ? context.clipTotalEntities : [];
+  const weapons = Array.isArray(context?.weapons) ? context.weapons : [];
 
   const safeCamName = sanitizeTelemetryString(cameraName || cameras[0]?.name || 'Active Surveillance Node', 80);
 
@@ -367,6 +368,10 @@ function buildTelemetryDataBlock(context: any, cameraName?: string): string {
   const clipSummary = clipTotalEntities.length > 0
     ? `${clipTotalEntities.length} unique tracks registered across whole clip`
     : `${entities.length} active tracks registered`;
+
+  const weaponsSummary = weapons.length > 0
+    ? weapons.map((w: any) => `${w.subclass || 'weapon'} (${w.label || 'candidate'}, conf: ${Math.round((w.confidence || 0.6) * 100)}%)`).join('; ')
+    : 'None detected';
 
   const alertsSummary = alerts
     .slice(0, 5)
@@ -391,6 +396,7 @@ function buildTelemetryDataBlock(context: any, cameraName?: string): string {
 - Monitored Nodes Count: ${cameras.length}
 - Active Incidents Logged: ${alerts.length} (${alertsSummary || 'None currently active'})
 - Active Frame Foreground Entities (visible at current time): ${entitiesSummary || 'Clear sector / no foreground entities'}
+- Weapon Candidates (Beta): ${weaponsSummary}
 - Cumulative Clip Tracking Scope: ${clipSummary}
 <<<END_TELEMETRY_DATA>>>`;
 }
@@ -402,6 +408,7 @@ export async function enrichTelemetryContext(context: any): Promise<any> {
     alerts: Array.isArray(context?.alerts) ? [...context.alerts] : [],
     entities: Array.isArray(context?.entities) ? [...context.entities] : [],
     clipTotalEntities: Array.isArray(context?.clipTotalEntities) ? [...context.clipTotalEntities] : [],
+    weapons: Array.isArray(context?.weapons) ? [...context.weapons] : [],
     plates: Array.isArray(context?.plates) ? [...context.plates] : [],
     zones: Array.isArray(context?.zones) ? [...context.zones] : [],
     videoTime: typeof context?.videoTime === 'number' ? context.videoTime : undefined,
@@ -724,6 +731,37 @@ export function generateGroundedFallbackResponse(
         : 'No readable plate in current perspective';
     return (
       `### 🚗 Vehicle & ANPR Intelligence: **${safeCam}**\n- **Vehicles in Frame**: ${vehicles.length}\n- **Plates Scanned**: ${plateFormatted}\n\nCheck the **Vehicle Registry (ANPR)** tab for full owner dossiers and NHAI format validation.` +
+      fallbackDisclaimer
+    );
+  }
+
+  // 11. Weapon inquiries (e.g. "any weapons", "is there a gun", "firearm", "knife", "threat objects")
+  if (/\b(weapons?|firearms?|guns?|rifles?|pistols?|knives?|knife|blades?|threats?)\b/i.test(p)) {
+    const weapons = Array.isArray(context?.weapons) ? context.weapons : [];
+    if (weapons.length === 0) {
+      return (
+        `### 🛡️ Tactical Weapon Assessment: **${safeCam}**\n` +
+        `**0 Possible Weapon Candidates Detected** in active surveillance sector.\n` +
+        `- Continuous object-centric screening active for firearms, bladed weapons, and blunt impact instruments.\n` +
+        `- Everyday items (smartphones, tools, umbrellas) are filtered by hard-negative background suppressors.` +
+        fallbackDisclaimer
+      );
+    }
+
+    const wList = weapons
+      .map((w: any, idx: number) => {
+        const cls = sanitizeTelemetryString(w.subclass || 'weapon', 24);
+        const conf = Math.round((w.confidence || 0.7) * 100);
+        const lbl = sanitizeTelemetryString(w.label || 'candidate near person', 50);
+        const status = sanitizeTelemetryString(w.verificationStatus || 'Needs operator verification', 40);
+        return `• **Candidate #${idx + 1} (${cls})**: ${lbl} (${conf}% conf) — Status: *${status}*`;
+      })
+      .join('\n');
+
+    return (
+      `### ⚠️ Tactical Weapon Assessment: **${safeCam}**\n` +
+      `**${weapons.length} Possible Weapon Candidate(s) Flagged**:\n${wList}\n\n` +
+      `*Notice: Designated 'Needs operator verification'. Weapons are linked to nearest persons only by proximity; persons are never labeled as armed or hostile.*` +
       fallbackDisclaimer
     );
   }
@@ -1195,6 +1233,98 @@ app.post(
         error: 'Failed to read plate with AI model.',
         details: err?.message || String(err),
         isValidFormat: false,
+      });
+    }
+  }
+);
+
+// POST /api/weapons/verify-crop - Multimodal verification of candidate weapon crop
+app.post(
+  '/api/weapons/verify-crop',
+  aiRateLimiter,
+  aiAccessControl,
+  frameJsonParser,
+  async (req, res) => {
+    const { cropBase64, subclass } = req.body || {};
+    if (!cropBase64 || typeof cropBase64 !== 'string') {
+      return res.status(400).json({ error: 'cropBase64 is required', isWeapon: false });
+    }
+
+    const client = getGeminiClient();
+    if (!client || !geminiReachable) {
+      return res.status(503).json({
+        error: 'AI weapon verification requires an active online Gemini connection.',
+        reason: geminiLastErrorCode || 'NO_API_KEY',
+        isWeapon: false,
+      });
+    }
+
+    try {
+      const cleanBase64 = cropBase64.replace(/^data:image\/\w+;base64,/, '');
+      const contents = [
+        {
+          role: 'user',
+          parts: [
+            {
+              inlineData: {
+                mimeType: 'image/jpeg',
+                data: cleanBase64,
+              },
+            },
+            {
+              text: `You are an automated tactical forensics verification assistant.
+An automated CCTV detector flagged this object crop as a candidate "${subclass || 'weapon'}".
+Examine the image carefully. Determine whether this object is:
+- A real weapon: "firearm", "bladed_weapon", or "blunt_object"
+- Or NOT a weapon: benign everyday handheld object (smartphone, tablet, umbrella, tool, wrench, drill, beverage bottle, coffee mug, wallet, keys, stick, toy).
+
+Respond in strict JSON format:
+{
+  "isWeapon": boolean,
+  "classification": "firearm" | "bladed_weapon" | "blunt_object" | "not_a_weapon",
+  "confidence": number,
+  "reason": "1 concise sentence explaining the visual visual features",
+  "recommendedAction": "confirm" | "dismiss_false_positive"
+}`,
+            },
+          ],
+        },
+      ];
+
+      const response = await client.models.generateContent({
+        model: activeGeminiModel,
+        contents,
+        config: {
+          temperature: 0.1,
+          responseMimeType: 'application/json',
+        },
+      });
+
+      const responseText = response?.text?.trim() || '{}';
+      let parsedJson: any = {};
+      try {
+        parsedJson = JSON.parse(responseText);
+      } catch {
+        parsedJson = { isWeapon: false, classification: 'not_a_weapon', confidence: 0.5, reason: responseText };
+      }
+
+      return res.json({
+        status: 'ok',
+        source: 'gemini-vision',
+        model: activeGeminiModel,
+        isWeapon: Boolean(parsedJson.isWeapon),
+        classification: parsedJson.classification || 'not_a_weapon',
+        confidence: typeof parsedJson.confidence === 'number' ? parsedJson.confidence : 0.7,
+        reason: parsedJson.reason || 'Visual analysis completed.',
+        verificationLabel: parsedJson.isWeapon ? 'AI-verified, needs operator confirmation' : 'AI-verified: Benign handheld item',
+        timestamp: Date.now(),
+      });
+    } catch (err: any) {
+      console.error('[IBVAP /api/weapons/verify-crop] Error calling Gemini:', err);
+      return res.status(500).json({
+        error: 'Failed to verify weapon crop with AI model.',
+        details: err?.message || String(err),
+        isWeapon: false,
       });
     }
   }

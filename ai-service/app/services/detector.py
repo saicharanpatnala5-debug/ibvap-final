@@ -18,6 +18,7 @@ from app.services.anpr import (
 from app.services.anpr_async import AsyncANPRWorker
 from app.services.classifier import VehicleCropClassifier
 from app.services.tracking_manager import TrackingManager, compute_direction_string
+from app.services.weapon_detector import WeaponDetector
 
 # Standard border surveillance target classes
 ALLOWED_CLASSES = {
@@ -62,6 +63,8 @@ class SurveillanceDetector:
         self.vehicle_class_votes: dict[int, list[str]] = {}
         self.vehicle_class_confirmed: dict[int, str] = {}
         self.target_class_ids: list[int] = []
+        self.weapon_detector = WeaponDetector.get_instance()
+        self.latest_weapons = []
         self._init_model()
 
     def _on_plate_confirmed(self, track_id: int, plate: ANPRResult):
@@ -74,6 +77,8 @@ class SurveillanceDetector:
         self.tracking_manager.reset()
         self.plate_voter.reset()
         self.async_anpr.reset()
+        self.weapon_detector.reset()
+        self.latest_weapons.clear()
         self.vehicle_class_votes.clear()
         self.vehicle_class_confirmed.clear()
         if self.model is not None and hasattr(self.model, "predictor") and self.model.predictor is not None:
@@ -290,7 +295,9 @@ class SurveillanceDetector:
         self,
         frame_bgr: np.ndarray,
         timestamp_sec: float,
-    ) -> tuple[list[TrackedEntity], list[ANPRResult]]:
+        zones: list = None,
+        return_weapons: bool = False,
+    ) -> tuple:
         """
         Runs object detection with ByteTrack 2nd-stage association,
         followed by lifecycle track filtering, EMA box smoothing, and footpoint kinematics.
@@ -463,6 +470,19 @@ class SurveillanceDetector:
         active_ids = {e.id for e in entities}
         self.plate_voter.prune(active_ids)
 
+        # Stage C: Optional Weapon Detection (Feature Flag: WEAPON_DETECTION, OFF by default)
+        weapons = []
+        if self.weapon_detector.enabled:
+            weapons = self.weapon_detector.process_frame(
+                frame_bgr=frame_bgr,
+                entities=entities,
+                timestamp_sec=timestamp_sec,
+                zones=zones
+            )
+        self.latest_weapons = weapons
+
+        if return_weapons:
+            return entities, plates, weapons
         return entities, plates
 
     def _extract_plate_heuristic(self, plate_crop: np.ndarray, track_id: int) -> Optional[ANPRResult]:

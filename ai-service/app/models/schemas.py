@@ -76,6 +76,22 @@ class VirtualZone(BaseModel):
     createdAt: Optional[int] = None
 
 
+class PossibleWeaponEntity(BaseModel):
+    id: str
+    subclass: Literal["firearm", "bladed_weapon", "blunt_object", "unknown"]
+    confidence: float  # 0.0 to 1.0
+    bbox: BoundingBox
+    nearestPersonTrackId: Optional[int] = None
+    label: str  # e.g. "weapon candidate near person #10"
+    cropDataUrl: Optional[str] = None
+    isConsecutiveConfirmed: bool = False
+    consecutiveHits: int = 1
+    isFriendlyZoneSuppressed: bool = False
+    suppressionReason: Optional[str] = None
+    verificationStatus: Literal["Needs operator verification", "AI-verified, needs operator confirmation", "Marked false positive"] = "Needs operator verification"
+    detectedAt: float = 0.0
+
+
 class ZoneEvent(BaseModel):
     id: str
     zoneId: str
@@ -116,3 +132,4 @@ class FrameStreamPayload(BaseModel):
     entities: list[TrackedEntity] = Field(default_factory=list)
     zone_events: list[ZoneEvent] = Field(default_factory=list)
     plates: list[ANPRResult] = Field(default_factory=list)
+    weapons: list[PossibleWeaponEntity] = Field(default_factory=list)

@@ -41,6 +41,49 @@ export const AlertsPanel: React.FC<AlertsPanelProps> = ({
 }) => {
   const [severityFilter, setSeverityFilter] = useState<AlertSeverity | 'all'>('all');
   const [expandedAlertIds, setExpandedAlertIds] = useState<Set<string>>(new Set());
+  const [verifyingId, setVerifyingId] = useState<string | null>(null);
+  const [aiVerifications, setAiVerifications] = useState<
+    Record<string, { status: string; explanation: string; subclass?: string }>
+  >({});
+
+  const handleVerifyWithAI = async (alert: AlertIncident) => {
+    const crop = alert.entityCropUrl || alert.snapshotUrl;
+    if (!crop) {
+      alert("No visual evidence snapshot available to verify.");
+      return;
+    }
+    const confirmed = window.confirm(
+      "Notice: Image crop will be sent to external Gemini Vision API for tactical verification.\n\nProceed?"
+    );
+    if (!confirmed) return;
+
+    setVerifyingId(alert.id);
+    try {
+      const res = await fetch('/api/weapons/verify-crop', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          cropBase64: crop,
+          subclass: alert.weaponCandidate?.subclass || 'firearm',
+        }),
+      });
+      if (res.ok) {
+        const data = await res.json();
+        setAiVerifications((prev) => ({
+          ...prev,
+          [alert.id]: {
+            status: data.verification,
+            explanation: data.explanation || 'Verified by Gemini Vision',
+            subclass: data.subclass,
+          },
+        }));
+      }
+    } catch (e) {
+      console.error('Failed to verify weapon crop with AI:', e);
+    } finally {
+      setVerifyingId(null);
+    }
+  };
 
   const toggleExpand = (id: string) => {
     setExpandedAlertIds((prev) => {
@@ -224,6 +267,8 @@ export const AlertsPanel: React.FC<AlertsPanelProps> = ({
           filteredAlerts.map((alert) => {
             const isExpanded = expandedAlertIds.has(alert.id);
             const isVehicle = ['car', 'truck', 'bus', 'motorcycle'].includes(alert.objectClass);
+            const isWeaponAlert = alert.ruleType === 'possible_weapon' || alert.title.toLowerCase().includes('weapon') || alert.title.toLowerCase().includes('firearm');
+            const verification = aiVerifications[alert.id];
 
             return (
               <div
@@ -238,6 +283,20 @@ export const AlertsPanel: React.FC<AlertsPanelProps> = ({
                       <span className="font-semibold text-sm text-neutral-100">{alert.title}</span>
                       {getSeverityBadge(alert.severity)}
                       {getStatusBadge(alert.status)}
+                      {isWeaponAlert && (
+                        <span className="rounded bg-purple-950/60 border border-purple-700/50 px-2 py-0.5 text-[10px] font-medium text-purple-300">
+                          Needs operator verification
+                        </span>
+                      )}
+                      {verification && (
+                        <span className={`rounded px-2 py-0.5 text-[10px] font-medium border ${
+                          verification.status === 'not_a_weapon'
+                            ? 'bg-emerald-950/60 border-emerald-700/50 text-emerald-300'
+                            : 'bg-purple-950/60 border-purple-700/50 text-purple-300'
+                        }`}>
+                          AI: {verification.status.replace(/_/g, ' ').toUpperCase()} ({verification.explanation})
+                        </span>
+                      )}
                     </div>
                     <div className="flex items-center gap-2 text-xs text-neutral-400">
                       <span className="font-medium text-neutral-300">{alert.cameraName}</span>
@@ -350,8 +409,32 @@ export const AlertsPanel: React.FC<AlertsPanelProps> = ({
 
                 {/* Actions & Audit Trail Accordion */}
                 <div className="mt-3 flex items-center justify-between border-t border-neutral-800 pt-3">
-                  <div className="flex items-center gap-2">
-                    {alert.status === 'active' && (
+                  <div className="flex items-center gap-2 flex-wrap">
+                    {isWeaponAlert && alert.status !== 'closed' && (
+                      <button
+                        type="button"
+                        id={`mark-fp-btn-${alert.id}`}
+                        onClick={() => onCloseAlert(alert.id)}
+                        className="rounded-md bg-neutral-800 border border-amber-800/60 px-2.5 py-1 text-xs font-medium text-amber-300 hover:bg-neutral-700 hover:text-amber-200 transition-colors"
+                        title="1-click mark as false positive and close alert"
+                      >
+                        Mark false positive
+                      </button>
+                    )}
+                    {isWeaponAlert && (
+                      <button
+                        type="button"
+                        id={`ai-verify-btn-${alert.id}`}
+                        onClick={() => handleVerifyWithAI(alert)}
+                        disabled={verifyingId === alert.id}
+                        className="rounded-md bg-purple-950/60 border border-purple-700/60 px-2.5 py-1 text-xs font-medium text-purple-300 hover:bg-purple-900/80 transition-colors flex items-center gap-1"
+                        title="Notice: Image crop will be sent to Gemini Vision API for tactical verification"
+                      >
+                        <ShieldAlert className="h-3 w-3" />
+                        {verifyingId === alert.id ? 'Verifying...' : 'Verify with AI'}
+                      </button>
+                    )}
+                    {alert.status === 'active' && !isWeaponAlert && (
                       <button
                         type="button"
                         id={`ack-btn-${alert.id}`}
@@ -361,7 +444,7 @@ export const AlertsPanel: React.FC<AlertsPanelProps> = ({
                         Acknowledge
                       </button>
                     )}
-                    {alert.status !== 'escalated' && alert.status !== 'closed' && (
+                    {alert.status !== 'escalated' && alert.status !== 'closed' && !isWeaponAlert && (
                       <button
                         type="button"
                         id={`esc-btn-${alert.id}`}
@@ -371,7 +454,7 @@ export const AlertsPanel: React.FC<AlertsPanelProps> = ({
                         Escalate
                       </button>
                     )}
-                    {alert.status !== 'closed' && (
+                    {alert.status !== 'closed' && !isWeaponAlert && (
                       <button
                         type="button"
                         id={`close-btn-${alert.id}`}

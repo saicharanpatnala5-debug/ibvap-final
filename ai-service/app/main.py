@@ -305,11 +305,19 @@ async def detect_frame(
             "state": ent.state,
         })
 
+    weapons_out = []
+    for w in getattr(detector, "latest_weapons", []):
+        if hasattr(w, "model_dump"):
+            weapons_out.append(w.model_dump())
+        elif hasattr(w, "dict"):
+            weapons_out.append(w.dict())
+
     return {
         "status": "ok",
         "engine": "ai-service",
         "model": detector.active_model_name,
         "detections": detections,
+        "weapons": weapons_out,
         "count": len(detections),
     }
 
@@ -360,6 +368,80 @@ async def anpr_read_crop(request: Request):
         "isDistanceGated": res.isDistanceGated,
         "processedAt": res.processedAt,
         "track_id": track_id,
+    }
+
+
+@app.get("/weapons/status")
+async def get_weapon_status():
+    """Returns the operational status of the experimental Weapon Detection (Beta) module."""
+    wd = detector.weapon_detector
+    return {
+        "status": "ok",
+        "enabled": wd.enabled,
+        "is_loaded": wd.is_loaded,
+        "model_path": wd.model_path,
+        "conf_threshold": wd.conf_threshold,
+        "min_consecutive_frames": wd.min_consecutive_frames,
+        "min_pixel_size": wd.min_pixel_size,
+        "active_tracks_count": len(wd.active_tracks),
+    }
+
+
+@app.post("/weapons/toggle")
+async def toggle_weapon_detection(request: Request):
+    """Dynamically enables or disables the weapon detection pipeline."""
+    body = {}
+    try:
+        body = await request.json()
+    except Exception:
+        pass
+
+    enable = bool(body.get("enabled", not detector.weapon_detector.enabled))
+    detector.weapon_detector.set_enabled(enable)
+    return {
+        "status": "ok",
+        "enabled": detector.weapon_detector.enabled,
+        "is_loaded": detector.weapon_detector.is_loaded,
+    }
+
+
+@app.post("/weapons/detect")
+async def detect_weapons(request: Request):
+    """Runs weapon detection stage on an uploaded frame with current tracking context."""
+    body = {}
+    try:
+        body = await request.json()
+    except Exception:
+        pass
+
+    b64 = body.get("frameBase64") or body.get("image") or body.get("frame")
+    if not b64:
+        raise HTTPException(status_code=400, detail="Missing frameBase64 image.")
+
+    clean_b64 = b64.split(",")[-1]
+    decoded = base64.b64decode(clean_b64)
+    nparr = np.frombuffer(decoded, np.uint8)
+    frame_bgr = cv2.imdecode(nparr, cv2.IMREAD_COLOR)
+
+    if frame_bgr is None or frame_bgr.size == 0:
+        raise HTTPException(status_code=400, detail="Could not decode image.")
+
+    t_sec = float(body.get("timestamp_sec", time.time()))
+    zones = body.get("zones", [])
+
+    # Process frame with return_weapons=True
+    entities, plates, weapons = detector.process_frame(
+        frame_bgr=frame_bgr,
+        timestamp_sec=t_sec,
+        zones=zones,
+        return_weapons=True
+    )
+
+    return {
+        "status": "ok",
+        "weapons": [w.dict() for w in weapons],
+        "count": len(weapons),
+        "entities_count": len(entities),
     }
 
 

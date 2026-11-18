@@ -8,6 +8,7 @@ import {
   TrackedObject,
   TrackedTrajectoryPoint,
   VirtualZone,
+  PossibleWeaponEntity,
 } from '../types';
 
 let modelPromise: Promise<cocoSsd.ObjectDetection> | null = null;
@@ -526,6 +527,7 @@ export type DetectionEngineType = 'ai-service' | 'yolo-worker' | 'coco-ssd';
 
 export interface LadderInferenceResult {
   detections: RawDetection[];
+  weapons?: PossibleWeaponEntity[];
   engine: DetectionEngineType;
   latencyMs: number;
 }
@@ -607,6 +609,7 @@ export async function performLadderSurveillanceInference(
               }));
               return {
                 detections: applyNmsDetections(mapped, 0.4),
+                weapons: Array.isArray(data.weapons) ? data.weapons : undefined,
                 engine: 'ai-service',
                 latencyMs: Math.round(performance.now() - startTime),
               };

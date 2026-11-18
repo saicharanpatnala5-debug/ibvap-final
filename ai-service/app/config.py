@@ -39,6 +39,13 @@ class Settings(BaseModel):
     ENABLE_ANPR: bool = os.getenv("ENABLE_ANPR", "true").lower() == "true"
     ANPR_MIN_CONFIDENCE: float = float(os.getenv("ANPR_MIN_CONFIDENCE", "65.0"))
     
+    # Weapon Detection (Beta) Feature Flag - OFF by default
+    WEAPON_DETECTION: bool = os.getenv("WEAPON_DETECTION", "false").lower() == "true"
+    WEAPON_MODEL_PATH: str = os.getenv("WEAPON_MODEL_PATH", "models/weapons.pt")
+    WEAPON_CONF_THRESHOLD: float = float(os.getenv("WEAPON_CONF_THRESHOLD", "0.45"))
+    WEAPON_MIN_CONSECUTIVE_FRAMES: int = int(os.getenv("WEAPON_MIN_CONSECUTIVE_FRAMES", "5"))
+    WEAPON_MIN_PIXEL_SIZE: int = int(os.getenv("WEAPON_MIN_PIXEL_SIZE", "25"))
+    
     # Allowed CORS Origins
     CORS_ORIGINS: list[str] = [
         "http://localhost:3000",

@@ -112,6 +112,23 @@ export interface FrameAnalysisResult {
   averageLuminance: number; // 0 to 255
   objects: TrackedObject[];
   rawDetectionsCount: number;
+  weapons?: PossibleWeaponEntity[];
+}
+
+export interface PossibleWeaponEntity {
+  id: string;
+  subclass: 'firearm' | 'bladed_weapon' | 'blunt_object' | 'unknown';
+  confidence: number; // 0.0 to 1.0
+  bbox: BoundingBox;
+  nearestPersonTrackId?: number;
+  label: string; // e.g. "weapon candidate near person #10"
+  cropDataUrl?: string;
+  isConsecutiveConfirmed: boolean;
+  consecutiveHits: number;
+  isFriendlyZoneSuppressed: boolean;
+  suppressionReason?: string;
+  verificationStatus: 'Needs operator verification' | 'AI-verified, needs operator confirmation' | 'Marked false positive';
+  detectedAt: number;
 }
 
 export interface RiskFactor {
@@ -146,7 +163,9 @@ export interface AlertIncident {
   entityCropUrl?: string;
   anprPlate?: string;
   anprConfidence?: number;
-  ruleType?: 'zone_entry' | 'zone_loitering' | 'wrong_direction' | 'watchlist_plate';
+  ruleType?: 'zone_entry' | 'zone_loitering' | 'wrong_direction' | 'watchlist_plate' | 'possible_weapon';
+  weaponCandidate?: PossibleWeaponEntity;
+  verificationStatus?: 'Needs operator verification' | 'AI-verified, needs operator confirmation' | 'Marked false positive';
   zoneId?: string;
   zoneName?: string;
   status: 'active' | 'acknowledged' | 'escalated' | 'closed';
@@ -170,6 +189,7 @@ export interface CameraFeedItem {
   createdAt: number;
   wsUrl?: string;
   aiSourceId?: string;
+  weaponDetectionEnabled?: boolean;
 }
 
 export type PlateStatus = 'Valid format' | 'Low confidence - needs review' | 'Unreadable' | 'Plate not legible at this distance';

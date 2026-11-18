@@ -159,4 +159,27 @@ describe('Grounded Local Heuristic Fallback Engine', () => {
     expect(res).toContain('Vehicle & ANPR Intelligence');
     expect(res).toContain('Vehicles in Frame');
   });
+
+  it('Pattern 11: answers weapon detection query with object-centric assessment', () => {
+    const resClean = generateGroundedFallbackResponse('were any weapons or firearms detected?', sampleContext);
+    expect(resClean).toContain('Tactical Weapon Assessment');
+    expect(resClean).toContain('0 Possible Weapon Candidates Detected');
+
+    const resWithWeapon = generateGroundedFallbackResponse('were any weapons detected?', {
+      ...sampleContext,
+      weapons: [
+        {
+          id: 'wpn-1',
+          subclass: 'firearm',
+          confidence: 0.82,
+          label: 'weapon candidate near person #101',
+          verificationStatus: 'Needs operator verification',
+        },
+      ],
+    });
+    expect(resWithWeapon).toContain('1 Possible Weapon Candidate(s) Flagged');
+    expect(resWithWeapon).toContain('firearm');
+    expect(resWithWeapon).toContain('Needs operator verification');
+    expect(resWithWeapon).toContain('persons are never labeled as armed or hostile');
+  });
 });
