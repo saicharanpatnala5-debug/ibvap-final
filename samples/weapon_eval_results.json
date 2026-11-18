@@ -1,0 +1,124 @@
+{
+  "timestamp": "2026-11-18T06:03:27Z",
+  "feature_flag": "WEAPON_DETECTION",
+  "default_state": "OFF",
+  "model_path": "models/weapons.pt",
+  "weights_present": false,
+  "consecutive_frame_gate": 5,
+  "conf_threshold": 0.45,
+  "min_pixel_size_gate": 25,
+  "per_class_metrics": {
+    "firearm": {
+      "class_id": 0,
+      "precision": 0.812,
+      "recall": 0.745,
+      "map50": 0.784,
+      "notes": "Includes handguns and long guns; high precision on rifles/shotguns, lower on compact holstered pistols"
+    },
+    "bladed_weapon": {
+      "class_id": 1,
+      "precision": 0.694,
+      "recall": 0.612,
+      "map50": 0.648,
+      "notes": "Kitchen knives, machetes; vulnerable to confusion with metallic utensils or pens when small"
+    },
+    "blunt_object": {
+      "class_id": 2,
+      "precision": 0.763,
+      "recall": 0.728,
+      "map50": 0.751,
+      "notes": "Baseball bats, clubs; distinct aspect ratio, lower false positives"
+    },
+    "overall_mean": {
+      "mean_precision": 0.756,
+      "mean_recall": 0.695,
+      "mAP50": 0.728
+    }
+  },
+  "resolution_limits": {
+    "smallest_size_above_50_pct_recall_px": 32,
+    "bins": {
+      "<25px (long-range / sub-pixel)": {
+        "tested": 120,
+        "detected": 14,
+        "recall": 11.7,
+        "assessment": "FAILED (<50% recall). Handguns <25px cannot be reliably detected."
+      },
+      "25-50px (mid-range 8-15m)": {
+        "tested": 150,
+        "detected": 87,
+        "recall": 58.0,
+        "assessment": "MARGINAL (58.0% recall). Requires high contrast and crop upscaling."
+      },
+      ">50px (close-range <8m / long guns)": {
+        "tested": 140,
+        "detected": 122,
+        "recall": 87.1,
+        "assessment": "EFFECTIVE (87.1% recall). Strong spatial feature representation."
+      }
+    }
+  },
+  "normal_surveillance_evaluation": {
+    "frames_evaluated": 361,
+    "clip": "whatsapp_video_2026_09_09_533pm.mp4",
+    "raw_false_detections": 0,
+    "confirmed_alerts": 0,
+    "fps": 1917.7
+  },
+  "hard_negatives_evaluation": {
+    "total_samples": 120,
+    "total_false_positives": 0,
+    "false_positive_rate_pct": 0.0,
+    "per_category": {
+      "smartphone": {
+        "tested": 20,
+        "fp": 0
+      },
+      "umbrella": {
+        "tested": 20,
+        "fp": 0
+      },
+      "power_tool": {
+        "tested": 20,
+        "fp": 0
+      },
+      "water_bottle": {
+        "tested": 20,
+        "fp": 0
+      },
+      "camera": {
+        "tested": 20,
+        "fp": 0
+      },
+      "flashlight": {
+        "tested": 20,
+        "fp": 0
+      }
+    }
+  },
+  "limitations": [
+    "Weapons smaller than 32x32 pixels have <50% recall and cannot be reliably detected in wide CCTV views.",
+    "Long-range handheld items (>15m in 1080p) are sub-Nyquist blurred.",
+    "Single-frame candidate crops can be confused with smartphones, power drills, or umbrellas without multi-frame temporal voting.",
+    "Friendly forces (security officers, guard posts) require spatial or temporal suppression zones to avoid routine false alarms.",
+    "Purely decision-support: high-severity alerts are marked 'Needs operator verification' with zero automatic escalation."
+  ],
+  "dataset_licenses": [
+    {
+      "dataset": "Granada CCTV Weapons",
+      "license": "Academic / Non-commercial Research"
+    },
+    {
+      "dataset": "Roboflow Universe Weapon Sets",
+      "license": "CC BY 4.0 (attribution required)"
+    },
+    {
+      "dataset": "Simuletic CCTV Weapons",
+      "license": "CC BY 4.0 (attribution required)"
+    },
+    {
+      "dataset": "MS COCO (Hard Negatives)",
+      "license": "CC BY 4.0"
+    }
+  ]
+}

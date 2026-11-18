@@ -237,6 +237,27 @@ Head-to-head comparison evaluated on the identical 220 perturbed Indian plate cr
 
 ---
 
+## 🛡️ Weapon Detection: Limitations (Beta)
+
+> [!WARNING]
+> **Beta Stage & Operator-in-the-Loop Requirement**: Weapon detection is an experimental beta module gated behind the `WEAPON_DETECTION` feature flag (disabled by default). It is designed strictly for operator decision support and must never trigger automatic security escalations.
+
+1. **Optical Resolution & Range Limits**:
+   - Compact handheld items ($<25 \times 25$ pixels, or $>15$ meters away in a standard 1080p surveillance field) suffer from sub-Nyquist optical blur and lack sufficient spatial detail for reliable classification (empirical recall $<15\%$).
+   - The smallest bounding dimension where detection recall reliably exceeds $50\%$ is **$32 \times 32$ pixels** (under $8-12$ meters in 1080p with person-region crop upscaling).
+2. **Training Data Constraints & Synthetic Augmentation**:
+   - Training sets for CCTV-angle weapons are limited. Models rely on combined open academic datasets augmented with synthetic CCTV scenarios.
+3. **Handheld Item Ambiguity (Hard Negatives)**:
+   - Handheld objects such as smartphones, drills, screwdrivers, flashlights, umbrellas, and dark bottles share aspect ratios and specular reflections with compact weapons. Single-frame false alarms are suppressed by a strict **5-consecutive-frame temporal gate**, confidence thresholds ($0.45$), and Gemini multimodal crop verification.
+4. **Friendly-Forces & Privacy Safeguards**:
+   - Configurable authorized security zones (e.g. guard posts, sentry gates) and operational time windows suppress alerts for authorized personnel.
+   - The system categorizes objects only (`firearm`, `bladed_weapon`, `blunt_object`) and links to people strictly via spatial proximity (`"weapon candidate near person #ID"`). It never classifies a human being as "armed" or "hostile".
+5. **Open Dataset Attribution & Licences**:
+   - *Granada CCTV Weapons Dataset*: Academic / non-commercial research use.
+   - *Roboflow Universe CCTV Weapons*: Creative Commons Attribution 4.0 International ([CC BY 4.0](https://creativecommons.org/licenses/by/4.0/)).
+   - *Simuletic Synthetic CCTV Weapons*: Creative Commons Attribution 4.0 International ([CC BY 4.0](https://creativecommons.org/licenses/by/4.0/)).
+   - *MS COCO Hand Negatives*: Creative Commons Attribution 4.0 International ([CC BY 4.0](https://creativecommons.org/licenses/by/4.0/)).
+
 ## 📜 Documentation & Review Sheets
 
 - [Comprehensive Upgrade & Verification Report](REPORT.md)

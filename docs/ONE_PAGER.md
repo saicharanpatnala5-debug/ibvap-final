@@ -108,6 +108,7 @@ Tested across 220 synthetically generated Indian license plate crops with varied
 1. **Physical Resolution Limit**: Optical character recognition on vehicle plates requires at least $28\times 100$ pixels of optical resolution. Distant vehicles in low-resolution video cannot be resolved without optical zoom lenses or closer camera positioning.
 2. **Auto-Rickshaw Geometry**: The fragile aspect-ratio heuristic was removed to prevent mislabeling frontal cars. Domain-specific fine-tuning is required for native auto-rickshaw classification.
 3. **CPU Execution Throughput**: Processing 1080p video on CPU achieves measured 4.6–11.5 FPS depending on quality mode. Real-time 30 FPS multi-stream processing requires GPU acceleration.
+4. **Weapon Detection Optical Limits (Beta)**: Handheld weapons $<25\times 25$ pixels ($>15$m in 1080p surveillance) cannot be reliably detected (recall $<15\%$). Minimum reliable detection size is $32\times 32$ pixels. Training data is small and augmented with synthetic CCTV data; false positives occur on handheld everyday items (phones, power tools, bottles, umbrellas) without the 5-consecutive-frame gate. Friendly-forces zones suppress false alerts around security posts. All weapon alerts are strictly decision-support marked "Needs operator verification" with zero automated escalation.
 
 ---
 
@@ -132,3 +133,6 @@ Main open-source licences identified across dependencies (no formal legal audit)
 | **API Gateway** | Express / Helmet / Zod | **MIT** | Permissive open-source stack. |
 | **Frontend Workstation** | React 19 / Tailwind CSS | **MIT** | Permissive open-source user interface. |
 | **Indian Driving Dataset (Research)** | AutoNue / IIIT-H (IDD) | **CC BY-NC-SA 4.0** | Research reference for Indian traffic classifications; no proprietary weights redistributed. |
+| **Granada CCTV Weapons Dataset** | University of Granada | **Academic / Non-commercial** | Video evaluation benchmarks for weapon detection research. |
+| **Roboflow Universe Weapon Sets** | Roboflow Community | **CC BY 4.0** | Open training imagery for firearms, bladed weapons, and blunt objects. |
+| **Simuletic CCTV Synthetic Sets** | Simuletic | **CC BY 4.0** | Synthetic CCTV frames for weapon detection evaluation under varying illumination. |
