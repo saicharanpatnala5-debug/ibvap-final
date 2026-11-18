@@ -30,6 +30,10 @@ import {
   X,
   FileText,
   RotateCcw,
+  Key,
+  Eye,
+  EyeOff,
+  Trash2,
 } from 'lucide-react';
 import Markdown from 'react-markdown';
 import {
@@ -116,6 +120,67 @@ export const AICommandCenter: React.FC<AICommandCenterProps> = ({
     fetchCopilotStatus();
     return () => { isMounted = false; };
   }, []);
+
+  // In-app Gemini API Key Modal state
+  const [isKeyModalOpen, setIsKeyModalOpen] = useState(false);
+  const [keyInputValue, setKeyInputValue] = useState('');
+  const [showKeySecret, setShowKeySecret] = useState(false);
+  const [rememberKey, setRememberKey] = useState(true);
+  const [keyModalLoading, setKeyModalLoading] = useState(false);
+  const [keyModalError, setKeyModalError] = useState<string | null>(null);
+
+  const handleOpenKeyModal = () => {
+    setKeyModalError(null);
+    setKeyInputValue('');
+    setIsKeyModalOpen(true);
+  };
+
+  const handleSaveKey = async (e?: React.FormEvent) => {
+    if (e) e.preventDefault();
+    const clean = keyInputValue.trim();
+    if (!clean) {
+      setKeyModalError('Please enter a valid Gemini API key.');
+      return;
+    }
+    setKeyModalLoading(true);
+    setKeyModalError(null);
+    try {
+      const res = await fetch('/api/ai/set-key', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ apiKey: clean, remember: rememberKey }),
+      });
+      const data = await res.json();
+      if (res.ok && data.success) {
+        setCopilotStatus({ online: true, model: data.model });
+        setIsKeyModalOpen(false);
+        setKeyInputValue('');
+      } else {
+        setKeyModalError(data.message || 'Key verification failed. Please check the key.');
+      }
+    } catch {
+      setKeyModalError('Network error connecting to gateway.');
+    } finally {
+      setKeyModalLoading(false);
+    }
+  };
+
+  const handleRemoveKey = async () => {
+    setKeyModalLoading(true);
+    setKeyModalError(null);
+    try {
+      const res = await fetch('/api/ai/remove-key', { method: 'POST' });
+      if (res.ok) {
+        setCopilotStatus({ online: false, reason: 'NO_API_KEY' });
+        setIsKeyModalOpen(false);
+        setKeyInputValue('');
+      }
+    } catch {
+      setKeyModalError('Failed to remove key from gateway.');
+    } finally {
+      setKeyModalLoading(false);
+    }
+  };
 
   // Chat message state initialized from persistent storage
   const [messages, setMessages] = useState<AIChatMessage[]>(() => {
@@ -660,22 +725,29 @@ Try clicking one of the suggested command actions above or retry your query.`,
           </div>
         </div>
 
-        {/* Live Grounding & Network Indicator */}
+        {/* Live Grounding & Network Indicator (Clickable to open Key Modal) */}
         <div className="flex items-center gap-2.5">
-          <div
+          <button
+            type="button"
             id="copilot-status-badge"
-            className={`flex items-center gap-1.5 rounded-full px-2.5 py-1 text-[11px] font-mono font-medium border ${
+            onClick={handleOpenKeyModal}
+            className={`flex items-center gap-1.5 rounded-full px-2.5 py-1 text-[11px] font-mono font-medium border cursor-pointer hover:brightness-110 active:scale-95 transition-all shadow-xs ${
               copilotStatus.online
-                ? 'bg-emerald-950/60 border-emerald-800 text-emerald-300'
-                : 'bg-amber-950/60 border-amber-800 text-amber-300'
+                ? 'bg-emerald-950/60 border-emerald-800 text-emerald-300 hover:border-emerald-600'
+                : 'bg-amber-950/60 border-amber-800 text-amber-300 hover:border-amber-600'
             }`}
-            title={copilotStatus.online ? `Online: Connected to ${copilotStatus.model}` : `Offline mode: ${copilotStatus.reason}`}
+            title={
+              copilotStatus.online
+                ? `Online: Connected to ${copilotStatus.model} (Click to manage key)`
+                : `Offline mode: ${copilotStatus.reason} (Click to configure Gemini API key)`
+            }
           >
             <span className={`h-2 w-2 rounded-full ${copilotStatus.online ? 'bg-emerald-400 animate-ping' : 'bg-amber-400'}`} />
             <span id="copilot-status-text">
               {copilotStatus.online ? `Online: ${copilotStatus.model}` : `Offline mode: ${copilotStatus.reason}`}
             </span>
-          </div>
+            <Key className="h-3 w-3 opacity-60 ml-0.5" />
+          </button>
 
           {onToggleDock && (
             <button
@@ -1187,6 +1259,181 @@ Try clicking one of the suggested command actions above or retry your query.`,
           </div>
         )}
       </div>
+
+      {/* In-App Gemini API Key Configuration Modal */}
+      {isKeyModalOpen && (
+        <div
+          id="gemini-key-modal-backdrop"
+          className="fixed inset-0 z-50 flex items-center justify-center bg-black/80 p-4 backdrop-blur-sm"
+        >
+          <div
+            id="gemini-key-modal"
+            role="dialog"
+            aria-modal="true"
+            aria-labelledby="gemini-key-modal-title"
+            className="w-full max-w-lg rounded-2xl border border-neutral-800 bg-neutral-900 p-6 shadow-2xl"
+          >
+            <div className="flex items-start justify-between gap-4 border-b border-neutral-800 pb-4">
+              <div className="flex items-center gap-3">
+                <div className="flex h-10 w-10 items-center justify-center rounded-xl bg-amber-500/10 border border-amber-500/20 text-amber-400">
+                  <Key className="h-5 w-5" />
+                </div>
+                <div>
+                  <h3 id="gemini-key-modal-title" className="text-base font-bold text-neutral-100">
+                    Gemini API Key Configuration
+                  </h3>
+                  <p className="text-xs text-neutral-400">
+                    Connect Google Gemini for live multimodal vision & streaming chat
+                  </p>
+                </div>
+              </div>
+              <button
+                type="button"
+                id="close-key-modal-btn"
+                onClick={() => setIsKeyModalOpen(false)}
+                className="rounded-lg p-1.5 text-neutral-400 hover:bg-neutral-800 hover:text-white transition-colors"
+                title="Close"
+              >
+                <X className="h-5 w-5" />
+              </button>
+            </div>
+
+            {/* Current Status Pill */}
+            <div className="mt-4 flex items-center justify-between rounded-xl bg-neutral-950 p-3 border border-neutral-800 text-xs">
+              <span className="text-neutral-400">Current Status:</span>
+              <div className="flex items-center gap-2">
+                <span
+                  className={`h-2 w-2 rounded-full ${
+                    copilotStatus.online ? 'bg-emerald-400 animate-ping' : 'bg-amber-400'
+                  }`}
+                />
+                <span className={`font-mono font-medium ${copilotStatus.online ? 'text-emerald-400' : 'text-amber-400'}`}>
+                  {copilotStatus.online ? `Online (${copilotStatus.model})` : `Offline (${copilotStatus.reason || 'NO_API_KEY'})`}
+                </span>
+              </div>
+            </div>
+
+            <p className="mt-3 text-xs text-neutral-300 leading-relaxed">
+              Create an API key at{' '}
+              <a
+                href="https://aistudio.google.com/apikey"
+                target="_blank"
+                rel="noreferrer"
+                className="text-amber-400 hover:underline inline-flex items-center gap-0.5"
+              >
+                aistudio.google.com/apikey
+              </a>
+              . The key is verified with a minimal probe call and held in server memory. It is never logged or exposed in browser bundles.
+            </p>
+
+            {/* Error Message if any */}
+            {keyModalError && (
+              <div
+                id="key-error-message"
+                className="mt-3 flex items-start gap-2.5 rounded-xl border border-red-800/80 bg-red-950/60 p-3 text-xs text-red-200"
+              >
+                <AlertTriangle className="h-4 w-4 text-red-400 shrink-0 mt-0.5" />
+                <div className="flex-1">
+                  <span>{keyModalError}</span>
+                  <button
+                    type="button"
+                    id="retry-key-btn"
+                    onClick={() => handleSaveKey()}
+                    className="ml-2 font-bold underline hover:text-white"
+                  >
+                    Retry
+                  </button>
+                </div>
+              </div>
+            )}
+
+            <form onSubmit={handleSaveKey} className="mt-4 flex flex-col gap-4">
+              <div>
+                <label htmlFor="gemini-api-key-input" className="block text-xs font-semibold text-neutral-300 mb-1.5">
+                  Gemini API Key
+                </label>
+                <div className="relative">
+                  <input
+                    id="gemini-api-key-input"
+                    type={showKeySecret ? 'text' : 'password'}
+                    value={keyInputValue}
+                    onChange={(e) => setKeyInputValue(e.target.value)}
+                    placeholder="AIzaSy..."
+                    autoFocus
+                    className="w-full rounded-xl border border-neutral-700 bg-neutral-950 px-3.5 py-2.5 pr-10 text-xs font-mono text-neutral-100 placeholder-neutral-500 focus:border-amber-500 focus:outline-none focus:ring-1 focus:ring-amber-500"
+                  />
+                  <button
+                    type="button"
+                    onClick={() => setShowKeySecret(!showKeySecret)}
+                    className="absolute right-3 top-2.5 text-neutral-400 hover:text-neutral-200"
+                    title={showKeySecret ? 'Hide Key' : 'Show Key'}
+                  >
+                    {showKeySecret ? <EyeOff className="h-4 w-4" /> : <Eye className="h-4 w-4" />}
+                  </button>
+                </div>
+              </div>
+
+              <div className="flex items-center gap-2">
+                <input
+                  type="checkbox"
+                  id="remember-key-checkbox"
+                  checked={rememberKey}
+                  onChange={(e) => setRememberKey(e.target.checked)}
+                  className="h-4 w-4 rounded border-neutral-700 bg-neutral-950 text-amber-500 focus:ring-amber-500"
+                />
+                <label htmlFor="remember-key-checkbox" className="text-xs text-neutral-400 select-none cursor-pointer">
+                  Remember on this machine (saves locally to gitignored <code className="text-neutral-300">gateway/.env.local</code>)
+                </label>
+              </div>
+
+              <div className="mt-2 flex items-center justify-between border-t border-neutral-800 pt-4">
+                {copilotStatus.online ? (
+                  <button
+                    type="button"
+                    id="remove-gemini-key-btn"
+                    onClick={handleRemoveKey}
+                    disabled={keyModalLoading}
+                    className="flex items-center gap-1.5 rounded-xl border border-red-900/60 bg-red-950/40 px-3 py-2 text-xs font-medium text-red-400 hover:bg-red-900/40 hover:text-red-300 transition-colors disabled:opacity-50"
+                  >
+                    <Trash2 className="h-3.5 w-3.5" />
+                    <span>Remove Key</span>
+                  </button>
+                ) : (
+                  <span />
+                )}
+
+                <div className="flex items-center gap-2.5">
+                  <button
+                    type="button"
+                    onClick={() => setIsKeyModalOpen(false)}
+                    className="rounded-xl border border-neutral-700 bg-neutral-800 px-4 py-2 text-xs font-semibold text-neutral-300 hover:bg-neutral-700 transition-colors"
+                  >
+                    Cancel
+                  </button>
+                  <button
+                    type="submit"
+                    id="save-gemini-key-btn"
+                    disabled={keyModalLoading || !keyInputValue.trim()}
+                    className="flex items-center gap-2 rounded-xl bg-amber-500 px-4 py-2 text-xs font-semibold text-neutral-950 hover:bg-amber-400 transition-colors shadow-md disabled:opacity-50 disabled:cursor-not-allowed"
+                  >
+                    {keyModalLoading ? (
+                      <>
+                        <RefreshCw className="h-3.5 w-3.5 animate-spin" />
+                        <span>Verifying...</span>
+                      </>
+                    ) : (
+                      <>
+                        <CheckCircle2 className="h-3.5 w-3.5" />
+                        <span>Save & Connect</span>
+                      </>
+                    )}
+                  </button>
+                </div>
+              </div>
+            </form>
+          </div>
+        </div>
+      )}
     </div>
   );
 };

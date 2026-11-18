@@ -68,6 +68,10 @@ export interface ANPRResult {
   plateCropDataUrl?: string;
   vehicleCropDataUrl?: string;
   isDistanceGated?: boolean;
+  attempts?: number;
+  charConfidences?: number[];
+  scaleUsed?: string;
+  bestGuessPlate?: string;
   processedAt: number;
 }
 

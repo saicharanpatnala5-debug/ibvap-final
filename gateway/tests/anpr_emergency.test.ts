@@ -44,7 +44,7 @@ describe('ANPR Emergency Fix & Dual-Confirmation Logic', () => {
 
     // Case 1: No local OCR agreement (edit distance > 1) and no matching second frame
     const distantLocalOcr = 'MH99ZZ9999';
-    const secondFrame = 'DL04XX1111';
+    const secondFrame: string = 'DL04XX1111';
     const matchesSecond = secondFrame === aiText;
     const matchesLocal = levenshteinDistance(distantLocalOcr, aiText) <= 1;
     const isConfirmed = matchesSecond || matchesLocal;

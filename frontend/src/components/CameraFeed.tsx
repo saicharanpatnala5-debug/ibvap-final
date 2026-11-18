@@ -65,6 +65,12 @@ interface CameraFeedProps {
     plate: string;
     confidence: number;
     cropUrl?: string;
+    vehicleThumbnailUrl?: string;
+    charConfidences?: number[];
+    scaleUsed?: string;
+    attempts?: number;
+    isAiAssisted?: boolean;
+    bestGuessPlate?: string;
     cameraId: string;
     cameraName?: string;
     videoTime: number;

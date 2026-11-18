@@ -49,7 +49,7 @@ export const AlertsPanel: React.FC<AlertsPanelProps> = ({
   const handleVerifyWithAI = async (alert: AlertIncident) => {
     const crop = alert.entityCropUrl || alert.snapshotUrl;
     if (!crop) {
-      alert("No visual evidence snapshot available to verify.");
+      window.alert("No visual evidence snapshot available to verify.");
       return;
     }
     const confirmed = window.confirm(

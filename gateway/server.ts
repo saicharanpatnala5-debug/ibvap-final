@@ -12,41 +12,90 @@ import dotenv from 'dotenv';
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
 
-// Load environment variables prioritizing gateway/.env then root .env fallback
+// In-memory API key held after in-app entry
+export let inMemoryApiKey: string | null = null;
+
+export function getEffectiveGeminiKey(): string | null {
+  if (inMemoryApiKey && inMemoryApiKey.length > 5) {
+    return inMemoryApiKey;
+  }
+  const envKey = process.env.GEMINI_API_KEY?.trim().replace(/^["']|["']$/g, '');
+  return (envKey && envKey.length > 5) ? envKey : null;
+}
+
+// Load environment variables prioritizing gateway/.env.local, gateway/.env, then root .env, then process.env
 export function loadEnvironmentVariables(): boolean {
-  const gatewayEnvCandidates = [
+  const localCandidates = [
+    path.resolve(__dirname, '.env.local'),
+    path.resolve(process.cwd(), 'gateway/.env.local'),
+  ];
+  const gatewayCandidates = [
     path.resolve(__dirname, '.env'),
     path.resolve(process.cwd(), 'gateway/.env'),
   ];
-  for (const envPath of gatewayEnvCandidates) {
-    if (fs.existsSync(envPath)) {
-      dotenv.config({ path: envPath, override: true });
-      break;
-    }
-  }
+  const rootCandidates = [
+    path.resolve(__dirname, '../.env'),
+    path.resolve(process.cwd(), '.env'),
+  ];
 
-  const currentKey = process.env.GEMINI_API_KEY?.trim().replace(/^["']|["']$/g, '');
-  if (!currentKey) {
-    const rootEnvCandidates = [
-      path.resolve(__dirname, '../.env'),
-      path.resolve(process.cwd(), '.env'),
-    ];
-    for (const envPath of rootEnvCandidates) {
-      if (fs.existsSync(envPath)) {
-        dotenv.config({ path: envPath, override: false });
-        break;
+  let resolvedApiKey: string | null = null;
+  let resolvedModel: string | null = null;
+
+  function tryReadFile(filePath: string) {
+    if (fs.existsSync(filePath)) {
+      try {
+        const raw = fs.readFileSync(filePath, 'utf-8');
+        const parsed = dotenv.parse(raw);
+        for (const [k, v] of Object.entries(parsed)) {
+          if (process.env[k] === undefined || process.env[k] === '') {
+            process.env[k] = v;
+          }
+        }
+        if (!resolvedApiKey && parsed.GEMINI_API_KEY) {
+          const clean = parsed.GEMINI_API_KEY.trim().replace(/^["']|["']$/g, '');
+          if (clean.length > 5) {
+            resolvedApiKey = clean;
+          }
+        }
+        if (!resolvedModel && parsed.GEMINI_MODEL) {
+          const clean = parsed.GEMINI_MODEL.trim().replace(/^["']|["']$/g, '');
+          if (clean.length > 0) {
+            resolvedModel = clean;
+          }
+        }
+      } catch (err) {
+        console.warn(`[IBVAP Gateway] Notice reading ${filePath}:`, err);
       }
     }
   }
 
-  if (process.env.GEMINI_API_KEY) {
-    process.env.GEMINI_API_KEY = process.env.GEMINI_API_KEY.trim().replace(/^["']|["']$/g, '');
+  // 1. gateway/.env.local
+  for (const p of localCandidates) tryReadFile(p);
+  // 2. gateway/.env
+  for (const p of gatewayCandidates) tryReadFile(p);
+  // 3. root .env
+  for (const p of rootCandidates) tryReadFile(p);
+
+  // 4. process.env fallback
+  if (!resolvedApiKey && process.env.GEMINI_API_KEY) {
+    const clean = process.env.GEMINI_API_KEY.trim().replace(/^["']|["']$/g, '');
+    if (clean.length > 5) resolvedApiKey = clean;
   }
-  if (process.env.GEMINI_MODEL) {
-    process.env.GEMINI_MODEL = process.env.GEMINI_MODEL.trim().replace(/^["']|["']$/g, '');
+  if (!resolvedModel && process.env.GEMINI_MODEL) {
+    const clean = process.env.GEMINI_MODEL.trim().replace(/^["']|["']$/g, '');
+    if (clean.length > 0) resolvedModel = clean;
   }
 
-  const hasKey = Boolean(process.env.GEMINI_API_KEY && process.env.GEMINI_API_KEY.length > 5);
+  if (resolvedApiKey) {
+    process.env.GEMINI_API_KEY = resolvedApiKey;
+  } else {
+    delete process.env.GEMINI_API_KEY;
+  }
+  if (resolvedModel) {
+    process.env.GEMINI_MODEL = resolvedModel;
+  }
+
+  const hasKey = Boolean(getEffectiveGeminiKey());
   console.log(`[IBVAP Gateway] Gemini key loaded: ${hasKey ? 'yes' : 'no'}`);
   return hasKey;
 }
@@ -127,11 +176,12 @@ export let geminiReachable = false;
 export let geminiLastErrorCode: string | null = null;
 let geminiClient: GoogleGenAI | null = null;
 
-export async function verifyAndSelectGeminiModel(): Promise<void> {
-  const apiKey = process.env.GEMINI_API_KEY?.trim().replace(/^["']|["']$/g, '');
+export async function verifyAndSelectGeminiModel(overrideKey?: string): Promise<void> {
+  const apiKey = (overrideKey || getEffectiveGeminiKey())?.trim().replace(/^["']|["']$/g, '');
   if (!apiKey) {
     geminiReachable = false;
     geminiLastErrorCode = 'NO_API_KEY';
+    geminiClient = null;
     console.log('[IBVAP Gateway] No GEMINI_API_KEY configured. AI Copilot operates in grounded heuristic fallback mode.');
     return;
   }
@@ -139,6 +189,7 @@ export async function verifyAndSelectGeminiModel(): Promise<void> {
   try {
     const client = new GoogleGenAI({ apiKey });
     geminiClient = client;
+    (geminiClient as any)._apiKey = apiKey;
 
     // Build ordered candidates: explicit env config first if set, then preferred list
     const candidateList: string[] = [];
@@ -253,10 +304,11 @@ const aiAccessControl: express.RequestHandler = (req, res, next) => {
 };
 
 function getGeminiClient(): GoogleGenAI | null {
-  const apiKey = process.env.GEMINI_API_KEY?.trim();
+  const apiKey = getEffectiveGeminiKey();
   if (!apiKey) return null;
-  if (!geminiClient) {
+  if (!geminiClient || (geminiClient as any)._apiKey !== apiKey) {
     geminiClient = new GoogleGenAI({ apiKey });
+    (geminiClient as any)._apiKey = apiKey;
   }
   return geminiClient;
 }
@@ -798,7 +850,7 @@ app.get('/api/health', async (_req, res) => {
   res.json({
     status: 'ok',
     gateway: 'online',
-    hasGeminiKey: !!process.env.GEMINI_API_KEY?.trim(),
+    hasGeminiKey: !!getEffectiveGeminiKey(),
     geminiReachable,
     model: activeGeminiModel,
     lastErrorCode: geminiLastErrorCode,
@@ -899,6 +951,140 @@ app.all('/api/vision/*', async (req, res) => {
       timestamp: Date.now(),
     });
   }
+});
+
+// Rate limiting for key setup: max 10 attempts per 10 minutes from localhost
+const keySetupRateLimiter = rateLimit({
+  windowMs: 10 * 60 * 1000,
+  max: 10,
+  message: {
+    success: false,
+    error: 'RATE_LIMIT',
+    message: 'Too many key setup attempts. Please wait a few minutes.',
+  },
+});
+
+// POST /api/ai/set-key - In-app Gemini API key registration & verification
+app.post('/api/ai/set-key', keySetupRateLimiter, async (req, res) => {
+  const ip = req.ip || req.socket.remoteAddress || '';
+  const isLocal =
+    ip.includes('127.0.0.1') ||
+    ip === '::1' ||
+    ip.includes('::ffff:127.0.0.1') ||
+    req.hostname === 'localhost';
+
+  if (!isLocal) {
+    return res.status(403).json({
+      success: false,
+      error: 'FORBIDDEN',
+      message: 'In-app key setup is restricted to localhost.',
+    });
+  }
+
+  const { apiKey, remember } = req.body || {};
+  const cleanKey = typeof apiKey === 'string' ? apiKey.trim().replace(/^["']|["']$/g, '') : '';
+  if (!cleanKey || cleanKey.length < 8) {
+    return res.status(400).json({
+      success: false,
+      error: 'INVALID_KEY',
+      message: 'Invalid key: Gemini API key must be at least 8 characters.',
+    });
+  }
+
+  console.log(`[IBVAP Gateway] Received in-app Gemini key update (remember=${Boolean(remember)}). Validating...`);
+
+  try {
+    const testClient = new GoogleGenAI({ apiKey: cleanKey });
+    // Minimal 1-token test probe
+    const probe = await testClient.models.generateContent({
+      model: activeGeminiModel || 'gemini-3.8-flash',
+      contents: 'ping',
+      config: { maxOutputTokens: 1 },
+    });
+
+    if (!probe) {
+      throw new Error('PROBE_EMPTY');
+    }
+
+    inMemoryApiKey = cleanKey;
+    process.env.GEMINI_API_KEY = cleanKey;
+    geminiClient = testClient;
+    (geminiClient as any)._apiKey = cleanKey;
+
+    await verifyAndSelectGeminiModel(cleanKey);
+
+    if (remember) {
+      try {
+        const localEnvFile = path.resolve(__dirname, '.env.local');
+        fs.writeFileSync(localEnvFile, `GEMINI_API_KEY=${cleanKey}\n`, { mode: 0o600 });
+        console.log(`[IBVAP Gateway] Gemini key written to ${localEnvFile} (mode 0600)`);
+      } catch (err: any) {
+        console.warn('[IBVAP Gateway] Could not write .env.local:', err.message);
+      }
+    }
+
+    return res.json({
+      success: true,
+      model: activeGeminiModel,
+      message: 'Gemini API key successfully verified and connected.',
+    });
+  } catch (err: any) {
+    const errMsg = err?.message || String(err);
+    const errStatus = err?.status || err?.code;
+    console.warn('[IBVAP Gateway] In-app key validation failed:', errMsg);
+
+    let friendlyError = 'The provided API key could not authenticate with Google Gemini.';
+    if (errMsg.includes('API_KEY_INVALID') || errMsg.includes('400') || errMsg.includes('INVALID_ARGUMENT')) {
+      friendlyError = 'Invalid API key. Please check your key at aistudio.google.com/apikey.';
+    } else if (errMsg.includes('429') || errMsg.includes('RESOURCE_EXHAUSTED')) {
+      friendlyError = 'API quota exceeded. Please check your rate limits or try a different key.';
+    } else if (errMsg.includes('FETCH_ERROR') || errMsg.includes('ENOTFOUND') || errMsg.includes('ETIMEDOUT') || errMsg.includes('ECONNREFUSED')) {
+      friendlyError = 'Network error reaching Google Gemini API. Please check your internet connection.';
+    }
+
+    return res.status(400).json({
+      success: false,
+      error: errStatus || 'INVALID_KEY',
+      message: friendlyError,
+    });
+  }
+});
+
+// POST /api/ai/remove-key - Disconnect and remove active key
+app.post('/api/ai/remove-key', async (req, res) => {
+  const ip = req.ip || req.socket.remoteAddress || '';
+  const isLocal =
+    ip.includes('127.0.0.1') ||
+    ip === '::1' ||
+    ip.includes('::ffff:127.0.0.1') ||
+    req.hostname === 'localhost';
+
+  if (!isLocal) {
+    return res.status(403).json({ success: false, error: 'FORBIDDEN' });
+  }
+
+  inMemoryApiKey = null;
+  delete process.env.GEMINI_API_KEY;
+  geminiClient = null;
+
+  const localCandidates = [
+    path.resolve(__dirname, '.env.local'),
+    path.resolve(process.cwd(), 'gateway/.env.local'),
+  ];
+  for (const p of localCandidates) {
+    if (fs.existsSync(p)) {
+      try {
+        fs.unlinkSync(p);
+        console.log(`[IBVAP Gateway] Removed ${p}`);
+      } catch {}
+    }
+  }
+
+  await verifyAndSelectGeminiModel();
+  return res.json({
+    success: true,
+    message: 'Gemini API key removed. Switched to offline mode.',
+  });
 });
 
 // POST /api/ai/chat - Conversational interactive surveillance assistant
