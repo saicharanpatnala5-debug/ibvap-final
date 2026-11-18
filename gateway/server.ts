@@ -1784,9 +1784,11 @@ Return structured JSON:
       });
     } catch (err: any) {
       console.error('[IBVAP /api/anpr/ai-read] Error calling Gemini:', err);
-      return res.status(500).json({
-        error: 'Failed to read plate with AI model.',
+      const is429 = err?.status === 429 || String(err).includes('429') || String(err).toLowerCase().includes('rate');
+      return res.status(is429 ? 429 : 500).json({
+        error: is429 ? 'Rate limit reached from Gemini API' : 'Failed to read plate with AI model.',
         details: err?.message || String(err),
+        retryAfter: is429 ? 2000 : undefined,
         isValidFormat: false,
       });
     }

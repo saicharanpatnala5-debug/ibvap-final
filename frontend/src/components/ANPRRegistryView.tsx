@@ -99,6 +99,16 @@ export const ANPRRegistryView: React.FC<ANPRRegistryViewProps> = ({
     return () => { isMounted = false; };
   }, []);
 
+  // Check for first-time consent prompt when online
+  React.useEffect(() => {
+    try {
+      const consent = localStorage.getItem('ibvap_cloud_anpr_enabled');
+      if (consent === null && isGeminiOnline) {
+        setShowCloudPrivacyModal(true);
+      }
+    } catch {}
+  }, [isGeminiOnline]);
+
   // Handle setting toggle click: require privacy confirmation dialog to turn ON
   const handleToggleCloudAnpr = () => {
     if (!isGeminiOnline) return;
@@ -117,6 +127,14 @@ export const ANPRRegistryView: React.FC<ANPRRegistryViewProps> = ({
     setShowCloudPrivacyModal(false);
     try {
       localStorage.setItem('ibvap_cloud_anpr_enabled', 'true');
+    } catch {}
+  };
+
+  const denyCloudAnpr = () => {
+    setCloudAnprEnabled(false);
+    setShowCloudPrivacyModal(false);
+    try {
+      localStorage.setItem('ibvap_cloud_anpr_enabled', 'false');
     } catch {}
   };
 
@@ -159,29 +177,40 @@ export const ANPRRegistryView: React.FC<ANPRRegistryViewProps> = ({
         total: Math.min(15, prev.total + 1),
       }));
 
-      fetch('/api/anpr/ai-read', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({
-          cropBase64: crop,
-          track_id: rec.trackId,
-          local_ocr_text: rec.plateNumber,
-        }),
-      })
-        .then((res) => (res.ok ? res.json() : null))
-        .then((data) => {
-          if (data && onUpgradeRecordWithAi) {
-            onUpgradeRecordWithAi(rec.id, data);
+      const sendWithBackoff = async (attempt = 1) => {
+        try {
+          const res = await fetch('/api/anpr/ai-read', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({
+              cropBase64: crop,
+              track_id: rec.trackId,
+              local_ocr_text: rec.plateNumber,
+            }),
+          });
+          if (res.status === 429 && attempt <= 2) {
+            // Exponential backoff retry on rate limit
+            await new Promise((r) => setTimeout(r, 1500 * attempt));
+            return sendWithBackoff(attempt + 1);
           }
-        })
-        .catch(() => {})
-        .finally(() => {
+          if (res.ok) {
+            const data = await res.json();
+            if (data && onUpgradeRecordWithAi) {
+              onUpgradeRecordWithAi(rec.id, data);
+            }
+          }
+        } catch {
+          // ignore network hiccups
+        } finally {
           activeCloudCallsRef.current = Math.max(0, activeCloudCallsRef.current - 1);
           setCloudReadingCount((prev) => ({
             ...prev,
-            current: prev.current + 1,
+            current: Math.min(prev.total, prev.current + 1),
           }));
-        });
+        }
+      };
+
+      sendWithBackoff();
     }
   }, [records, cloudAnprEnabled, isGeminiOnline, onUpgradeRecordWithAi]);
 
@@ -429,23 +458,27 @@ export const ANPRRegistryView: React.FC<ANPRRegistryViewProps> = ({
             <div>
               <div className="flex items-center gap-2">
                 <span className="text-xs font-semibold text-neutral-200">
-                  Cloud-assisted plate reading (sends vehicle/plate crops to Gemini)
+                  Cloud-assisted plate reading (Gemini Vision)
                 </span>
-                <span className="rounded bg-neutral-800 border border-neutral-700 px-1.5 py-0.2 text-[9px] font-bold text-neutral-400">
-                  DEFAULT OFF
+                <span className={`rounded border px-1.5 py-0.2 text-[9px] font-bold ${
+                  cloudAnprEnabled ? 'bg-cyan-950 border-cyan-700 text-cyan-300' : 'bg-neutral-800 border-neutral-700 text-neutral-400'
+                }`}>
+                  {cloudAnprEnabled ? 'ON' : 'OFF'}
                 </span>
               </div>
               <p className="text-[11px] text-neutral-400 mt-0.5">
                 {!isGeminiOnline
-                  ? `Disabled: Gemini API is offline (${geminiOfflineReason || 'no API key configured'}).`
+                  ? `Local OCR active: Cloud ANPR unavailable (${geminiOfflineReason || 'no API key configured'}).`
+                  : !cloudAnprEnabled
+                  ? 'Local OCR active (Cloud-assisted reading disabled by operator).'
                   : 'Automatically enhances unvalidated or low-confidence reads via server-side Gemini Vision.'}
               </p>
             </div>
           </div>
 
           <div className="flex items-center gap-3 self-end sm:self-center">
-            {cloudAnprEnabled && cloudReadingCount.total > 0 && (
-              <span className="text-[11px] font-mono text-cyan-400 bg-cyan-950/80 border border-cyan-800 px-2.5 py-1 rounded-md animate-pulse">
+            {cloudAnprEnabled && cloudReadingCount.total > 0 && cloudReadingCount.current < cloudReadingCount.total && (
+              <span id="cloud-anpr-progress" className="text-[11px] font-mono text-cyan-400 bg-cyan-950/80 border border-cyan-800 px-2.5 py-1 rounded-md animate-pulse">
                 Reading plates {cloudReadingCount.current}/{cloudReadingCount.total}
               </span>
             )}
@@ -1065,7 +1098,7 @@ export const ANPRRegistryView: React.FC<ANPRRegistryViewProps> = ({
 
       {/* Cloud-Assisted Plate Reading Privacy Confirmation Dialog */}
       {showCloudPrivacyModal && (
-        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/80 p-4 backdrop-blur-sm">
+        <div id="cloud-anpr-consent-modal" data-testid="cloud-anpr-consent-modal" className="fixed inset-0 z-50 flex items-center justify-center bg-black/80 p-4 backdrop-blur-sm">
           <div className="max-w-md w-full rounded-2xl border border-neutral-700 bg-neutral-900 p-6 shadow-2xl">
             <div className="flex items-start gap-3">
               <div className="p-2.5 rounded-xl bg-cyan-500/10 border border-cyan-500/30 text-cyan-400">
@@ -1076,7 +1109,7 @@ export const ANPRRegistryView: React.FC<ANPRRegistryViewProps> = ({
                   Enable Cloud-Assisted Plate Reading?
                 </h3>
                 <p className="mt-2 text-xs leading-relaxed text-neutral-300">
-                  <strong>Privacy Notice:</strong> Enabling cloud-assisted plate reading will send isolated vehicle and license plate crops to Google Gemini API for optical character recognition.
+                  <strong>Privacy Notice:</strong> Enabling cloud-assisted plate reading will ensure vehicle and license plate crops are sent to Google's Gemini API for text recognition.
                 </p>
                 <div className="mt-3 rounded-lg bg-neutral-950 p-3 border border-neutral-800 text-[11px] space-y-1 text-neutral-400">
                   <p>• Only isolated vehicle/plate bounding box crops leave your local machine.</p>
@@ -1090,10 +1123,10 @@ export const ANPRRegistryView: React.FC<ANPRRegistryViewProps> = ({
               <button
                 type="button"
                 id="cancel-cloud-anpr-modal-btn"
-                onClick={() => setShowCloudPrivacyModal(false)}
+                onClick={denyCloudAnpr}
                 className="rounded-lg border border-neutral-700 bg-neutral-800 px-4 py-2 text-xs font-semibold text-neutral-300 hover:bg-neutral-700 transition-colors"
               >
-                Cancel
+                Deny / Cancel
               </button>
               <button
                 type="button"
