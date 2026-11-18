@@ -118,6 +118,7 @@ export const CameraFeed: React.FC<CameraFeedProps> = ({
   const isDetectingRef = useRef<boolean>(false);
   const lastDetectionTimeRef = useRef<number>(0);
   const trackLastAnprTimeRef = useRef<Record<number, number>>({});
+  const inFlightAnprTracksRef = useRef<Set<number>>(new Set());
 
   // VMS Quality & Overlay State
   const [qualityMode, setQualityMode] = useState<'fast' | 'balanced' | 'high'>('fast');
@@ -643,101 +644,109 @@ export const CameraFeed: React.FC<CameraFeedProps> = ({
         ].some((v) => rawClass.includes(v));
 
         const hasConfirmedValidPlate = Boolean(track.anpr?.isValidFormat);
+        const isAlreadyInFlight = inFlightAnprTracksRef.current.has(track.id);
+        const isGlobalLimitReached = inFlightAnprTracksRef.current.size >= 2;
         const lastAttempt = trackLastAnprTimeRef.current[track.id] || 0;
-        const canAttemptAnpr = !hasConfirmedValidPlate && (nowMs - lastAttempt > 500);
+        const canAttemptAnpr = !hasConfirmedValidPlate && !isAlreadyInFlight && !isGlobalLimitReached && (nowMs - lastAttempt > 1200);
 
         if (isVehicle && canAttemptAnpr) {
           trackLastAnprTimeRef.current[track.id] = nowMs;
-          extractAndReadLicensePlate(video, track.bbox, track.id).then((anprResult) => {
-            track.anpr = anprResult;
-            const bestCrop = anprResult.plateCropDataUrl || anprResult.cropDataUrl;
-            const vehThumbnail = anprResult.vehicleCropDataUrl || anprResult.cropDataUrl;
-            const bestGuess = anprResult.plateText || (anprResult.formatType === 'distance_gated' ? 'Plate not legible at this distance' : 'Plate not detected / obscured');
+          inFlightAnprTracksRef.current.add(track.id);
+          extractAndReadLicensePlate(video, track.bbox, track.id)
+            .then((anprResult) => {
+              inFlightAnprTracksRef.current.delete(track.id);
+              track.anpr = anprResult;
+              const bestCrop = anprResult.plateCropDataUrl || anprResult.cropDataUrl;
+              const vehThumbnail = anprResult.vehicleCropDataUrl || anprResult.cropDataUrl;
+              const bestGuess = anprResult.plateText || (anprResult.formatType === 'distance_gated' ? 'Plate not legible at this distance' : 'Plate not detected / obscured');
 
-            if (anprResult.isValidFormat || (anprResult.isReadable && anprResult.plateText && anprResult.plateText.length >= 4)) {
-              setLatestReadPlate({
-                plate: anprResult.plateText,
-                confidence: anprResult.confidence,
-                cropUrl: bestCrop,
-                timestamp: Date.now(),
-                isValidFormat: anprResult.isValidFormat,
-                formatType: anprResult.formatType,
-                validationStatus: anprResult.validationStatus,
-              });
-              if (onPlateDetected) {
-                onPlateDetected({
+              if (anprResult.isValidFormat || (anprResult.isReadable && anprResult.plateText && anprResult.plateText.length >= 4)) {
+                setLatestReadPlate({
                   plate: anprResult.plateText,
                   confidence: anprResult.confidence,
                   cropUrl: bestCrop,
-                  vehicleThumbnailUrl: vehThumbnail,
-                  cameraId: camera.id,
-                  cameraName: camera.name,
-                  videoTime: video.currentTime,
-                  trackId: track.id,
-                  objectClass: track.class,
+                  timestamp: Date.now(),
+                  isValidFormat: anprResult.isValidFormat,
                   formatType: anprResult.formatType,
                   validationStatus: anprResult.validationStatus,
-                  charConfidences: anprResult.charConfidences,
-                  scaleUsed: anprResult.scaleUsed,
-                  attempts: anprResult.attempts || 1,
-                  bestGuessPlate: bestGuess,
-                  isDualRow: anprResult.isDualRow,
-                  stateCode: anprResult.stateCode,
-                  stateName: anprResult.stateName,
-                  rtoCode: anprResult.rtoCode,
-                  rtoOffice: anprResult.rtoOffice,
-                  ocrModel: anprResult.ocrModel,
                 });
+                if (onPlateDetected) {
+                  onPlateDetected({
+                    plate: anprResult.plateText,
+                    confidence: anprResult.confidence,
+                    cropUrl: bestCrop,
+                    vehicleThumbnailUrl: vehThumbnail,
+                    cameraId: camera.id,
+                    cameraName: camera.name,
+                    videoTime: video.currentTime,
+                    trackId: track.id,
+                    objectClass: track.class,
+                    formatType: anprResult.formatType,
+                    validationStatus: anprResult.validationStatus,
+                    charConfidences: anprResult.charConfidences,
+                    scaleUsed: anprResult.scaleUsed,
+                    attempts: anprResult.attempts || 1,
+                    bestGuessPlate: bestGuess,
+                    isDualRow: anprResult.isDualRow,
+                    stateCode: anprResult.stateCode,
+                    stateName: anprResult.stateName,
+                    rtoCode: anprResult.rtoCode,
+                    rtoOffice: anprResult.rtoOffice,
+                    ocrModel: anprResult.ocrModel,
+                  });
+                }
+                if (anprResult.isValidFormat && !autoOpenedPlatesRef.current.has(anprResult.plateText)) {
+                  autoOpenedPlatesRef.current.add(anprResult.plateText);
+                  onSelectPlate(anprResult.plateText, bestCrop);
+                }
+              } else if (anprResult.formatType === 'distance_gated') {
+                if (onPlateDetected && !autoOpenedPlatesRef.current.has(`dist-${track.id}`)) {
+                  autoOpenedPlatesRef.current.add(`dist-${track.id}`);
+                  onPlateDetected({
+                    plate: bestGuess,
+                    confidence: anprResult.confidence,
+                    cropUrl: bestCrop,
+                    vehicleThumbnailUrl: vehThumbnail,
+                    cameraId: camera.id,
+                    cameraName: camera.name,
+                    videoTime: video.currentTime,
+                    trackId: track.id,
+                    objectClass: track.class,
+                    formatType: 'distance_gated',
+                    validationStatus: 'Plate not legible at this distance',
+                    charConfidences: anprResult.charConfidences,
+                    scaleUsed: anprResult.scaleUsed,
+                    attempts: anprResult.attempts || 1,
+                    bestGuessPlate: bestGuess,
+                  });
+                }
+              } else {
+                // Unlocalized or obscured vehicle
+                if (onPlateDetected && !autoOpenedPlatesRef.current.has(`unloc-${track.id}`)) {
+                  autoOpenedPlatesRef.current.add(`unloc-${track.id}`);
+                  onPlateDetected({
+                    plate: bestGuess,
+                    confidence: anprResult.confidence,
+                    cropUrl: bestCrop,
+                    vehicleThumbnailUrl: vehThumbnail,
+                    cameraId: camera.id,
+                    cameraName: camera.name,
+                    videoTime: video.currentTime,
+                    trackId: track.id,
+                    objectClass: track.class,
+                    formatType: anprResult.formatType || 'invalid',
+                    validationStatus: anprResult.validationStatus || 'Plate not detected / obscured',
+                    charConfidences: anprResult.charConfidences,
+                    scaleUsed: anprResult.scaleUsed,
+                    attempts: anprResult.attempts || 1,
+                    bestGuessPlate: bestGuess,
+                  });
+                }
               }
-              if (anprResult.isValidFormat && !autoOpenedPlatesRef.current.has(anprResult.plateText)) {
-                autoOpenedPlatesRef.current.add(anprResult.plateText);
-                onSelectPlate(anprResult.plateText, bestCrop);
-              }
-            } else if (anprResult.formatType === 'distance_gated') {
-              if (onPlateDetected && !autoOpenedPlatesRef.current.has(`dist-${track.id}`)) {
-                autoOpenedPlatesRef.current.add(`dist-${track.id}`);
-                onPlateDetected({
-                  plate: bestGuess,
-                  confidence: anprResult.confidence,
-                  cropUrl: bestCrop,
-                  vehicleThumbnailUrl: vehThumbnail,
-                  cameraId: camera.id,
-                  cameraName: camera.name,
-                  videoTime: video.currentTime,
-                  trackId: track.id,
-                  objectClass: track.class,
-                  formatType: 'distance_gated',
-                  validationStatus: 'Plate not legible at this distance',
-                  charConfidences: anprResult.charConfidences,
-                  scaleUsed: anprResult.scaleUsed,
-                  attempts: anprResult.attempts || 1,
-                  bestGuessPlate: bestGuess,
-                });
-              }
-            } else {
-              // Unlocalized or obscured vehicle
-              if (onPlateDetected && !autoOpenedPlatesRef.current.has(`unloc-${track.id}`)) {
-                autoOpenedPlatesRef.current.add(`unloc-${track.id}`);
-                onPlateDetected({
-                  plate: bestGuess,
-                  confidence: anprResult.confidence,
-                  cropUrl: bestCrop,
-                  vehicleThumbnailUrl: vehThumbnail,
-                  cameraId: camera.id,
-                  cameraName: camera.name,
-                  videoTime: video.currentTime,
-                  trackId: track.id,
-                  objectClass: track.class,
-                  formatType: anprResult.formatType || 'invalid',
-                  validationStatus: anprResult.validationStatus || 'Plate not detected / obscured',
-                  charConfidences: anprResult.charConfidences,
-                  scaleUsed: anprResult.scaleUsed,
-                  attempts: anprResult.attempts || 1,
-                  bestGuessPlate: bestGuess,
-                });
-              }
-            }
-          });
+            })
+            .catch(() => {
+              inFlightAnprTracksRef.current.delete(track.id);
+            });
         }
       }
 
@@ -1773,10 +1782,10 @@ export const CameraFeed: React.FC<CameraFeedProps> = ({
                       const isPerson = obj.class === 'person' || obj.class === 'pedestrian';
                       const label = isPerson ? 'person' : 'vehicle';
                       onAskAI(
-                        `What is ${label} #${obj.id} (${obj.class}) doing in the scene?`,
+                        `What is Track #${obj.id} (${label}) doing?`,
                         {
                           type: 'crop',
-                          url: cropUrl || obj.anpr?.cropDataUrl || '',
+                          url: cropUrl || obj.anpr?.cropDataUrl || 'data:image/jpeg;base64,placeholder',
                           trackId: obj.id,
                           objectClass: obj.class,
                         }

@@ -463,9 +463,9 @@ Ask me anything or pick a quick command to begin:`,
       // Target crop if operator asked about a specific vehicle/person
       let attachedCrop: string | undefined = undefined;
       let attachedTrackId: number | string | undefined = undefined;
-      if (currentAttachment?.url) {
-        attachedCrop = currentAttachment.url;
-        attachedTrackId = currentAttachment.trackId;
+      if (currentAttachment) {
+        if (currentAttachment.url) attachedCrop = currentAttachment.url;
+        if (currentAttachment.trackId !== undefined) attachedTrackId = currentAttachment.trackId;
       }
 
       // 2. Prepare conversation history for natural multi-turn context (last 10 turns)
@@ -900,10 +900,10 @@ Ask me anything or pick a quick command to begin:`,
                 : copilotStatus.state === 'starting_up'
                 ? 'Starting Up...'
                 : copilotStatus.state === 'invalid_key'
-                ? 'Invalid API Key'
+                ? 'Offline mode: Invalid API Key'
                 : copilotStatus.state === 'gemini_error'
-                ? 'Gemini Error'
-                : 'No API Key'}
+                ? 'Offline mode: Gemini Error'
+                : 'Offline mode: No API Key'}
             </span>
             <Key className="h-3 w-3 opacity-60 ml-0.5" />
           </button>

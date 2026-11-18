@@ -48,7 +48,7 @@ export interface StreamCallbacks {
 
 // Model defaults per provider
 export const DEFAULT_MODELS: Record<LLMProviderType, string> = {
-  gemini: 'gemini-3.8-flash',
+  gemini: 'gemini-2.5-flash',
   openai_compatible: 'gpt-4o',
   anthropic: 'claude-3-5-sonnet-20241022',
 };
@@ -389,6 +389,7 @@ async function streamOpenAICompatible(
       model: config.model,
       messages,
       temperature: options.temperature ?? 0.3,
+      max_tokens: options.maxTokens ?? 1024,
       stream: true,
     }),
     signal: AbortSignal.timeout(timeoutMs),

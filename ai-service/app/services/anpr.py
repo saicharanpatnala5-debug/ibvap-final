@@ -578,65 +578,78 @@ class FastALPREngine:
 
         if self._alpr is not None:
             try:
-                # Build multi-scale search candidates:
-                scales = []
-                # 1. Native crop
-                scales.append(("native", vehicle_crop_bgr))
+                # 1. Primary pass: Run ALPR on native vehicle crop
+                results_native = self._alpr.predict(vehicle_crop_bgr)
+                if results_native and len(results_native) > 0:
+                    for det in results_native:
+                        det_conf = float(det.detection.confidence)
+                        bx = det.detection.bounding_box
+                        dx1, dy1, dx2, dy2 = int(bx.x1), int(bx.y1), int(bx.x2), int(bx.y2)
+                        pw = dx2 - dx1
+                        ph = dy2 - dy1
+                        if pw < 15 or ph < 6:
+                            continue
+                        ar = float(pw) / float(max(1, ph))
+                        is_good_ar = (1.2 <= ar <= 5.8)
+                        area = float(pw * ph)
+                        size_factor = min(2.2, max(0.45, (area / 1200.0) ** 0.5))
+                        score = det_conf * (1.25 if is_good_ar else 0.70) * size_factor * 1.15
+                        if score > best_cand_score:
+                            best_cand_score = score
+                            best_cand = {
+                                "det": det,
+                                "scale_name": "native",
+                                "img": vehicle_crop_bgr,
+                                "box": (dx1, dy1, dx2, dy2),
+                                "pw": pw,
+                                "ph": ph,
+                            }
 
-                # 2. 2x Cubic Upscaled crop
-                scales.append(("upscaled_2x", cv2.resize(vehicle_crop_bgr, (vw * 2, vh * 2), interpolation=cv2.INTER_CUBIC)))
+                # 2. Secondary multi-scale passes: ONLY if no confident plate detected on native crop
+                if best_cand is None or best_cand_score < 0.60:
+                    scales = []
+                    # Lower 50% vehicle region (most likely location for plates)
+                    y_lower = int(vh * 0.40)
+                    lower_crop = vehicle_crop_bgr[y_lower:, :]
+                    if lower_crop.shape[0] >= 15 and lower_crop.shape[1] >= 30:
+                        if lower_crop.shape[0] < 120:
+                            lower_crop_up = cv2.resize(lower_crop, (lower_crop.shape[1] * 2, lower_crop.shape[0] * 2), interpolation=cv2.INTER_CUBIC)
+                            scales.append(("lower_50", lower_crop_up))
+                        else:
+                            scales.append(("lower_50", lower_crop))
 
-                # 3. Lower 50% vehicle region (most likely location for plates)
-                y_lower = int(vh * 0.40)
-                lower_crop = vehicle_crop_bgr[y_lower:, :]
-                if lower_crop.shape[0] >= 15 and lower_crop.shape[1] >= 30:
-                    if lower_crop.shape[0] < 120:
-                        lower_crop_up = cv2.resize(lower_crop, (lower_crop.shape[1] * 2, lower_crop.shape[0] * 2), interpolation=cv2.INTER_CUBIC)
-                        scales.append(("lower_50", lower_crop_up))
-                    else:
-                        scales.append(("lower_50", lower_crop))
+                    # 2x Cubic Upscaled crop (for distant or small vehicle crops)
+                    if vw < 300:
+                        scales.append(("upscaled_2x", cv2.resize(vehicle_crop_bgr, (vw * 2, vh * 2), interpolation=cv2.INTER_CUBIC)))
 
-                # 4. Wide vehicle tile splits (if vehicle is wide)
-                if vw > 250:
-                    tile_l = vehicle_crop_bgr[int(vh * 0.4):, :int(vw * 0.6)]
-                    tile_r = vehicle_crop_bgr[int(vh * 0.4):, int(vw * 0.4):]
-                    if tile_l.size > 0:
-                        scales.append(("tile_left", tile_l))
-                    if tile_r.size > 0:
-                        scales.append(("tile_right", tile_r))
-
-                # Run detector across candidates and find best plate bounding box
-                for scale_name, scale_img in scales:
-                    results = self._alpr.predict(scale_img)
-                    if results and len(results) > 0:
-                        for det in results:
-                            det_conf = float(det.detection.confidence)
-                            bx = det.detection.bounding_box
-                            dx1, dy1, dx2, dy2 = int(bx.x1), int(bx.y1), int(bx.x2), int(bx.y2)
-                            pw = dx2 - dx1
-                            ph = dy2 - dy1
-                            if pw < 15 or ph < 6:
-                                continue
-                            ar = float(pw) / float(max(1, ph))
-                            # Accept both single-row (2.0 to 5.5) and dual-row (1.2 to 2.1) aspect ratios
-                            is_good_ar = (1.2 <= ar <= 5.8)
-                            area = float(pw * ph)
-                            # Normalize upscaled area for fair comparison across scales
-                            norm_area = area / 4.0 if scale_name == "upscaled_2x" else area
-                            # Size factor: heavily favor larger, higher-resolution plates over microscopic background specks
-                            size_factor = min(2.2, max(0.45, (norm_area / 1200.0) ** 0.5))
-                            scale_pref = 1.15 if scale_name in ["native", "lower_50", "upscaled_2x"] else 0.80
-                            score = det_conf * (1.25 if is_good_ar else 0.70) * size_factor * scale_pref
-                            if score > best_cand_score:
-                                best_cand_score = score
-                                best_cand = {
-                                    "det": det,
-                                    "scale_name": scale_name,
-                                    "img": scale_img,
-                                    "box": (dx1, dy1, dx2, dy2),
-                                    "pw": pw,
-                                    "ph": ph,
-                                }
+                    for scale_name, scale_img in scales:
+                        results = self._alpr.predict(scale_img)
+                        if results and len(results) > 0:
+                            for det in results:
+                                det_conf = float(det.detection.confidence)
+                                bx = det.detection.bounding_box
+                                dx1, dy1, dx2, dy2 = int(bx.x1), int(bx.y1), int(bx.x2), int(bx.y2)
+                                pw = dx2 - dx1
+                                ph = dy2 - dy1
+                                if pw < 15 or ph < 6:
+                                    continue
+                                ar = float(pw) / float(max(1, ph))
+                                is_good_ar = (1.2 <= ar <= 5.8)
+                                area = float(pw * ph)
+                                norm_area = area / 4.0 if scale_name == "upscaled_2x" else area
+                                size_factor = min(2.2, max(0.45, (norm_area / 1200.0) ** 0.5))
+                                scale_pref = 1.15 if scale_name in ["native", "lower_50", "upscaled_2x"] else 0.80
+                                score = det_conf * (1.25 if is_good_ar else 0.70) * size_factor * scale_pref
+                                if score > best_cand_score:
+                                    best_cand_score = score
+                                    best_cand = {
+                                        "det": det,
+                                        "scale_name": scale_name,
+                                        "img": scale_img,
+                                        "box": (dx1, dy1, dx2, dy2),
+                                        "pw": pw,
+                                        "ph": ph,
+                                    }
             except Exception as err:
                 print(f"[FastALPREngine] Multi-scale prediction error: {err}")
 

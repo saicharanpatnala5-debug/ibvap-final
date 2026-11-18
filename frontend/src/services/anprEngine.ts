@@ -466,7 +466,7 @@ export async function extractAndReadLicensePlate(
         min_w: Math.max(35, Math.round(vW * 0.035)),
         min_h: Math.max(15, Math.round(vH * 0.02)),
       }),
-      signal: AbortSignal.timeout(3500),
+      signal: AbortSignal.timeout(8000),
     });
 
     if (res.ok) {

@@ -27,6 +27,7 @@ from app.models.schemas import (
 )
 import base64
 import time
+import asyncio
 import cv2
 import numpy as np
 from app.services.detector import SurveillanceDetector
@@ -353,7 +354,7 @@ async def anpr_read_crop(request: Request):
         raise HTTPException(status_code=400, detail="Could not decode image.")
 
     engine = FastALPREngine.get_instance()
-    res = engine.process_vehicle_crop(crop_bgr, min_veh_w=min_w, min_veh_h=min_h)
+    res = await asyncio.to_thread(engine.process_vehicle_crop, crop_bgr, min_w, min_h)
 
     return {
         "status": "ok",
@@ -486,7 +487,7 @@ async def anpr_detect_image(request: Request):
     from app.services.anpr import detect_image_plates
     t0 = time.time()
     detector = get_shared_detector()
-    plate_items = detect_image_plates(img_bgr, detector=detector)
+    plate_items = await asyncio.to_thread(detect_image_plates, img_bgr, detector=detector)
     elapsed_ms = round((time.time() - t0) * 1000, 1)
 
     return {

@@ -30,7 +30,7 @@ export let inMemoryApiKey: string | null = null;
 
 // Multi-provider configuration state
 export let activeProvider: LLMProviderType = 'gemini';
-export let activeLLMModel: string = 'gemini-3.8-flash';
+export let activeLLMModel: string = 'gemini-2.5-flash';
 export let activeBaseUrl: string | undefined = undefined;
 export let llmReachable = false;
 export let llmLastErrorCode: string | null = null;
@@ -134,16 +134,28 @@ export function getFailoverChain(): LLMConfig[] {
       });
     }
 
-    // Backup 3: Anthropic if not primary and key exists
-    const anthropicKey = cleanKey(process.env.ANTHROPIC_API_KEY);
+    // Backup 3: Anthropic or OpenRouter if not primary and key exists
+    const anthropicKey = cleanKey(process.env.ANTHROPIC_API_KEY) || cleanKey(process.env.OPENROUTER_API_KEY);
     if (anthropicKey && primary?.provider !== 'anthropic') {
-      list.push({
-        provider: 'anthropic',
-        apiKey: anthropicKey,
-        baseUrl: DEFAULT_BASE_URLS.anthropic,
-        model: cleanKey(process.env.ANTHROPIC_MODEL) || DEFAULT_MODELS.anthropic,
-        supportsVision: modelSupportsVision('anthropic', cleanKey(process.env.ANTHROPIC_MODEL) || DEFAULT_MODELS.anthropic),
-      });
+      const baseUrl = cleanKey(process.env.ANTHROPIC_BASE_URL) || cleanKey(process.env.OPENROUTER_BASE_URL) || DEFAULT_BASE_URLS.anthropic;
+      if (anthropicKey.startsWith('sk-or-v1') || baseUrl.includes('openrouter.ai')) {
+        const orBaseUrl = baseUrl.includes('/v1') ? baseUrl : `${baseUrl.replace(/\/+$/, '')}/v1`;
+        list.push({
+          provider: 'openai_compatible',
+          apiKey: anthropicKey,
+          baseUrl: orBaseUrl,
+          model: cleanKey(process.env.ANTHROPIC_MODEL) || 'anthropic/claude-haiku-4.5',
+          supportsVision: true,
+        });
+      } else {
+        list.push({
+          provider: 'anthropic',
+          apiKey: anthropicKey,
+          baseUrl: baseUrl,
+          model: cleanKey(process.env.ANTHROPIC_MODEL) || DEFAULT_MODELS.anthropic,
+          supportsVision: modelSupportsVision('anthropic', cleanKey(process.env.ANTHROPIC_MODEL) || DEFAULT_MODELS.anthropic),
+        });
+      }
     }
   }
 
@@ -314,12 +326,12 @@ const aiRateLimiter = rateLimit({
   },
 });
 
-// Gemini model preferences in priority order (gemini-2.5-flash is being retired)
+// Gemini model preferences in priority order (official stable & flash models)
 export const PREFERRED_GEMINI_MODELS = [
-  'gemini-3.8-flash',
-  'gemini-3.5-flash',
-  'gemini-3.5-flash-lite',
+  'gemini-2.5-flash',
   'gemini-2.5-flash-lite',
+  'gemini-2.0-flash',
+  'gemini-1.5-flash',
 ];
 
 export let activeGeminiModel: string = process.env.GEMINI_MODEL?.trim() || PREFERRED_GEMINI_MODELS[0];
@@ -512,7 +524,7 @@ export const chatRequestSchema = z
     history: z
       .array(
         z.object({
-          sender: z.enum(['user', 'ai']),
+          sender: z.enum(['user', 'ai', 'assistant', 'model', 'system']),
           text: z.string().max(2000, 'History text cannot exceed 2000 characters'),
         })
       )
@@ -1077,11 +1089,11 @@ export function generateGroundedFallbackResponse(
 // -------------------------------------------------------------
 
 app.get('/api/health', async (_req, res) => {
-  // Query downstream microservices concurrently with fast non-blocking timeouts (800ms)
+  // Query downstream microservices concurrently with fast non-blocking timeouts (2000ms)
   const [aiResult, coreResult, awirosResult] = await Promise.allSettled([
-    fetch(`${AI_SERVICE_URL}/health`, { signal: AbortSignal.timeout(800) }).then((r) => r.ok ? r.json() : { status: 'offline', details: `HTTP ${r.status}` }),
-    fetch(`${CORE_SERVICE_URL}/api/health`, { signal: AbortSignal.timeout(800) }).then((r) => r.ok ? r.json() : { status: 'offline', details: `HTTP ${r.status}` }),
-    fetch(`${AWIROS_SERVICE_URL}/health`, { signal: AbortSignal.timeout(800) }).then((r) => r.ok ? r.json() : { status: 'offline', details: `HTTP ${r.status}` }),
+    fetch(`${AI_SERVICE_URL}/health`, { signal: AbortSignal.timeout(2000) }).then((r) => r.ok ? r.json() : { status: 'offline', details: `HTTP ${r.status}` }),
+    fetch(`${CORE_SERVICE_URL}/api/health`, { signal: AbortSignal.timeout(2000) }).then((r) => r.ok ? r.json() : { status: 'offline', details: `HTTP ${r.status}` }),
+    fetch(`${AWIROS_SERVICE_URL}/health`, { signal: AbortSignal.timeout(2000) }).then((r) => r.ok ? r.json() : { status: 'offline', details: `HTTP ${r.status}` }),
   ]);
 
   const aiHealth = aiResult.status === 'fulfilled' ? aiResult.value : { status: 'offline', details: (aiResult as PromiseRejectedResult).reason?.message || 'unreachable' };
@@ -1450,57 +1462,82 @@ ${compactTelemetry}`;
         const provConfig = failoverList[i];
         try {
           if (isStreamRequested) {
-            res.setHeader('Content-Type', 'text/event-stream');
-            res.setHeader('Cache-Control', 'no-cache');
-            res.setHeader('Connection', 'keep-alive');
-            if (typeof (res as any).flushHeaders === 'function') {
-              (res as any).flushHeaders();
+            let chunksSent = 0;
+            try {
+              await executeUnifiedStreamChat(provConfig, chatOptions, {
+                onChunk: (chunkText) => {
+                  if (!res.headersSent) {
+                    res.setHeader('Content-Type', 'text/event-stream');
+                    res.setHeader('Cache-Control', 'no-cache');
+                    res.setHeader('Connection', 'keep-alive');
+                    if (typeof (res as any).flushHeaders === 'function') {
+                      (res as any).flushHeaders();
+                    }
+                  }
+                  chunksSent++;
+                  if (!res.writableEnded) {
+                    res.write(`data: ${JSON.stringify({ text: chunkText })}\n\n`);
+                  }
+                },
+                onDone: (doneMeta) => {
+                  if (!res.headersSent) {
+                    res.setHeader('Content-Type', 'text/event-stream');
+                    res.setHeader('Cache-Control', 'no-cache');
+                    res.setHeader('Connection', 'keep-alive');
+                  }
+                  if (!res.writableEnded) {
+                    res.write(
+                      `data: ${JSON.stringify({
+                        done: true,
+                        model: doneMeta.model,
+                        provider: doneMeta.provider,
+                        source: doneMeta.source,
+                        visionUsed: doneMeta.visionUsed,
+                      })}\n\n`
+                    );
+                    res.end();
+                  }
+                },
+                onError: (err) => {
+                  console.warn(`[IBVAP /api/ai/chat] Streaming error on provider ${provConfig.provider}:`, err.message);
+                  if (chunksSent === 0 && i < failoverList.length - 1) {
+                    return; // Try next fallback provider
+                  }
+                  if (!res.headersSent) {
+                    res.setHeader('Content-Type', 'text/event-stream');
+                    res.setHeader('Cache-Control', 'no-cache');
+                    res.setHeader('Connection', 'keep-alive');
+                  }
+                  if (!res.writableEnded) {
+                    const fallbackText = computeOfflineTrackerFallback(enrichedContext);
+                    res.write(`data: ${JSON.stringify({ text: fallbackText, done: true, source: 'fallback', reason: err.message })}\n\n`);
+                    res.end();
+                  }
+                },
+              });
+            } catch (streamErr: any) {
+              console.warn(`[IBVAP /api/ai/chat] Stream call failed for ${provConfig.provider}:`, streamErr?.message || streamErr);
             }
 
-            let chunksSent = 0;
-            await executeUnifiedStreamChat(provConfig, chatOptions, {
-              onChunk: (chunkText) => {
-                chunksSent++;
-                res.write(`data: ${JSON.stringify({ text: chunkText })}\n\n`);
-              },
-              onDone: (doneMeta) => {
-                res.write(
-                  `data: ${JSON.stringify({
-                    done: true,
-                    model: doneMeta.model,
-                    provider: doneMeta.provider,
-                    source: doneMeta.source,
-                    visionUsed: doneMeta.visionUsed,
-                  })}\n\n`
-                );
-                res.end();
-              },
-              onError: (err) => {
-                console.warn(`[IBVAP /api/ai/chat] Streaming error on provider ${provConfig.provider}:`, err.message);
-                if (chunksSent === 0 && i < failoverList.length - 1) {
-                  return;
-                }
-                const fallbackText = computeOfflineTrackerFallback(enrichedContext);
-                res.write(`data: ${JSON.stringify({ text: fallbackText, done: true, source: 'fallback', reason: err.message })}\n\n`);
-                res.end();
-              },
-            });
-            return;
-          }
-
-          const result = await executeUnifiedChat(provConfig, chatOptions);
-          if (result && result.text) {
-            return res.json({
-              text: result.text,
-              source: result.source,
-              provider: result.provider,
-              model: result.model,
-              visionUsed: result.visionUsed,
-              timestamp: Date.now(),
-            });
+            if (res.writableEnded || chunksSent > 0) {
+              return;
+            }
+          } else {
+            const result = await executeUnifiedChat(provConfig, chatOptions);
+            if (result && result.text) {
+              return res.json({
+                text: result.text,
+                source: result.source,
+                provider: result.provider,
+                model: result.model,
+                visionUsed: result.visionUsed,
+                timestamp: Date.now(),
+              });
+            }
           }
         } catch (provErr: any) {
           console.warn(`[IBVAP /api/ai/chat] Provider ${provConfig.provider} failed:`, provErr?.message || provErr);
+          if (res.writableEnded) return;
         }
       }
     }
@@ -1508,22 +1545,29 @@ ${compactTelemetry}`;
     // Offline (no key or all providers failed): minimal honest tracker-only fallback
     const fallbackText = computeOfflineTrackerFallback(enrichedContext);
     if (isStreamRequested) {
-      res.setHeader('Content-Type', 'text/event-stream');
-      res.setHeader('Cache-Control', 'no-cache');
-      res.setHeader('Connection', 'keep-alive');
-      if (typeof (res as any).flushHeaders === 'function') {
-        (res as any).flushHeaders();
+      if (!res.headersSent) {
+        res.setHeader('Content-Type', 'text/event-stream');
+        res.setHeader('Cache-Control', 'no-cache');
+        res.setHeader('Connection', 'keep-alive');
+        if (typeof (res as any).flushHeaders === 'function') {
+          (res as any).flushHeaders();
+        }
       }
-      res.write(`data: ${JSON.stringify({ text: fallbackText, done: true, source: 'fallback', reason: llmLastErrorCode || geminiLastErrorCode || 'NO_API_KEY' })}\n\n`);
-      return res.end();
+      if (!res.writableEnded) {
+        res.write(`data: ${JSON.stringify({ text: fallbackText, done: true, source: 'fallback', reason: llmLastErrorCode || geminiLastErrorCode || 'NO_API_KEY' })}\n\n`);
+        res.end();
+      }
+      return;
     }
 
-    return res.json({
-      text: fallbackText,
-      source: 'fallback',
-      reason: llmLastErrorCode || geminiLastErrorCode || 'NO_API_KEY',
-      timestamp: Date.now(),
-    });
+    if (!res.headersSent && !res.writableEnded) {
+      return res.json({
+        text: fallbackText,
+        source: 'fallback',
+        reason: llmLastErrorCode || geminiLastErrorCode || 'NO_API_KEY',
+        timestamp: Date.now(),
+      });
+    }
   }
 );
 

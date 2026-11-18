@@ -103,6 +103,8 @@ function checkToolchain() {
 const { pythonCmd, javaCmd, jdkHome } = checkToolchain();
 const childProcesses = [];
 
+let isShuttingDown = false;
+
 function startProcess(name, cmd, args, cwd, env = {}) {
   const isNpm = cmd === 'npm' || cmd === 'npm.cmd';
   const isCmdOrBat = typeof cmd === 'string' && (cmd.endsWith('.cmd') || cmd.endsWith('.bat'));
@@ -131,6 +133,14 @@ function startProcess(name, cmd, args, cwd, env = {}) {
 
   p.on('exit', (code) => {
     console.log(`[${name}] exited with code ${code}`);
+    if (code !== 0 && !isShuttingDown) {
+      console.log(`[Launcher] Auto-restarting crashed service ${name} in 1.5s...`);
+      setTimeout(() => {
+        if (!isShuttingDown) {
+          startProcess(name, cmd, args, cwd, env);
+        }
+      }, 1500);
+    }
   });
 
   childProcesses.push(p);
@@ -237,6 +247,7 @@ waitForAllServicesReady();
 
 // Teardown handler
 function cleanup() {
+  isShuttingDown = true;
   console.log('\nTerminating all services gracefully...');
   for (const p of childProcesses) {
     try {
