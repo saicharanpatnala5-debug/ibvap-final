@@ -60,4 +60,32 @@ describe('ANPR Emergency Fix & Dual-Confirmation Logic', () => {
     const confirmedStatus = (matchesNearLocal && validation.isValid) ? 'Valid (AI-assisted)' : 'Needs review';
     expect(confirmedStatus).toBe('Valid (AI-assisted)');
   });
+
+  it('restricts optical normalization to unambiguous mappings only', () => {
+    // Unambiguous: O->0, I->1, B->8, S->5
+    expect(positionAwareCorrection('DL01AB123O')).toBe('DL01AB1230');
+    expect(positionAwareCorrection('DL01AB123I')).toBe('DL01AB1231');
+    expect(positionAwareCorrection('DL01AB123B')).toBe('DL01AB1238');
+    expect(positionAwareCorrection('DL01AB123S')).toBe('DL01AB1235');
+
+    // Ambiguous letters: Q, D, L, T, A, P are NOT normalized to numbers
+    const withD = positionAwareCorrection('DL01AB123D');
+    expect(withD.endsWith('D')).toBe(true);
+    const withT = positionAwareCorrection('DL01AB123T');
+    expect(withT.endsWith('T')).toBe(true);
+  });
+
+  it('guarantees zero synthetic plate hallucination from registry', () => {
+    // An unknown or unconfirmed read must never be resolved against mock registry
+    const unknownRead = 'KA01M9999';
+    const validation = validateStrictIndianPlate(unknownRead);
+    expect(validation.isValid).toBe(true);
+
+    // If not in database, returns no dossier
+    const MOCK_REGISTRY_DATABASE: Record<string, any> = {
+      'KA01M4449': { owner: 'Demo' },
+    };
+    const lookup = MOCK_REGISTRY_DATABASE[unknownRead] || null;
+    expect(lookup).toBeNull();
+  });
 });

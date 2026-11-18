@@ -22,16 +22,15 @@ VALID_STATE_CODES = {
     "UK", "UP", "WB"
 }
 
-# OCR character ambiguity maps
+# OCR character ambiguity maps (strictly unambiguous optical mappings)
 DIGIT_TO_LETTER = {
-    '0': 'O', '1': 'I', '2': 'Z', '3': 'E', '4': 'A',
-    '5': 'S', '6': 'G', '8': 'B', '9': 'P'
+    '0': 'O', '1': 'I', '2': 'Z',
+    '5': 'S', '8': 'B'
 }
 
 LETTER_TO_DIGIT = {
-    'O': '0', 'D': '0', 'Q': '0', 'I': '1', 'L': '1',
-    'Z': '2', 'E': '3', 'A': '4', 'S': '5', 'G': '6',
-    'T': '7', 'B': '8', 'P': '9'
+    'O': '0', 'I': '1', 'Z': '2',
+    'S': '5', 'B': '8'
 }
 
 

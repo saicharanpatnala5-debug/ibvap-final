@@ -102,11 +102,7 @@ export function correctCharToLetter(char: string): string {
 export function correctCharToDigit(char: string): string {
   const map: Record<string, string> = {
     'O': '0',
-    'Q': '0',
-    'D': '0',
     'I': '1',
-    'L': '1',
-    'T': '1',
     'Z': '2',
     'S': '5',
     'B': '8',

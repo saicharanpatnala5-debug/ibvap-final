@@ -884,11 +884,13 @@ export const ANPRRegistryView: React.FC<ANPRRegistryViewProps> = ({
                     {/* Operator Quick Actions: Confirm Read, AI Read, Manual Correction */}
                     <div className="mt-4 pt-4 border-t border-neutral-800/80 flex flex-col gap-3">
                       <div className="flex flex-wrap items-center justify-center gap-2">
-                        {activeRecord.plateNumber && activeRecord.plateNumber !== 'UNREADABLE' && activeRecord.plateNumber !== 'UNRESOLVED' && onCorrectPlate && (
+                        {(activeRecord.bestGuessPlate || activeRecord.plateNumber) &&
+                          (activeRecord.bestGuessPlate !== 'UNREADABLE' && activeRecord.bestGuessPlate !== 'UNRESOLVED' && activeRecord.bestGuessPlate !== 'Distant Target' && activeRecord.bestGuessPlate !== 'Plate not detected') &&
+                          onCorrectPlate && !activeRecord.isValidFormat && (
                           <button
                             type="button"
                             id="confirm-plate-read-btn"
-                            onClick={() => onCorrectPlate(activeRecord.id, activeRecord.plateNumber)}
+                            onClick={() => onCorrectPlate(activeRecord.id, activeRecord.bestGuessPlate || activeRecord.plateNumber)}
                             className="inline-flex items-center gap-1.5 rounded-lg bg-emerald-600 hover:bg-emerald-500 px-3 py-1.5 text-xs font-semibold text-white shadow-sm transition-colors"
                             title="Confirm candidate read as verified"
                           >
