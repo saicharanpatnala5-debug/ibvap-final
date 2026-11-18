@@ -521,6 +521,35 @@ export default function App() {
     setEventLog(updatedLog);
   };
 
+  // Upgrade record with AI-assisted plate read
+  const handleUpgradeRecordWithAi = (recordId: string, aiData: any) => {
+    const rawText = (aiData.plateText || '').trim().toUpperCase();
+    const cleanPlate = rawText.replace(/[^A-Z0-9]/g, '');
+    const isConfirmed = Boolean(aiData.isConfirmed);
+    const isValid = Boolean(aiData.isValidFormat);
+    const status: PlateStatus = isConfirmed ? 'Valid format' : 'Low confidence - needs review';
+    const dossier = isConfirmed && isValid ? lookupVehicleDossier(cleanPlate) : null;
+
+    setPlateRecords((prev) =>
+      prev.map((rec) => {
+        if (rec.id !== recordId) return rec;
+        return {
+          ...rec,
+          plateNumber: cleanPlate && cleanPlate !== 'UNREADABLE' ? cleanPlate : rec.plateNumber,
+          bestGuessPlate: cleanPlate && cleanPlate !== 'UNREADABLE' ? cleanPlate : rec.bestGuessPlate,
+          status,
+          formatValidationStatus: isConfirmed ? 'Valid (AI-assisted)' : 'Needs review',
+          isValidFormat: isConfirmed && isValid,
+          formatType: aiData.formatType || rec.formatType,
+          confidence: Math.max(rec.confidence, aiData.confidence || 0),
+          isAiAssisted: true,
+          attempts: (rec.attempts || 1) + 1,
+          dossier,
+        };
+      })
+    );
+  };
+
   // Count unacknowledged active alerts
   const activeAlertCount = alerts.filter((a) => a.status === 'active').length;
 
@@ -578,6 +607,7 @@ export default function App() {
               onLoadDemoData={handleLoadDemoData}
               onClearAllData={handleClearAllData}
               onCorrectPlate={handleCorrectPlate}
+              onUpgradeRecordWithAi={handleUpgradeRecordWithAi}
               onOpenAddCamera={() => setIsAddCameraOpen(true)}
             />
           </div>

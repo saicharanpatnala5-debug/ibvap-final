@@ -1161,6 +1161,151 @@ Structure your answer into:
   }
 );
 
+// Helper: Levenshtein distance for optical OCR edit distance verification
+export function levenshteinDistance(a: string, b: string): number {
+  const al = a.length;
+  const bl = b.length;
+  if (!al) return bl;
+  if (!bl) return al;
+  const dp: number[][] = Array.from({ length: al + 1 }, () => Array(bl + 1).fill(0));
+  for (let i = 0; i <= al; i++) dp[i][0] = i;
+  for (let j = 0; j <= bl; j++) dp[0][j] = j;
+  for (let i = 1; i <= al; i++) {
+    for (let j = 1; j <= bl; j++) {
+      const cost = a[i - 1] === b[j - 1] ? 0 : 1;
+      dp[i][j] = Math.min(
+        dp[i - 1][j] + 1,
+        dp[i][j - 1] + 1,
+        dp[i - 1][j - 1] + cost
+      );
+    }
+  }
+  return dp[al][bl];
+}
+
+const VALID_INDIAN_STATES = new Set([
+  'AN', 'AP', 'AR', 'AS', 'BR', 'CG', 'CH', 'DD', 'DL', 'DN', 'DNH', 'GA',
+  'GJ', 'HP', 'HR', 'JH', 'JK', 'KA', 'KL', 'LA', 'LD', 'MH', 'ML', 'MN',
+  'MP', 'MZ', 'NL', 'OD', 'PB', 'PY', 'RJ', 'SK', 'TN', 'TR', 'TS', 'TG',
+  'UK', 'UP', 'WB',
+]);
+
+const DIGIT_TO_LETTER: Record<string, string> = {
+  '0': 'O', '1': 'I', '2': 'Z', '3': 'E', '4': 'A',
+  '5': 'S', '6': 'G', '8': 'B', '9': 'P',
+};
+
+const LETTER_TO_DIGIT: Record<string, string> = {
+  'O': '0', 'D': '0', 'Q': '0', 'I': '1', 'L': '1',
+  'Z': '2', 'E': '3', 'A': '4', 'S': '5', 'G': '6',
+  'T': '7', 'B': '8', 'P': '9',
+};
+
+export function positionAwareCorrection(candidate: string): string {
+  const text = candidate.trim().toUpperCase().replace(/[^A-Z0-9]/g, '');
+  if (text.length < 8 || text.length > 11) return text;
+  const chars = text.split('');
+  const n = chars.length;
+
+  // Bharat series: YY BH NNNN LL (length 9 or 10)
+  if (n >= 9 && ['BH', '8H', 'BI', 'B1', '0H'].includes(chars.slice(2, 4).join(''))) {
+    chars[0] = LETTER_TO_DIGIT[chars[0]] || chars[0];
+    chars[1] = LETTER_TO_DIGIT[chars[1]] || chars[1];
+    chars[2] = 'B';
+    chars[3] = 'H';
+    for (let i = 4; i < Math.min(8, n); i++) chars[i] = LETTER_TO_DIGIT[chars[i]] || chars[i];
+    for (let i = 8; i < n; i++) chars[i] = DIGIT_TO_LETTER[chars[i]] || chars[i];
+    const corr = chars.join('');
+    if (/^[0-9]{2}BH[0-9]{4}[A-Z]{1,2}$/.test(corr)) return corr;
+  }
+
+  // Standard Indian Series: State (2 letters) + RTO (1-2 digits) + Series (1-3 letters) + Number (4 digits)
+  // 1. State Prefix: Positions 0 and 1 MUST be letters
+  chars[0] = DIGIT_TO_LETTER[chars[0]] || chars[0];
+  chars[1] = DIGIT_TO_LETTER[chars[1]] || chars[1];
+
+  // 2. Vehicle Number: Last 4 characters MUST be digits
+  for (let i = Math.max(2, n - 4); i < n; i++) {
+    chars[i] = LETTER_TO_DIGIT[chars[i]] || chars[i];
+  }
+
+  // 3. Middle section: RTO digits then Series letters
+  if (n === 10) {
+    // SS DD LL NNNN: unambiguous slots
+    chars[2] = LETTER_TO_DIGIT[chars[2]] || chars[2];
+    chars[3] = LETTER_TO_DIGIT[chars[3]] || chars[3];
+    chars[4] = DIGIT_TO_LETTER[chars[4]] || chars[4];
+    chars[5] = DIGIT_TO_LETTER[chars[5]] || chars[5];
+  } else if (n === 9) {
+    // Slot 2 is always RTO digit; Slot 4 is always Series letter
+    chars[2] = LETTER_TO_DIGIT[chars[2]] || chars[2];
+    chars[4] = DIGIT_TO_LETTER[chars[4]] || chars[4];
+    // Slot 3 is ambiguous; do not swap
+  } else if (n === 11) {
+    chars[2] = LETTER_TO_DIGIT[chars[2]] || chars[2];
+    chars[3] = LETTER_TO_DIGIT[chars[3]] || chars[3];
+    chars[4] = DIGIT_TO_LETTER[chars[4]] || chars[4];
+    chars[5] = DIGIT_TO_LETTER[chars[5]] || chars[5];
+    chars[6] = DIGIT_TO_LETTER[chars[6]] || chars[6];
+  }
+
+  return chars.join('');
+}
+
+export function validateStrictIndianPlate(plateText: string): {
+  isValid: boolean;
+  formatType: 'standard' | 'bharat' | 'invalid';
+} {
+  if (!plateText || plateText.length < 8 || plateText.length > 11) {
+    return { isValid: false, formatType: 'invalid' };
+  }
+  if (/^[0-9]{2}BH[0-9]{4}[A-Z]{1,2}$/.test(plateText)) {
+    return { isValid: true, formatType: 'bharat' };
+  }
+  if (/^[A-Z]{2}[0-9]{1,2}[A-Z]{1,3}[0-9]{4}$/.test(plateText)) {
+    const state = plateText.slice(0, 2);
+    if (VALID_INDIAN_STATES.has(state)) {
+      return { isValid: true, formatType: 'standard' };
+    }
+  }
+  return { isValid: false, formatType: 'invalid' };
+}
+
+// Curated mock vehicle database: Only lookup against pre-existing records.
+// Under NO circumstances generate, hallucinate, or mock a registration dossier for an unknown plate.
+const MOCK_REGISTRY_DATABASE: Record<string, any> = {
+  'DL01AB1234': {
+    registeredOwner: 'Simulated Citizen 01 (Test)',
+    vehicleMake: 'Hyundai',
+    vehicleModel: 'Creta SX',
+    registrationStatus: 'Valid',
+  },
+  'MH12AB4029': {
+    registeredOwner: 'Simulated Citizen 02 (Test)',
+    vehicleMake: 'Toyota',
+    vehicleModel: 'Innova Crysta',
+    registrationStatus: 'Valid',
+  },
+  'DL01CZ9876': {
+    registeredOwner: 'Simulated Citizen 03 (Test)',
+    vehicleMake: 'Tata',
+    vehicleModel: 'Nexon EV',
+    registrationStatus: 'Valid',
+  },
+  'UP32EV8812': {
+    registeredOwner: 'Simulated Citizen 04 (Test)',
+    vehicleMake: 'Mahindra',
+    vehicleModel: 'Scorpio-N',
+    registrationStatus: 'Watchlist Flagged',
+  },
+  '22BH1234AB': {
+    registeredOwner: 'Simulated Fleet Logistics (Govt Test)',
+    vehicleMake: 'Volvo',
+    vehicleModel: 'FH16 Heavy Hauler',
+    registrationStatus: 'Valid',
+  },
+};
+
 // POST /api/anpr/ai-read - Assisted optical plate reading using server-side Gemini Vision
 app.post(
   '/api/anpr/ai-read',
@@ -1168,7 +1313,7 @@ app.post(
   aiAccessControl,
   frameJsonParser,
   async (req, res) => {
-    const { cropBase64 } = req.body || {};
+    const { cropBase64, track_id, local_ocr_text, second_frame_text } = req.body || {};
     if (!cropBase64 || typeof cropBase64 !== 'string') {
       return res.status(400).json({ error: 'cropBase64 is required', isValidFormat: false });
     }
@@ -1195,7 +1340,16 @@ app.post(
               },
             },
             {
-              text: 'You are an automated optical reader for Indian vehicle license plates. Extract the registration plate alphanumeric characters from this vehicle/plate crop. Return ONLY the uppercase string without spaces, hyphens, or punctuation (e.g. KA01NW4498 or MH12AB1234). If no license plate is visible or readable, return UNREADABLE.',
+              text: `You are an automated optical reader for Indian vehicle license plates. Extract the registration plate alphanumeric characters from this vehicle/plate crop.
+If the plate cannot be read with confidence, output "unreadable" for plate_text and set legible to false.
+If uncertain about specific characters, mark them with "?" in plate_text (e.g. "KA01?4498") and list them in uncertain_characters.
+Return structured JSON:
+{
+  "plate_text": string,
+  "legible": boolean,
+  "uncertain_characters": string[],
+  "notes": string
+}`,
             },
           ],
         },
@@ -1206,26 +1360,92 @@ app.post(
         contents,
         config: {
           temperature: 0.1,
+          responseMimeType: 'application/json',
         },
       });
 
-      const rawText = (response?.text || '').trim().toUpperCase().replace(/[^A-Z0-9]/g, '');
-      const isUnreadable = !rawText || rawText.includes('UNREADABLE') || rawText.length < 4;
-      const plateText = isUnreadable ? 'UNREADABLE' : rawText;
+      const replyRaw = (response?.text || '').trim();
+      let parsedJson: {
+        plate_text?: string;
+        legible?: boolean;
+        uncertain_characters?: string[];
+        notes?: string;
+      } = {};
 
-      // Strict Indian plate format validation
-      const isStandard = /^[A-Z]{2}[0-9]{1,2}[A-Z]{0,3}[0-9]{4}$/.test(plateText);
-      const isBharat = /^[0-9]{2}BH[0-9]{4}[A-Z]{1,2}$/.test(plateText);
-      const isValidFormat = isStandard || isBharat;
+      try {
+        parsedJson = JSON.parse(replyRaw);
+      } catch {
+        const jsonMatch = replyRaw.match(/\{[\s\S]*\}/);
+        if (jsonMatch) {
+          try {
+            parsedJson = JSON.parse(jsonMatch[0]);
+          } catch {
+            parsedJson = { plate_text: replyRaw, legible: true };
+          }
+        }
+      }
+
+      const extractedRaw = (parsedJson.plate_text || '').trim().toUpperCase();
+      const isLegible = Boolean(parsedJson.legible !== false && !extractedRaw.includes('UNREADABLE') && !extractedRaw.includes('?'));
+      const uncertainChars = Array.isArray(parsedJson.uncertain_characters) ? parsedJson.uncertain_characters : [];
+
+      if (!isLegible || extractedRaw.length < 6) {
+        return res.json({
+          plateText: 'UNREADABLE',
+          legible: false,
+          uncertainCharacters: uncertainChars,
+          isValidFormat: false,
+          formatType: 'invalid',
+          confidence: 0,
+          isConfirmed: false,
+          status: 'Needs review',
+          dossier: null,
+          dossierStatus: 'Plate read - no registry record',
+          source: 'gemini-vision',
+          model: activeGeminiModel,
+        });
+      }
+
+      // Position-aware syntax correction for Indian formats
+      const corrected = positionAwareCorrection(extractedRaw);
+      const validation = validateStrictIndianPlate(corrected);
+
+      // Dual-confirmation acceptance rule:
+      // Valid (AI-assisted) ONLY if:
+      // 1. Strict format valid
+      // 2. AND confirmed by either: a second frame yielding same text, OR edit distance <= 1 with local OCR
+      let isConfirmed = false;
+      const cleanLocal = (local_ocr_text || '').trim().toUpperCase().replace(/[^A-Z0-9]/g, '');
+      const cleanSecond = (second_frame_text || '').trim().toUpperCase().replace(/[^A-Z0-9]/g, '');
+
+      if (validation.isValid) {
+        const matchesSecondFrame = cleanSecond && cleanSecond === corrected;
+        const matchesLocalOcr = cleanLocal && levenshteinDistance(cleanLocal, corrected) <= 1;
+        if (matchesSecondFrame || matchesLocalOcr) {
+          isConfirmed = true;
+        }
+      }
+
+      const finalStatus = isConfirmed ? 'Valid (AI-assisted)' : 'Needs review';
+      const finalIsValid = isConfirmed && validation.isValid;
+
+      // Simulated registry lookup: ONLY return records from mock database
+      const mockDossier = finalIsValid ? MOCK_REGISTRY_DATABASE[corrected] : null;
+      const dossierStatus = mockDossier ? 'Record verified' : 'Plate read - no registry record';
 
       return res.json({
-        plateText,
-        isValidFormat,
-        formatType: isBharat ? 'bharat' : isStandard ? 'standard' : 'invalid',
-        confidence: isValidFormat ? 88 : 55,
+        plateText: corrected,
+        legible: true,
+        uncertainCharacters: uncertainChars,
+        isValidFormat: finalIsValid,
+        formatType: validation.formatType,
+        confidence: isConfirmed ? 92 : 65,
+        isConfirmed,
+        status: finalStatus,
+        dossier: mockDossier || null,
+        dossierStatus,
         source: 'gemini-vision',
         model: activeGeminiModel,
-        status: 'AI-assisted - needs confirmation',
       });
     } catch (err: any) {
       console.error('[IBVAP /api/anpr/ai-read] Error calling Gemini:', err);

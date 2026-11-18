@@ -28,6 +28,7 @@ interface ANPRRegistryViewProps {
   onLoadDemoData?: () => void;
   onClearAllData?: () => void;
   onCorrectPlate?: (recordId: string, newPlate: string) => void;
+  onUpgradeRecordWithAi?: (recordId: string, aiData: any) => void;
   onOpenAddCamera?: () => void;
 }
 
@@ -39,6 +40,7 @@ export const ANPRRegistryView: React.FC<ANPRRegistryViewProps> = ({
   onLoadDemoData,
   onClearAllData,
   onCorrectPlate,
+  onUpgradeRecordWithAi,
   onOpenAddCamera,
 }) => {
   const [searchQuery, setSearchQuery] = useState('');
@@ -49,10 +51,139 @@ export const ANPRRegistryView: React.FC<ANPRRegistryViewProps> = ({
   const [isEditingPlate, setIsEditingPlate] = useState(false);
   const [correctionInput, setCorrectionInput] = useState('');
 
-  // AI-assisted plate reading state
+  // Cloud-assisted plate reading settings & state
+  const [cloudAnprEnabled, setCloudAnprEnabled] = useState<boolean>(() => {
+    try {
+      return localStorage.getItem('ibvap_cloud_anpr_enabled') === 'true';
+    } catch {
+      return false;
+    }
+  });
+  const [showCloudPrivacyModal, setShowCloudPrivacyModal] = useState(false);
+  const [isGeminiOnline, setIsGeminiOnline] = useState(false);
+  const [geminiOfflineReason, setGeminiOfflineReason] = useState<string>('');
+  const [cloudReadingCount, setCloudReadingCount] = useState<{ current: number; total: number }>({ current: 0, total: 0 });
+
+  // Rate limiting & deduplication refs for automatic Cloud ANPR
+  const activeCloudCallsRef = React.useRef(0);
+  const attemptedCloudCallsRef = React.useRef<Record<string, number>>({});
+  const dispatchedCropsRef = React.useRef<Set<string>>(new Set());
+  const totalCloudCallsMadeRef = React.useRef(0);
+
+  // Manual AI-assisted plate reading state
   const [isAiReading, setIsAiReading] = useState(false);
   const [showAiWarning, setShowAiWarning] = useState(false);
   const [aiReadError, setAiReadError] = useState<string | null>(null);
+
+  // Fetch online status from /api/health
+  React.useEffect(() => {
+    let isMounted = true;
+    fetch('/api/health')
+      .then((res) => (res.ok ? res.json() : null))
+      .then((data) => {
+        if (!isMounted || !data) return;
+        if (data.geminiReachable && data.hasGeminiKey) {
+          setIsGeminiOnline(true);
+          setGeminiOfflineReason('');
+        } else {
+          setIsGeminiOnline(false);
+          setGeminiOfflineReason(data.lastErrorCode || (data.hasGeminiKey ? 'Gemini API unreachable' : 'no API key configured'));
+        }
+      })
+      .catch(() => {
+        if (isMounted) {
+          setIsGeminiOnline(false);
+          setGeminiOfflineReason('gateway unreachable');
+        }
+      });
+    return () => { isMounted = false; };
+  }, []);
+
+  // Handle setting toggle click: require privacy confirmation dialog to turn ON
+  const handleToggleCloudAnpr = () => {
+    if (!isGeminiOnline) return;
+    if (!cloudAnprEnabled) {
+      setShowCloudPrivacyModal(true);
+    } else {
+      setCloudAnprEnabled(false);
+      try {
+        localStorage.setItem('ibvap_cloud_anpr_enabled', 'false');
+      } catch {}
+    }
+  };
+
+  const confirmEnableCloudAnpr = () => {
+    setCloudAnprEnabled(true);
+    setShowCloudPrivacyModal(false);
+    try {
+      localStorage.setItem('ibvap_cloud_anpr_enabled', 'true');
+    } catch {}
+  };
+
+  // Automatic Cloud ANPR reading queue when setting is ON
+  React.useEffect(() => {
+    if (!cloudAnprEnabled || !isGeminiOnline || !onUpgradeRecordWithAi) return;
+
+    // Filter unvalidated reads that have not been AI-assisted yet
+    const unvalidated = records.filter(
+      (r) =>
+        !r.isValidFormat &&
+        r.status !== 'Plate not legible at this distance' &&
+        r.formatType !== 'distance_gated' &&
+        !r.isAiAssisted &&
+        (r.cropUrl || r.vehicleThumbnailUrl)
+    );
+
+    if (unvalidated.length === 0) return;
+    if (totalCloudCallsMadeRef.current >= 15) return; // Hard per-clip cap
+
+    for (const rec of unvalidated) {
+      const trackKey = String(rec.trackId || rec.id);
+      const callCount = attemptedCloudCallsRef.current[trackKey] || 0;
+      if (callCount >= 3) continue; // Rate limit: max 3 calls per track
+
+      const crop = rec.cropUrl || rec.vehicleThumbnailUrl;
+      if (!crop) continue;
+      const cropKey = crop.slice(0, 100);
+      if (dispatchedCropsRef.current.has(cropKey)) continue; // Deduplication
+
+      if (activeCloudCallsRef.current >= 2) break; // Concurrency limit 2
+
+      dispatchedCropsRef.current.add(cropKey);
+      attemptedCloudCallsRef.current[trackKey] = callCount + 1;
+      totalCloudCallsMadeRef.current += 1;
+      activeCloudCallsRef.current += 1;
+
+      setCloudReadingCount((prev) => ({
+        current: prev.current,
+        total: Math.min(15, prev.total + 1),
+      }));
+
+      fetch('/api/anpr/ai-read', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          cropBase64: crop,
+          track_id: rec.trackId,
+          local_ocr_text: rec.plateNumber,
+        }),
+      })
+        .then((res) => (res.ok ? res.json() : null))
+        .then((data) => {
+          if (data && onUpgradeRecordWithAi) {
+            onUpgradeRecordWithAi(rec.id, data);
+          }
+        })
+        .catch(() => {})
+        .finally(() => {
+          activeCloudCallsRef.current = Math.max(0, activeCloudCallsRef.current - 1);
+          setCloudReadingCount((prev) => ({
+            ...prev,
+            current: prev.current + 1,
+          }));
+        });
+    }
+  }, [records, cloudAnprEnabled, isGeminiOnline, onUpgradeRecordWithAi]);
 
   const handleAiReadClick = () => {
     setShowAiWarning(true);
@@ -167,7 +298,7 @@ export const ANPRRegistryView: React.FC<ANPRRegistryViewProps> = ({
     }
   };
 
-  const getStatusBadge = (status: PlateStatus, formatType?: string) => {
+  const getStatusBadge = (status: PlateStatus, formatType?: string, isAiAssisted?: boolean) => {
     if (status === 'Plate not legible at this distance' || formatType === 'distance_gated') {
       return (
         <span className="inline-flex items-center gap-1 rounded bg-neutral-800/90 border border-neutral-700/80 px-2 py-0.5 text-[11px] font-medium text-neutral-300" title="Physical resolution limit: vehicle is distant">
@@ -181,6 +312,12 @@ export const ANPRRegistryView: React.FC<ANPRRegistryViewProps> = ({
         <span className="inline-flex items-center gap-1 rounded bg-emerald-950/80 border border-emerald-700/60 px-2 py-0.5 text-[11px] font-semibold text-emerald-300">
           <CheckCircle2 className="h-3 w-3" />
           Format Valid
+          {isAiAssisted && (
+            <span className="ml-1 inline-flex items-center gap-0.5 rounded bg-cyan-900/80 border border-cyan-600/70 px-1 py-0 text-[9px] font-bold text-cyan-200">
+              <Sparkles className="h-2.5 w-2.5 text-cyan-300" />
+              AI-assisted
+            </span>
+          )}
         </span>
       );
     }
@@ -189,6 +326,12 @@ export const ANPRRegistryView: React.FC<ANPRRegistryViewProps> = ({
         <span className="inline-flex items-center gap-1 rounded bg-amber-950/80 border border-amber-700/60 px-2 py-0.5 text-[11px] font-semibold text-amber-300">
           <AlertTriangle className="h-3 w-3" />
           Needs Review
+          {isAiAssisted && (
+            <span className="ml-1 inline-flex items-center gap-0.5 rounded bg-cyan-900/80 border border-cyan-600/70 px-1 py-0 text-[9px] font-bold text-cyan-200">
+              <Sparkles className="h-2.5 w-2.5 text-cyan-300" />
+              AI-assisted
+            </span>
+          )}
         </span>
       );
     }
@@ -257,7 +400,7 @@ export const ANPRRegistryView: React.FC<ANPRRegistryViewProps> = ({
           </div>
         </div>
 
-        {/* Stats Grid */}
+        {/* Stats Grid: Format Valid, Needs Review, Distant, Total */}
         <div className="grid grid-cols-2 sm:grid-cols-4 gap-3 mt-5 pt-4 border-t border-neutral-800/70">
           <div className="rounded-lg bg-neutral-950/70 border border-neutral-800/80 p-3">
             <span className="text-[11px] font-medium text-neutral-400 block">Total Plates Logged</span>
@@ -265,15 +408,64 @@ export const ANPRRegistryView: React.FC<ANPRRegistryViewProps> = ({
           </div>
           <div className="rounded-lg bg-neutral-950/70 border border-neutral-800/80 p-3">
             <span className="text-[11px] font-medium text-neutral-400 block">Format Valid</span>
-            <span className="text-xl font-bold text-emerald-400 font-mono">{metrics.formatValid}</span>
+            <span id="anpr-format-valid-metric" className="text-xl font-bold text-emerald-400 font-mono">{metrics.formatValid}</span>
           </div>
           <div className="rounded-lg bg-neutral-950/70 border border-neutral-800/80 p-3">
-            <span className="text-[11px] font-medium text-neutral-400 block">Watchlist Flagged</span>
-            <span className="text-xl font-bold text-red-400 font-mono">{metrics.watchlist}</span>
+            <span className="text-[11px] font-medium text-neutral-400 block">Needs Review</span>
+            <span id="anpr-needs-review-metric" className="text-xl font-bold text-amber-400 font-mono">{metrics.needsReview}</span>
           </div>
           <div className="rounded-lg bg-neutral-950/70 border border-neutral-800/80 p-3">
-            <span className="text-[11px] font-medium text-neutral-400 block">Electric Vehicles (EV)</span>
-            <span className="text-xl font-bold text-cyan-400 font-mono">{metrics.ev}</span>
+            <span className="text-[11px] font-medium text-neutral-400 block">Distant (Resolution Limited)</span>
+            <span id="anpr-distant-metric" className="text-xl font-bold text-neutral-400 font-mono">{metrics.distant}</span>
+          </div>
+        </div>
+
+        {/* Cloud-Assisted Reading Setting Toggle */}
+        <div className="mt-4 pt-4 border-t border-neutral-800/70 flex flex-col sm:flex-row items-start sm:items-center justify-between gap-3 bg-neutral-950/50 p-3.5 rounded-xl border border-neutral-800/80">
+          <div className="flex items-center gap-3">
+            <div className="flex h-9 w-9 items-center justify-center rounded-lg bg-cyan-500/10 border border-cyan-500/20 text-cyan-400 shrink-0">
+              <Sparkles className="h-5 w-5" />
+            </div>
+            <div>
+              <div className="flex items-center gap-2">
+                <span className="text-xs font-semibold text-neutral-200">
+                  Cloud-assisted plate reading (sends vehicle/plate crops to Gemini)
+                </span>
+                <span className="rounded bg-neutral-800 border border-neutral-700 px-1.5 py-0.2 text-[9px] font-bold text-neutral-400">
+                  DEFAULT OFF
+                </span>
+              </div>
+              <p className="text-[11px] text-neutral-400 mt-0.5">
+                {!isGeminiOnline
+                  ? `Disabled: Gemini API is offline (${geminiOfflineReason || 'no API key configured'}).`
+                  : 'Automatically enhances unvalidated or low-confidence reads via server-side Gemini Vision.'}
+              </p>
+            </div>
+          </div>
+
+          <div className="flex items-center gap-3 self-end sm:self-center">
+            {cloudAnprEnabled && cloudReadingCount.total > 0 && (
+              <span className="text-[11px] font-mono text-cyan-400 bg-cyan-950/80 border border-cyan-800 px-2.5 py-1 rounded-md animate-pulse">
+                Reading plates {cloudReadingCount.current}/{cloudReadingCount.total}
+              </span>
+            )}
+            <button
+              type="button"
+              id="cloud-anpr-toggle-btn"
+              disabled={!isGeminiOnline}
+              onClick={handleToggleCloudAnpr}
+              className={`relative inline-flex h-6 w-11 shrink-0 cursor-pointer rounded-full border-2 border-transparent transition-colors duration-200 ease-in-out focus:outline-none disabled:opacity-40 disabled:cursor-not-allowed ${
+                cloudAnprEnabled ? 'bg-cyan-500' : 'bg-neutral-700'
+              }`}
+              role="switch"
+              aria-checked={cloudAnprEnabled}
+            >
+              <span
+                className={`pointer-events-none inline-block h-5 w-5 transform rounded-full bg-white shadow ring-0 transition duration-200 ease-in-out ${
+                  cloudAnprEnabled ? 'translate-x-5' : 'translate-x-0'
+                }`}
+              />
+            </button>
           </div>
         </div>
       </div>
@@ -453,27 +645,49 @@ export const ANPRRegistryView: React.FC<ANPRRegistryViewProps> = ({
                       <div className="flex items-start justify-between gap-3">
                         {/* Left: Plate Badge + Info */}
                         <div className="flex items-center gap-3">
-                          {/* Plate optical crop thumbnail if available */}
-                          {record.cropUrl ? (
-                            <div className="h-10 w-24 rounded border border-neutral-750 bg-black overflow-hidden flex items-center justify-center shrink-0">
-                              <img
-                                src={record.cropUrl}
-                                alt={`Crop of ${record.plateNumber}`}
-                                className="max-h-full max-w-full object-contain"
-                              />
-                            </div>
-                          ) : (
-                            <div className="flex items-center rounded-md border border-neutral-700 bg-white px-2 py-1 font-mono font-bold tracking-wider text-xs text-neutral-950 shrink-0">
-                              <span className="text-[8px] text-blue-800 font-extrabold mr-1 border-r border-neutral-300 pr-1">IND</span>
-                              <span>{record.plateNumber}</span>
-                            </div>
-                          )}
+                          {/* Vehicle Thumbnail and Plate optical crop if available */}
+                          <div className="flex items-center gap-1.5 shrink-0">
+                            {record.vehicleThumbnailUrl && (
+                              <div className="h-10 w-16 rounded border border-neutral-750 bg-black overflow-hidden flex items-center justify-center shrink-0" title="Vehicle Crop">
+                                <img
+                                  src={record.vehicleThumbnailUrl}
+                                  alt="Vehicle Crop"
+                                  className="max-h-full max-w-full object-contain"
+                                />
+                              </div>
+                            )}
+                            {record.cropUrl ? (
+                              <div className="h-10 w-24 rounded border border-neutral-750 bg-black overflow-hidden flex items-center justify-center shrink-0" title="Plate Crop">
+                                <img
+                                  src={record.cropUrl}
+                                  alt={`Crop of ${record.plateNumber}`}
+                                  className="max-h-full max-w-full object-contain"
+                                />
+                              </div>
+                            ) : (
+                              <div className="flex items-center rounded-md border border-neutral-700 bg-white px-2 py-1 font-mono font-bold tracking-wider text-xs text-neutral-950 shrink-0">
+                                <span className="text-[8px] text-blue-800 font-extrabold mr-1 border-r border-neutral-300 pr-1">IND</span>
+                                <span>{record.bestGuessPlate || record.plateNumber}</span>
+                              </div>
+                            )}
+                          </div>
 
                           <div>
-                            <div className="flex items-center gap-2">
+                            <div className="flex items-center gap-2 flex-wrap">
                               <span className="text-sm font-semibold text-neutral-200">
-                                {record.plateNumber}
+                                {record.bestGuessPlate || record.plateNumber}
                               </span>
+                              {record.isAiAssisted && (
+                                <span className="inline-flex items-center gap-1 rounded bg-cyan-950/90 border border-cyan-700/70 px-1.5 py-0.2 text-[10px] font-semibold text-cyan-300">
+                                  <Sparkles className="h-2.5 w-2.5 text-cyan-400" />
+                                  AI-assisted
+                                </span>
+                              )}
+                              {record.attempts !== undefined && record.attempts > 0 && (
+                                <span className="rounded bg-neutral-800 border border-neutral-700 px-1.5 py-0.2 text-[9px] font-mono text-neutral-400">
+                                  {record.attempts} attempt{record.attempts > 1 ? 's' : ''}
+                                </span>
+                              )}
                               {record.isDemo && (
                                 <span className="rounded bg-neutral-800 px-1.5 py-0.2 text-[9px] font-mono text-amber-400 border border-neutral-700">
                                   DEMO
@@ -490,13 +704,39 @@ export const ANPRRegistryView: React.FC<ANPRRegistryViewProps> = ({
                                 ? `${record.dossier.vehicleMake} ${record.dossier.vehicleModel} • ${record.dossier.registeredOwner}`
                                 : 'No registry record attached'}
                             </span>
+
+                            {/* Per-character confidence breakdown if available */}
+                            {record.charConfidences && record.charConfidences.length > 0 && (
+                              <div className="mt-1 flex items-center gap-0.5 overflow-x-auto py-0.5">
+                                {record.charConfidences.map((conf, cIdx) => {
+                                  const textCandidate = record.bestGuessPlate || record.plateNumber;
+                                  const char = textCandidate[cIdx] || '';
+                                  if (!char) return null;
+                                  return (
+                                    <span
+                                      key={cIdx}
+                                      className={`inline-flex items-center px-1 rounded text-[8px] font-mono font-bold ${
+                                        conf >= 80
+                                          ? 'bg-emerald-950/90 text-emerald-300 border border-emerald-800/80'
+                                          : conf >= 50
+                                          ? 'bg-amber-950/90 text-amber-300 border border-amber-800/80'
+                                          : 'bg-red-950/90 text-red-300 border border-red-800/80'
+                                      }`}
+                                      title={`Character ${char}: ${conf}%`}
+                                    >
+                                      {char}:{Math.round(conf)}%
+                                    </span>
+                                  );
+                                })}
+                              </div>
+                            )}
                           </div>
                         </div>
 
                         {/* Right: Validation & Confidence */}
                         <div className="flex flex-col items-end gap-1">
                           <div className="flex items-center gap-1.5">
-                            {getStatusBadge(record.status, record.formatType)}
+                            {getStatusBadge(record.status, record.formatType, record.isAiAssisted)}
                             <span className="font-mono text-xs text-neutral-400">
                               {record.confidence}% OCR
                             </span>
@@ -813,6 +1053,51 @@ export const ANPRRegistryView: React.FC<ANPRRegistryViewProps> = ({
                 )}
               </div>
             ) : null}
+          </div>
+        </div>
+      )}
+
+      {/* Cloud-Assisted Plate Reading Privacy Confirmation Dialog */}
+      {showCloudPrivacyModal && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/80 p-4 backdrop-blur-sm">
+          <div className="max-w-md w-full rounded-2xl border border-neutral-700 bg-neutral-900 p-6 shadow-2xl">
+            <div className="flex items-start gap-3">
+              <div className="p-2.5 rounded-xl bg-cyan-500/10 border border-cyan-500/30 text-cyan-400">
+                <Sparkles className="h-6 w-6" />
+              </div>
+              <div>
+                <h3 className="text-base font-bold text-neutral-100">
+                  Enable Cloud-Assisted Plate Reading?
+                </h3>
+                <p className="mt-2 text-xs leading-relaxed text-neutral-300">
+                  <strong>Privacy Notice:</strong> Enabling cloud-assisted plate reading will send isolated vehicle and license plate crops to Google Gemini API for optical character recognition.
+                </p>
+                <div className="mt-3 rounded-lg bg-neutral-950 p-3 border border-neutral-800 text-[11px] space-y-1 text-neutral-400">
+                  <p>• Only isolated vehicle/plate bounding box crops leave your local machine.</p>
+                  <p>• No live video streams, audio, or camera location telemetry are transmitted.</p>
+                  <p>• Dual-confirmation is strictly enforced before marking any plate Valid.</p>
+                  <p>• You can disable this setting at any time from this view.</p>
+                </div>
+              </div>
+            </div>
+            <div className="mt-6 flex items-center justify-end gap-3 border-t border-neutral-800 pt-4">
+              <button
+                type="button"
+                id="cancel-cloud-anpr-modal-btn"
+                onClick={() => setShowCloudPrivacyModal(false)}
+                className="rounded-lg border border-neutral-700 bg-neutral-800 px-4 py-2 text-xs font-semibold text-neutral-300 hover:bg-neutral-700 transition-colors"
+              >
+                Cancel
+              </button>
+              <button
+                type="button"
+                id="confirm-cloud-anpr-modal-btn"
+                onClick={confirmEnableCloudAnpr}
+                className="rounded-lg bg-cyan-600 px-4 py-2 text-xs font-semibold text-white hover:bg-cyan-500 shadow-md transition-colors"
+              >
+                Enable Cloud ANPR
+              </button>
+            </div>
           </div>
         </div>
       )}
