@@ -1412,6 +1412,7 @@ Ask me anything or pick a quick command to begin:`,
                 <div className="relative">
                   <input
                     id="gemini-api-key-input"
+                    data-testid="gemini-key-input"
                     type={showKeySecret ? 'text' : 'password'}
                     value={keyInputValue}
                     onChange={(e) => setKeyInputValue(e.target.value)}

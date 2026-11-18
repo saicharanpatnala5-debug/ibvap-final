@@ -333,11 +333,12 @@ export const CameraFeed: React.FC<CameraFeedProps> = ({
   useEffect(() => {
     registerCameraFrameProvider(camera.id, camera.name, () => {
       const video = videoRef.current;
-      if (!video || video.readyState < 2) return null;
+      const canvas = canvasRef.current;
+      if (!video) return null;
 
       // Native resolution scaled to max 1280px on long side
-      const origW = video.videoWidth || 640;
-      const origH = video.videoHeight || 360;
+      const origW = video.videoWidth || canvas?.width || 1280;
+      const origH = video.videoHeight || canvas?.height || 720;
       const maxDim = Math.max(origW, origH);
       const scale = maxDim > 1280 ? 1280 / maxDim : 1.0;
 
@@ -349,7 +350,24 @@ export const CameraFeed: React.FC<CameraFeedProps> = ({
       snapCanvas.height = targetH;
       const ctx = snapCanvas.getContext('2d');
       if (!ctx) return null;
-      ctx.drawImage(video, 0, 0, targetW, targetH);
+
+      try {
+        if (video.readyState >= 2 && (video.videoWidth || 0) > 0) {
+          ctx.drawImage(video, 0, 0, targetW, targetH);
+        } else if (canvas && canvas.width > 0) {
+          ctx.drawImage(canvas, 0, 0, targetW, targetH);
+        } else {
+          ctx.fillStyle = '#0f172a';
+          ctx.fillRect(0, 0, targetW, targetH);
+          ctx.fillStyle = '#38bdf8';
+          ctx.font = '20px sans-serif';
+          ctx.fillText(`Surveillance Feed: ${camera.name}`, 30, 60);
+        }
+      } catch {
+        ctx.fillStyle = '#0f172a';
+        ctx.fillRect(0, 0, targetW, targetH);
+      }
+
       const currentJpeg = snapCanvas.toDataURL('image/jpeg', 0.85);
 
       // Find frame from ~1.0s earlier in buffer

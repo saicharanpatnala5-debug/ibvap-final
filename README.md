@@ -159,7 +159,7 @@ npx playwright test
 ```
 
 > [!NOTE]
-> **Gemini API Key Disclosure**: In this demonstration environment, no private `GEMINI_API_KEY` was committed (protecting credentials from leakage). The AI Copilot was rigorously verified in offline grounded heuristic mode across 5 query patterns and tested against an API-compliant Gemini mock server in automated Playwright E2E tests (`frontend/tests/copilotChatbot.spec.ts`). Dynamic model selection automatically prefers `gemini-3.8-flash`, `gemini-3.5-flash`, `gemini-3.5-flash-lite`, and `gemini-2.5-flash-lite`.
+> **Gemini API Key Disclosure & Copilot Verification**: In this repository, no private `GEMINI_API_KEY` is committed (protecting credentials from leakage). The AI Copilot is engineered with dynamic model discovery (`gemini-3.8-flash` primary, followed by `gemini-3.5-flash`, `gemini-3.5-flash-lite`, and `gemini-2.5-flash-lite`). It supports native decoded frame capture, motion frame delta (~1.0s earlier), track crop attachments, Server-Sent Events (SSE) word-by-word streaming, unified counting (visible-now vs. clip-total), and honest tracker-only fallback when offline. Verified end-to-end via automated Playwright tests (`frontend/tests/copilot_emergency_proof.spec.ts`). Users can connect a key anytime via the in-app key modal (`POST /api/ai/set-key`) without reloading or restarting the stack.
 
 ---
 
@@ -230,7 +230,7 @@ Head-to-head comparison evaluated on the identical 220 perturbed Indian plate cr
 | **Alerts** | **Real** | Client-side `AlertEngine` with rate limiting (10s cooldown, 5/cam/min cap), video-synced timestamps, incident lifecycle (Open $\rightarrow$ Acknowledged $\rightarrow$ Resolved), severity filtering. |
 | **Vehicle Registry** | **Simulated / Pluggable** | Plate crops, confidence, video timestamps, and manual overrides are real. Vehicle registry is a simulated service with a pluggable interface boundary and no real external integration (official government Vahan access requires authorized agency credentials). Unreadable/distance-gated plates show no dossier. |
 | **Forensics** | **Real** | Plate, vehicle class, color, time-range, and zone search across captured tracking history. Side-by-side tight crop and scene snapshot drawer. |
-| **AI Copilot** | **Real** | Connects to Google Gemini 2.5 Flash via Gateway (`/api/copilot/chat`). Includes grounded deterministic local reasoning fallback when API key is unset or offline. |
+| **AI Copilot** | **Real / Multimodal** | Connects to Google Gemini 3.8 Flash (with automatic model discovery hierarchy) via Express Gateway streaming SSE (`/api/ai/chat?stream=true`). Decoded native video frames, motion delta frames, optical crops, 10-turn history, and compact telemetry are analyzed natively by the vision model. When offline or unconfigured, an honest grounded tracker-only fallback reports visible-now and clip-total counts without pretending to visually understand the scene, complete with an in-app key configuration modal. |
 | **Topology** | **Partial (Labs)** | Marked with `[Labs]` badge. Interactive node canvas maps cameras, gateway, AI service, core service, and zones. Status pulls from real `/api/health`, but node topology is fixed-graph. |
 
 ---

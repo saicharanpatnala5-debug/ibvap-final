@@ -148,7 +148,7 @@ By scanning `whatsapp_video_2026_09_09_842pm.mp4` via `find_pedestrian_dwell.py`
 | **Alerts** | **Real** | `AlertEngine` evaluates client-side and receives server incidents. Includes 10s cooldown per track/rule, 5 alerts/cam/min cap, video timestamps, severity filtering, and state transitions (Open $\rightarrow$ Acknowledged $\rightarrow$ Resolved). |
 | **Vehicle Registry** | **Simulated / Pluggable** | Plate crops, confidence, video timestamps, and manual overrides are real. Vehicle registry is a simulated service with a pluggable interface boundary and no real external integration (official government Vahan API access requires authenticated agency credentials). Unreadable/distance-gated plates show no dossier. |
 | **Forensics** | **Real** | Search and filter by plate, vehicle class, color, time range, and virtual zone across captured tracking history. Includes side-by-side tight crop and scene snapshot drawer. |
-| **AI Copilot** | **Real** | Reverse proxy endpoint `/api/copilot/chat` routes to Google Gemini 2.5 Flash when `GEMINI_API_KEY` is set. Includes a deterministic grounded fallback engine for offline or unconfigured deployments. |
+| **AI Copilot** | **Real / Multimodal** | Reverse proxy endpoint `/api/ai/chat?stream=true` routes to Google Gemini 3.8 Flash (with automatic discovery hierarchy: `gemini-3.8-flash`, `gemini-3.5-flash`, `gemini-3.5-flash-lite`, `gemini-2.5-flash-lite`). Includes real-time SSE token streaming, native frame capture, motion frame delta (~1.0s prior), track crop attachments, unified counting (visible-now vs. clip-total), and honest tracker-only fallback with in-app key management modal. |
 | **Topology** | **Partial (Labs)** | Labeled with `[Labs]` badge. Interactive node-graph canvas visualizes cameras, gateway proxy, AI service, core service, and zones. Status reflects live `/api/health`, but node topology graph is fixed. |
 
 ---
@@ -198,8 +198,13 @@ To eliminate the gap between automated test fixtures and visual runtime reality,
 - Navigation and VMS UI are verified responsive across 5 viewports (390px to 1920px).
 - Offline UI operation verified with 0 external network requests via Playwright.
 - Stale data automatically evicted with schema envelope `v8.0.0`.
-- AI Copilot Chatbot verified end-to-end: operates with dynamic model selection (`gemini-3.8-flash` primary) when keys are configured, and falls back seamlessly to grounded local heuristics when offline, passing 5-question automated E2E tests and mock server verification (`frontend/tests/copilotChatbot.spec.ts`).
-- All 114 tests pass across the entire polyglot stack.
+- AI Copilot Emergency Fix verified end-to-end (`frontend/tests/copilot_emergency_proof.spec.ts`):
+  * **Model & Discovery Hierarchy**: Automatically discovers `gemini-3.8-flash` (primary), `gemini-3.5-flash`, `gemini-3.5-flash-lite`, and `gemini-2.5-flash-lite`, eliminating deprecated model fallbacks.
+  * **Multimodal Visual & Motion Grounding**: On every message, captures native decoded frame (max 1280px on long edge, JPEG 0.85). Attaches a second frame (~1.0s earlier) on motion queries, and entity bounding box crops on "Ask AI" track clicks.
+  * **Unified Counting & Review Sheet**: Single source of truth in `entityStore.ts` and `gateway/server.ts` reports visible-now vs. clip-total counts across 5 key frames documented in gitignored `docs/copilot_counts_review.html`.
+  * **Real-time SSE Streaming**: Tokens stream live token-by-token into the chat UI with an animated streaming indicator.
+  * **Honest Fallback & Key Modal**: In offline mode or when key is unset, displays `"Offline mode: tracker data only. To enable visual understanding, set your Gemini API key."` with a prominent `"Set API key"` button. In-app key configuration validates keys via a minimal probe and saves to memory or `.env.local` (mode 0600) without exposing secrets to browser bundles.
+- All test suites pass with 100% pass rate across python, gateway, and frontend.
 
 ### Known Limitations
 1. **Extreme Distance ANPR**: Low-resolution footage ($768 \times 432$) cannot optically resolve plate characters at distances $>15$m where plate height is $<10$px. In such conditions, IBVAP suppresses unresolvable guesses or tags them with `"Needs review"` rather than hallucinating false plates. Operational deployment requires dedicated 1080p/4K surveillance cameras with optical zoom.

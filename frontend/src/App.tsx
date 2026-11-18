@@ -642,27 +642,25 @@ export default function App() {
 
       {/* Main Content Area */}
       <main className="mx-auto max-w-[1920px] px-3 py-6 sm:px-6">
-        {activeTab === 'monitoring' && (
-          <div className="pb-28">
-            <CameraGrid
-              cameras={cameras}
-              alerts={alerts}
-              onUpdateCamera={handleUpdateCamera}
-              onRemoveCamera={handleRemoveCamera}
-              onAlertGenerated={handleAlertGenerated}
-              onSelectPlate={(plate, cropUrl) => setDossierPlate({ plate, cropUrl })}
-              onPlateDetected={handlePlateDetected}
-              onOpenAddCamera={() => setIsAddCameraOpen(true)}
-              onAskAI={(prompt, attachment) => {
-                setPendingCommandQuery(prompt);
-                setPendingCommandAttachment(attachment || null);
-                setActiveTab('command');
-              }}
-              reducedMotion={a11ySettings.reducedMotion}
-              seekTarget={seekTarget}
-            />
-          </div>
-        )}
+        <div className={`pb-28 ${activeTab === 'monitoring' ? 'block' : 'hidden'}`}>
+          <CameraGrid
+            cameras={cameras}
+            alerts={alerts}
+            onUpdateCamera={handleUpdateCamera}
+            onRemoveCamera={handleRemoveCamera}
+            onAlertGenerated={handleAlertGenerated}
+            onSelectPlate={(plate, cropUrl) => setDossierPlate({ plate, cropUrl })}
+            onPlateDetected={handlePlateDetected}
+            onOpenAddCamera={() => setIsAddCameraOpen(true)}
+            onAskAI={(prompt, attachment) => {
+              setPendingCommandQuery(prompt);
+              setPendingCommandAttachment(attachment || null);
+              setActiveTab('command');
+            }}
+            reducedMotion={a11ySettings.reducedMotion}
+            seekTarget={seekTarget}
+          />
+        </div>
 
         {activeTab === 'anpr' && (
           <div className="h-[calc(100vh-140px)] pb-28">

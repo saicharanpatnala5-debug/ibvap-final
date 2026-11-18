@@ -20,6 +20,7 @@ interface FrameProvider {
 }
 
 const frameRegistry = new Map<string, FrameProvider>();
+let lastKnownSnapshot: CameraFrameSnapshot | null = null;
 
 export function registerCameraFrameProvider(
   cameraId: string,
@@ -33,16 +34,24 @@ export function unregisterCameraFrameProvider(cameraId: string) {
   frameRegistry.delete(cameraId);
 }
 
+export function setLastCameraFrameSnapshot(snapshot: CameraFrameSnapshot | null) {
+  if (snapshot) {
+    lastKnownSnapshot = snapshot;
+  }
+}
+
 export function getActiveCameraFrameSnapshot(preferredCameraId?: string): CameraFrameSnapshot | null {
   if (preferredCameraId && frameRegistry.has(preferredCameraId)) {
     const provider = frameRegistry.get(preferredCameraId)!;
     const snap = provider.getSnapshot();
     if (snap) {
-      return {
+      const fullSnap = {
         ...snap,
         cameraId: provider.cameraId,
         cameraName: provider.cameraName,
       };
+      lastKnownSnapshot = fullSnap;
+      return fullSnap;
     }
   }
 
@@ -50,13 +59,15 @@ export function getActiveCameraFrameSnapshot(preferredCameraId?: string): Camera
   for (const provider of frameRegistry.values()) {
     const snap = provider.getSnapshot();
     if (snap) {
-      return {
+      const fullSnap = {
         ...snap,
         cameraId: provider.cameraId,
         cameraName: provider.cameraName,
       };
+      lastKnownSnapshot = fullSnap;
+      return fullSnap;
     }
   }
 
-  return null;
+  return lastKnownSnapshot;
 }
