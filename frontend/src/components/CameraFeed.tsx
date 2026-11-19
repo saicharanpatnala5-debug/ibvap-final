@@ -85,6 +85,13 @@ interface CameraFeedProps {
     rtoCode?: string;
     rtoOffice?: string;
     ocrModel?: string;
+    vehicleClass?: string;
+    vehicleColor?: string;
+    vehicleColorHex?: string;
+    vehicleCategory?: string;
+    bodyType?: string;
+    visualCharacteristics?: string | string[];
+    detectionConfidence?: number;
   }) => void;
   onInspectObject?: (object: TrackedObject) => void;
   onAskAI?: (prompt: string, attachment?: any) => void;
@@ -1270,12 +1277,15 @@ export const CameraFeed: React.FC<CameraFeedProps> = ({
             // ANPR License Plate Badge on Vehicles with Indian NHAI/RTO Format Validation Status
             if (isVehicle && obj.anpr) {
               const isRead = obj.anpr.isReadable && obj.anpr.plateText !== 'Unreadable';
-              const isValid = obj.anpr.isValidFormat && isRead;
-              const formatLabel = isValid
-                ? obj.anpr.formatType === 'bharat'
-                  ? 'Valid BH series'
-                  : 'Valid format'
-                : 'Unreadable / invalid format';
+              const isConfirmed = obj.anpr.recognitionState === 'CONFIRMED' || (obj.anpr.isValidFormat && isRead && (obj.anpr.confidence || 0) >= 80);
+              const isTentative = obj.anpr.recognitionState === 'TENTATIVE';
+              const formatLabel = isConfirmed
+                ? 'Confirmed'
+                : isTentative
+                ? 'Tentative'
+                : isRead
+                ? 'Needs Review'
+                : 'Unreadable';
               const plateStr = isRead
                 ? `ANPR: ${obj.anpr.plateText} (${obj.anpr.confidence}%) • ${formatLabel}`
                 : `ANPR: Unreadable • ${formatLabel}`;
@@ -1283,8 +1293,10 @@ export const CameraFeed: React.FC<CameraFeedProps> = ({
               const plateY = Math.min(cH - 4, by + bh + 16);
               const plateX = Math.max(1, Math.min(cW - plateW - 1, bx));
 
-              ctx.fillStyle = isValid
+              ctx.fillStyle = isConfirmed
                 ? 'rgba(5, 150, 105, 0.95)'
+                : isTentative
+                ? 'rgba(2, 132, 199, 0.95)'
                 : isRead
                 ? 'rgba(180, 83, 9, 0.95)'
                 : 'rgba(75, 85, 99, 0.90)';
@@ -1861,21 +1873,27 @@ export const CameraFeed: React.FC<CameraFeedProps> = ({
                   </button>
                 )}
 
-                {obj.anpr && (
-                  <button
-                    onClick={() => onSelectPlate(obj.anpr!.plateText, obj.anpr!.cropDataUrl)}
-                    className={`ml-1 rounded px-1.5 py-0.5 font-mono text-[10px] border transition-colors ${
-                      obj.anpr.isValidFormat && obj.anpr.isReadable
-                        ? 'bg-emerald-950/80 text-emerald-300 hover:text-emerald-200 border-emerald-600/60'
-                        : 'bg-amber-950/70 text-amber-300 hover:text-amber-200 border-amber-600/50'
-                    }`}
-                    title={`ANPR: ${obj.anpr.plateText} (${obj.anpr.validationStatus || 'Format check'})`}
-                  >
-                    {obj.anpr.isReadable
-                      ? `${obj.anpr.plateText} • ${obj.anpr.isValidFormat ? 'Valid format' : 'Invalid format'}`
-                      : 'Unreadable'}
-                  </button>
-                )}
+                {obj.anpr && (() => {
+                  const isConfirmed = obj.anpr.recognitionState === 'CONFIRMED' || (obj.anpr.isValidFormat && obj.anpr.isReadable && (obj.anpr.confidence || 0) >= 80);
+                  const isTentative = obj.anpr.recognitionState === 'TENTATIVE';
+                  return (
+                    <button
+                      onClick={() => onSelectPlate(obj.anpr!.plateText, obj.anpr!.cropDataUrl)}
+                      className={`ml-1 rounded px-1.5 py-0.5 font-mono text-[10px] border transition-colors ${
+                        isConfirmed
+                          ? 'bg-emerald-950/80 text-emerald-300 hover:text-emerald-200 border-emerald-600/60'
+                          : isTentative
+                          ? 'bg-sky-950/80 text-sky-300 hover:text-sky-200 border-sky-600/60'
+                          : 'bg-amber-950/70 text-amber-300 hover:text-amber-200 border-amber-600/50'
+                      }`}
+                      title={`ANPR: ${obj.anpr.plateText} (${obj.anpr.validationStatus || 'Format check'})`}
+                    >
+                      {obj.anpr.isReadable
+                        ? `${obj.anpr.plateText} • ${isConfirmed ? 'Confirmed' : isTentative ? 'Tentative' : 'Needs Review'}`
+                        : 'Unreadable'}
+                    </button>
+                  );
+                })()}
               </div>
             ))}
           </div>
@@ -1967,54 +1985,60 @@ export const CameraFeed: React.FC<CameraFeedProps> = ({
       </div>
 
       {/* Real-time ANPR Match Notification Banner with Indian Format Validation Status */}
-      {latestReadPlate && (
-        <div className="flex items-center justify-between border-t border-emerald-500/30 bg-emerald-950/70 px-3.5 py-2 text-xs text-emerald-200">
-          <div className="flex items-center gap-2">
-            <span
-              className={`h-2 w-2 rounded-full ${
-                latestReadPlate.isValidFormat ? 'bg-emerald-400 animate-pulse' : 'bg-amber-400'
-              }`}
-            />
-            <span>
-              ANPR Read Detected:{' '}
-              <strong className="font-mono text-white text-sm tracking-wider">
-                {latestReadPlate.plate}
-              </strong>{' '}
-              ({latestReadPlate.confidence}% Conf) •{' '}
+      {latestReadPlate && (() => {
+        const isConfirmed = Boolean(latestReadPlate.isValidFormat && latestReadPlate.confidence >= 80);
+        return (
+          <div className={`flex items-center justify-between border-t px-3.5 py-2 text-xs ${
+            isConfirmed ? 'border-emerald-500/30 bg-emerald-950/70 text-emerald-200' : 'border-amber-500/30 bg-amber-950/70 text-amber-200'
+          }`}>
+            <div className="flex items-center gap-2">
               <span
-                className={`font-semibold ${
-                  latestReadPlate.isValidFormat ? 'text-emerald-300' : 'text-amber-300'
+                className={`h-2 w-2 rounded-full ${
+                  isConfirmed ? 'bg-emerald-400 animate-pulse' : 'bg-amber-400'
+                }`}
+              />
+              <span>
+                ANPR Read Detected:{' '}
+                <strong className="font-mono text-white text-sm tracking-wider">
+                  {latestReadPlate.plate}
+                </strong>{' '}
+                ({latestReadPlate.confidence}% Conf) •{' '}
+                <span
+                  className={`font-semibold ${
+                    isConfirmed ? 'text-emerald-300' : 'text-amber-300'
+                  }`}
+                >
+                  {isConfirmed ? 'Confirmed' : 'Needs Review'}
+                </span>
+              </span>
+            </div>
+            <div className="flex items-center gap-2">
+              <button
+                type="button"
+                onClick={() => onSelectPlate(latestReadPlate.plate, latestReadPlate.cropUrl)}
+                className={`rounded px-3 py-1 font-semibold text-xs transition-colors shadow-sm ${
+                  isConfirmed
+                    ? 'bg-emerald-500 hover:bg-emerald-400 text-neutral-950'
+                    : 'bg-amber-500 hover:bg-amber-400 text-neutral-950'
                 }`}
               >
-                {latestReadPlate.validationStatus ||
-                  (latestReadPlate.isValidFormat
-                    ? latestReadPlate.formatType === 'bharat'
-                      ? 'Valid BH series'
-                      : 'Valid format'
-                    : 'Unreadable / invalid format')}
-              </span>
-            </span>
+                View Vehicle Dossier
+              </button>
+              <button
+                type="button"
+                onClick={() => updateLatestReadPlate(null)}
+                className={`rounded p-1 transition-colors ${
+                  isConfirmed ? 'text-emerald-300 hover:text-white hover:bg-emerald-900/50' : 'text-amber-300 hover:text-white hover:bg-amber-900/50'
+                }`}
+                title="Dismiss notification"
+                aria-label="Dismiss notification"
+              >
+                <X className="h-4 w-4" />
+              </button>
+            </div>
           </div>
-          <div className="flex items-center gap-2">
-            <button
-              type="button"
-              onClick={() => onSelectPlate(latestReadPlate.plate, latestReadPlate.cropUrl)}
-              className="rounded bg-emerald-500 hover:bg-emerald-400 text-neutral-950 px-3 py-1 font-semibold text-xs transition-colors shadow-sm"
-            >
-              View Vehicle Dossier
-            </button>
-            <button
-              type="button"
-              onClick={() => updateLatestReadPlate(null)}
-              className="rounded p-1 text-emerald-300 hover:text-white hover:bg-emerald-900/50 transition-colors"
-              title="Dismiss notification"
-              aria-label="Dismiss notification"
-            >
-              <X className="h-4 w-4" />
-            </button>
-          </div>
-        </div>
-      )}
+        );
+      })()}
 
       {/* Video Playback Controls (Standard controls per requirement 1) */}
       <div className="border-t border-neutral-800 bg-neutral-950 p-3">

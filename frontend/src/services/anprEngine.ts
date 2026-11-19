@@ -1,5 +1,5 @@
 import { createWorker, Worker } from 'tesseract.js';
-import { ANPRResult, BoundingBox, VehicleDossier, ImageANPRResponse } from '../types';
+import { ANPRResult, BoundingBox, VehicleDossier, ImageANPRResponse, RecognitionState } from '../types';
 import seededRegistryJson from './seededDemoRegistry.json';
 
 let ocrWorkerPromise: Promise<Worker | null> | null = null;
@@ -122,6 +122,8 @@ export interface PlateValidationResult {
   rtoCode?: string;
   series?: string;
   plateNumber?: string;
+  standardNormalizedPlate?: string;
+  isSyntacticMatch?: boolean;
 }
 
 /**
@@ -184,9 +186,10 @@ export function sanitizePlateText(rawText: string, ocrConf: number): PlateValida
     };
   }
 
-  // B. Standard Indian Format: [State Code: 2 letters] [RTO: 1-2 digits] [Series: 1-3 letters] [Number: 4 digits]
-  const standardDirect = clean.match(/^([A-Z]{2})(\d{1,2})([A-Z]{1,3})(\d{4})$/);
+  // B. Standard Indian Format: [State Code: 2 letters] [RTO: 1-2 digits] [Series: 1-3 letters] [Number: 1-4 digits per CMVR Rule 50]
+  const standardDirect = clean.match(/^([A-Z]{2})(\d{1,2})([A-Z]{1,3})(\d{1,4})$/);
   if (standardDirect && VALID_INDIAN_STATE_CODES.has(standardDirect[1])) {
+    const normPlate = `${standardDirect[1]}${standardDirect[2].padStart(2, '0')}${standardDirect[3]}${standardDirect[4].padStart(4, '0')}`;
     return {
       plateText: clean,
       confidence: baseConfidence,
@@ -198,6 +201,8 @@ export function sanitizePlateText(rawText: string, ocrConf: number): PlateValida
       rtoCode: standardDirect[2],
       series: standardDirect[3],
       plateNumber: standardDirect[4],
+      standardNormalizedPlate: normPlate,
+      isSyntacticMatch: true,
     };
   }
 
@@ -680,6 +685,39 @@ export const SIMULATED_VEHICLE_DATABASE: Record<string, any> = {
 };
 
 /**
+ * Computes explicit recognition state:
+ * DETECTED, OCR_PENDING, TENTATIVE, CONFIRMED, NEEDS_REVIEW, UNREADABLE
+ * Strict rule: A plate can ONLY be CONFIRMED if:
+ * 1. Overall OCR confidence >= 80.0%
+ * 2. Minimum 2 agreeing independent observations (or single frame >= 95.0%)
+ * 3. Per-character confidence passes threshold (>= 50%)
+ * 4. Format is syntactically valid under MoRTH rules (1-4 digits permitted)
+ * Any near-match, low-confidence reading (< 80%), or conflicting reading MUST be NEEDS_REVIEW
+ */
+export function determineRecognitionState(
+  plateText: string,
+  confidence: number,
+  voteCount: number = 1,
+  charConfidences?: number[]
+): RecognitionState {
+  const clean = (plateText || '').toUpperCase().replace(/[^A-Z0-9]/g, '');
+  if (!clean || clean.length < 4 || confidence < ANPR_CONF_MIN || clean.includes('UNREADABLE')) {
+    return 'UNREADABLE';
+  }
+  const statusInfo = determinePlateStatus(clean, confidence);
+  const minChar = charConfidences && charConfidences.length > 0 ? Math.min(...charConfidences) : confidence;
+
+  if (statusInfo.isValidFormat && confidence >= ANPR_CONF_HIGH && minChar >= 50) {
+    if (voteCount >= 2 || confidence >= 95) {
+      return 'CONFIRMED';
+    }
+    return 'TENTATIVE';
+  }
+
+  return 'NEEDS_REVIEW';
+}
+
+/**
  * Determine plate status per requirement:
  * - "Valid format": validated plate format and confidence >= 80%
  * - "Low confidence - needs review": validated plate format but confidence < 80%
@@ -687,15 +725,20 @@ export const SIMULATED_VEHICLE_DATABASE: Record<string, any> = {
  */
 export function determinePlateStatus(plateText: string, confidence: number): {
   status: 'Valid format' | 'Low confidence - needs review' | 'Unreadable';
+  recognitionState: RecognitionState;
   isValidFormat: boolean;
+  isSyntacticMatch: boolean;
   formatType?: 'standard' | 'bharat' | 'invalid';
   cleanPlate: string;
+  standardNormalizedPlate?: string;
 } {
   const clean = (plateText || '').toUpperCase().replace(/[^A-Z0-9]/g, '');
   if (!clean || clean.length < 8 || clean.includes('UNREADABLE') || confidence < ANPR_CONF_MIN) {
     return {
       status: 'Unreadable',
+      recognitionState: 'UNREADABLE',
       isValidFormat: false,
+      isSyntacticMatch: false,
       formatType: 'invalid',
       cleanPlate: clean || 'UNREADABLE',
     };
@@ -705,7 +748,9 @@ export function determinePlateStatus(plateText: string, confidence: number): {
   if (!validation.isValidFormat) {
     return {
       status: 'Unreadable',
+      recognitionState: 'UNREADABLE',
       isValidFormat: false,
+      isSyntacticMatch: false,
       formatType: 'invalid',
       cleanPlate: clean,
     };
@@ -714,17 +759,23 @@ export function determinePlateStatus(plateText: string, confidence: number): {
   if (confidence >= ANPR_CONF_HIGH) {
     return {
       status: 'Valid format',
+      recognitionState: 'CONFIRMED',
       isValidFormat: true,
+      isSyntacticMatch: true,
       formatType: validation.formatType,
       cleanPlate: validation.plateText || clean,
+      standardNormalizedPlate: validation.standardNormalizedPlate,
     };
   }
 
   return {
     status: 'Low confidence - needs review',
+    recognitionState: 'NEEDS_REVIEW',
     isValidFormat: true,
+    isSyntacticMatch: true,
     formatType: validation.formatType,
     cleanPlate: validation.plateText || clean,
+    standardNormalizedPlate: validation.standardNormalizedPlate,
   };
 }
 

@@ -11,9 +11,9 @@ from collections import Counter
 from app.models.schemas import ANPRResult, ImageANPRPlateItem, BoundingBox
 from app.services.appearance import extract_entity_appearance
 
-# Standard Indian License Plate Format: State Code (2) + District/RTO (1-2) + Series (1-3) + Number (4)
-# Example: DL01AB1234, MH12CD5678, KA04E9999, HR12AX8522, KA01MW4498, TN55CZ5446
-STANDARD_PLATE_REGEX = re.compile(r"^([A-Z]{2})([0-9]{1,2})([A-Z]{1,3})([0-9]{4})$")
+# Standard Indian License Plate Format: State Code (2) + District/RTO (1-2) + Series (1-3) + Number (1-4 digits per CMVR Rule 50)
+# Example: DL01AB1234, MH12CD5678, KA04E9999, HR12AX8522, KA01MW4498, TN55CZ5446, KA03S453, KA51AB130
+STANDARD_PLATE_REGEX = re.compile(r"^([A-Z]{2})([0-9]{1,2})([A-Z]{1,3})([0-9]{1,4})$")
 
 # Bharat (BH) Series Format: Year (2) + BH (2) + Number (4) + Series (1-2)
 # Example: 22BH1234AA
@@ -141,6 +141,46 @@ LETTER_TO_DIGIT = {
 AWIROS_SERVICE_URL = os.environ.get("AWIROS_SERVICE_URL", "http://127.0.0.1:8001")
 
 
+def determine_recognition_state(
+    plate_text: str,
+    confidence: float,
+    is_valid_format: bool,
+    char_confs: Optional[List[float]] = None,
+    vote_count: int = 1,
+    is_distance_gated: bool = False,
+) -> Tuple[str, str]:
+    """
+    Computes unambiguous recognition state and user-facing status.
+    States:
+    - DETECTED: Plate localized, OCR not completed.
+    - OCR_PENDING: In background processing queue.
+    - CONFIRMED: Valid statutory format, confidence >= 80.0%, min char conf >= 50.0%, and (vote_count >= 2 or confidence >= 95.0%).
+    - TENTATIVE: Valid statutory format, confidence >= 75.0%, but single frame observation (vote_count == 1).
+    - NEEDS_REVIEW: Low confidence (< 80.0%), near matches (e.g. KA51ABK51 at 67.2%), char conf < 50%, or syntax invalid.
+    - UNREADABLE: Obscured, distance gated, confidence < 40%, or < 4 characters.
+    """
+    clean = (plate_text or "").upper().replace(" ", "").strip()
+    if is_distance_gated:
+        return "UNREADABLE", "Plate not legible at this distance"
+    if not clean or len(clean) < 4 or confidence < 40.0 or "UNREADABLE" in clean:
+        return "UNREADABLE", "Unreadable"
+
+    min_char = min(char_confs) if (char_confs and len(char_confs) > 0) else confidence
+
+    # Strict rule: A plate can ONLY be CONFIRMED if:
+    # 1. Overall OCR confidence >= 80.0%
+    # 2. Minimum 2 agreeing independent observations (or high-confidence single frame >= 95.0%)
+    # 3. Per-character confidence passes threshold (>= 50%)
+    # 4. Format is syntactically valid under MoRTH rules (1-4 digits permitted)
+    if is_valid_format and confidence >= 80.0 and min_char >= 50.0:
+        if vote_count >= 2 or confidence >= 95.0:
+            return "CONFIRMED", "Confirmed"
+        return "TENTATIVE", "Tentative"
+
+    # Any near-match, low-confidence reading (< 80%), or conflicting reading MUST be NEEDS_REVIEW
+    return "NEEDS_REVIEW", "Needs Review"
+
+
 def bgr_to_base64_jpeg(img_bgr: np.ndarray, quality: int = 85) -> str:
     """Encodes an image to a base64 Data URL JPEG string."""
     if img_bgr is None or img_bgr.size == 0:
@@ -221,8 +261,10 @@ class PlateValidator:
         if bh_match:
             year_code, number_code, series_code = bh_match.groups()
             res["is_valid"] = True
+            res["is_syntactic_match"] = True
             res["format_type"] = "bharat"
             res["validation_status"] = "Valid format"
+            res["standard_normalized_plate"] = clean
             res["state_code"] = "BH"
             res["state_name"] = "Bharat (BH) All-India Registry"
             res["rto_code"] = year_code
@@ -231,7 +273,7 @@ class PlateValidator:
             res["plate_number"] = clean
             return res
 
-        # 2. Standard State MoRTH Format Check
+        # 2. Standard State MoRTH Format Check (supporting 1-4 digits per CMVR Rule 50)
         std_match = STANDARD_PLATE_REGEX.match(clean)
         if std_match:
             state_code, rto_digits, series_chars, num_digits = std_match.groups()
@@ -241,9 +283,13 @@ class PlateValidator:
                 rto_key = f"{state_code}{int(rto_digits):02d}" if rto_digits.isdigit() else f"{state_code}{rto_digits}"
                 rto_office = KNOWN_RTO_NAMES.get(rto_key, f"{state_name} ({state_code}-{rto_digits})")
 
+                normalized_plate = f"{state_code}{rto_digits.zfill(2)}{series_chars}{num_digits.zfill(4)}"
+
                 res["is_valid"] = True
+                res["is_syntactic_match"] = True
                 res["format_type"] = "standard"
                 res["validation_status"] = "Valid format"
+                res["standard_normalized_plate"] = normalized_plate
                 res["state_code"] = state_code
                 res["state_name"] = state_name
                 res["rto_code"] = rto_digits
@@ -802,26 +848,32 @@ class FastALPREngine:
                     chosen_char_confs = [round(chosen_conf, 1)] * len(chosen_text)
 
             # -------------------------------------------------------------
-            # Stage C: Indian Registration Format Validation
+            # Stage C: Indian Registration Format Validation & Recognition State
             # -------------------------------------------------------------
             valid_info = PlateValidator.validate_indian_registration(chosen_text)
-            is_valid = valid_info["is_valid"] and (chosen_conf >= 55.0)
+            is_valid = valid_info["is_valid"]
             is_readable = bool(chosen_text and len(chosen_text) >= 4)
+            min_char = min(chosen_char_confs) if chosen_char_confs else chosen_conf
 
-            if is_valid:
-                vstatus = "Valid format"
-            elif is_readable:
-                vstatus = "Uncertain / Needs Review"
-            else:
-                vstatus = "Unreadable"
+            rec_state, vstatus = determine_recognition_state(
+                plate_text=chosen_text,
+                confidence=chosen_conf,
+                is_valid_format=is_valid,
+                char_confs=chosen_char_confs,
+                vote_count=1,
+                is_distance_gated=False,
+            )
 
             single_result = ANPRResult(
                 plateText=chosen_text if is_readable else "",
                 confidence=round(chosen_conf, 1),
                 isReadable=is_readable,
-                isValidFormat=is_valid,
+                isValidFormat=(rec_state in ["CONFIRMED", "TENTATIVE"]),
                 formatType=valid_info["format_type"] if is_valid else "invalid",
                 validationStatus=vstatus,
+                recognitionState=rec_state,
+                isSyntacticMatch=valid_info.get("is_syntactic_match", False),
+                standardNormalizedPlate=valid_info.get("standard_normalized_plate"),
                 stateCode=valid_info.get("state_code"),
                 rtoCode=valid_info.get("rto_code"),
                 series=valid_info.get("series"),
@@ -1250,17 +1302,28 @@ class PlateVotingTracker:
         plate_b64 = sharp_info.get("plate_crop_b64") or reading.plateCropDataUrl
         veh_b64 = sharp_info.get("veh_crop_b64") or reading.vehicleCropDataUrl
 
-        # Only statutory valid formats can achieve confirmed status
-        is_confirmed = (total_votes >= self.required_votes) and valid_info["is_valid"]
-        vstatus = "Valid format" if valid_info["is_valid"] else "Uncertain / Needs Review"
+        # Determine recognition state through multi-frame voting evidence
+        rec_state, vstatus = determine_recognition_state(
+            plate_text=voted_text,
+            confidence=mean_conf,
+            is_valid_format=valid_info["is_valid"],
+            char_confs=avg_char_confs,
+            vote_count=total_votes,
+            is_distance_gated=False,
+        )
+
+        is_confirmed = (rec_state == "CONFIRMED")
 
         consensus_result = ANPRResult(
             plateText=voted_text,
             confidence=round(mean_conf, 1),
             isReadable=True,
-            isValidFormat=valid_info["is_valid"],
+            isValidFormat=(rec_state in ["CONFIRMED", "TENTATIVE"]),
             formatType=valid_info["format_type"] if valid_info["is_valid"] else "invalid",
             validationStatus=vstatus,
+            recognitionState=rec_state,
+            isSyntacticMatch=valid_info.get("is_syntactic_match", False),
+            standardNormalizedPlate=valid_info.get("standard_normalized_plate"),
             stateCode=valid_info.get("state_code"),
             rtoCode=valid_info.get("rto_code"),
             series=valid_info.get("series"),
@@ -1294,24 +1357,20 @@ class PlateVotingTracker:
     def get_track_lifecycle_status(self, track_id: int) -> str:
         """
         Returns formal lifecycle status for UI and audit:
-        - 'Confirmed reading'
-        - 'Tentative reading'
-        - 'Uncertain / Needs Review'
-        - 'Plate not legible at this distance'
-        - 'OCR in progress'
+        - 'CONFIRMED'
+        - 'TENTATIVE'
+        - 'NEEDS_REVIEW'
+        - 'UNREADABLE'
+        - 'OCR_PENDING'
         """
         if track_id in self.confirmed_plates:
-            return "Confirmed reading"
+            return "CONFIRMED"
         guess = self.best_guess_plates.get(track_id)
         if guess:
             if guess.isDistanceGated or guess.formatType == "distance_gated":
-                return "Plate not legible at this distance"
-            if guess.isValidFormat:
-                return "Tentative reading"
-            if guess.isReadable:
-                return "Uncertain / Needs Review"
-            return "Unreadable"
-        return "OCR in progress"
+                return "UNREADABLE"
+            return guess.recognitionState or "NEEDS_REVIEW"
+        return "OCR_PENDING"
 
     def get_confirmed(self, track_id: int) -> Optional[ANPRResult]:
         return self.confirmed_plates.get(track_id)

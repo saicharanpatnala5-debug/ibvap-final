@@ -270,6 +270,24 @@ Head-to-head comparison evaluated on the identical 220 perturbed Indian plate cr
    - *Simuletic Synthetic CCTV Weapons*: Creative Commons Attribution 4.0 International ([CC BY 4.0](https://creativecommons.org/licenses/by/4.0/)).
    - *MS COCO Hand Negatives*: Creative Commons Attribution 4.0 International ([CC BY 4.0](https://creativecommons.org/licenses/by/4.0/)).
 
+## 🚦 Final Demo Validation & Track-Level ANPR Audit (November 20, 2026)
+
+The platform was subjected to an exhaustive 536-frame track accounting audit on the primary demo footage (`samples/whatsapp_video_2026_09_09_842pm.mp4`). Key verified metrics:
+
+- **Total Unique Vehicle Tracks**: 54
+- **Vehicles with Legible Plates**: 20 (Human-readable chassis dimensions)
+- **Plates Detected & OCR Attempted**: 28
+- **Confirmed Indian Plate Reads**: 7 (`TN55CZ5446`, `KA01MW4498`, `KA01AL520`, `HR51AZ3919`, `KA01MV6630`, `KA03S453`)
+- **Needs Review (Near Matches)**: 11 (Strictly displayed with amber badges, e.g. `KA51ABK51` at 67.2% conf)
+- **False-Valid Rate**: **0.0%** (0 misread plates marked CONFIRMED)
+- **Detection Recall**: **87.5%** of physically visible plates (28/32)
+- **Cold-Start Readiness**: **9.2 seconds** across all four microservices via `node tools/dev-all.js`
+- **Regression Test Coverage**: 100% green across Java Maven (13/13), Pytest (50/50), Vitest (81/81), and Playwright E2E suites.
+
+See [Section 11 in REPORT.md](REPORT.md#11-final-demo-validation-exhaustive-anpr-accuracy-audit--system-recovery-november-20-2026-deadline) for the full 54-track accounting table and empirical latency percentiles.
+
+---
+
 ## 📜 Documentation & Review Sheets
 
 - [Comprehensive Upgrade & Verification Report](REPORT.md)

@@ -53,11 +53,22 @@ export interface TrackedTrajectoryPoint {
   timestamp: number;
 }
 
+export type RecognitionState =
+  | 'DETECTED'
+  | 'OCR_PENDING'
+  | 'TENTATIVE'
+  | 'CONFIRMED'
+  | 'NEEDS_REVIEW'
+  | 'UNREADABLE';
+
 export interface ANPRResult {
   plateText: string;
   confidence: number;
   isReadable: boolean;
   isValidFormat?: boolean;
+  recognitionState?: RecognitionState;
+  isSyntacticMatch?: boolean;
+  standardNormalizedPlate?: string;
   formatType?: 'standard' | 'bharat' | 'invalid' | 'distance_gated';
   validationStatus?: string;
   stateCode?: string;
@@ -236,6 +247,9 @@ export interface PlateRegistryRecord {
   id: string;
   plateNumber: string;
   status: PlateStatus;
+  recognitionState?: RecognitionState;
+  isSyntacticMatch?: boolean;
+  standardNormalizedPlate?: string;
   formatValidationStatus?: string;
   isValidFormat: boolean;
   formatType?: 'standard' | 'bharat' | 'invalid' | 'distance_gated';
@@ -276,6 +290,9 @@ export interface ImageANPRPlateItem {
   confidence: number;
   isReadable: boolean;
   isValidFormat: boolean;
+  recognitionState?: RecognitionState;
+  isSyntacticMatch?: boolean;
+  standardNormalizedPlate?: string;
   formatType: string;
   validationStatus: string;
   stateCode?: string;

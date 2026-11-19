@@ -59,27 +59,30 @@ def test_multi_frame_plate_voting():
     voter = PlateVotingTracker(required_votes=2)
     track_id = 501
 
-    # First vote (noise/glitch)
+    # First vote: high confidence observation (82.0%)
     r1 = ANPRResult(
         plateText="DL01AB1234",
-        confidence=72.0,
+        confidence=82.0,
         isReadable=True,
         isValidFormat=True,
         formatType="standard",
     )
     res1 = voter.add_reading(track_id, r1)
-    # Not yet committed (< 85% conf and only 1 vote)
+    # Not yet confirmed (requires 2 agreeing votes)
     assert res1 is None
+    assert voter.is_confirmed(track_id) is False
 
-    # Second vote (same plate confirmed)
+    # Second vote: agreeing observation (86.0%, mean >= 80%)
     r2 = ANPRResult(
         plateText="DL01AB1234",
-        confidence=78.0,
+        confidence=86.0,
         isReadable=True,
         isValidFormat=True,
         formatType="standard",
     )
     res2 = voter.add_reading(track_id, r2)
-    # Now committed via 2-vote threshold!
+    # Now confirmed via 2-vote consensus threshold (mean conf >= 80.0%)
     assert res2 is not None
     assert res2.plateText == "DL01AB1234"
+    assert res2.recognitionState == "CONFIRMED"
+    assert voter.is_confirmed(track_id) is True

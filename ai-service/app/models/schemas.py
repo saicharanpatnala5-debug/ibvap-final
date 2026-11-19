@@ -25,6 +25,9 @@ class ANPRResult(BaseModel):
     isValidFormat: bool = False
     formatType: Optional[Literal["standard", "bharat", "invalid", "distance_gated"]] = "invalid"
     validationStatus: Optional[str] = "Unreadable / invalid format"
+    recognitionState: Optional[str] = "DETECTED"  # DETECTED, OCR_PENDING, TENTATIVE, CONFIRMED, NEEDS_REVIEW, UNREADABLE
+    isSyntacticMatch: bool = False
+    standardNormalizedPlate: Optional[str] = None
     stateCode: Optional[str] = None
     rtoCode: Optional[str] = None
     series: Optional[str] = None
@@ -56,6 +59,9 @@ class ImageANPRPlateItem(BaseModel):
     isValidFormat: bool
     formatType: str
     validationStatus: str
+    recognitionState: Optional[str] = "DETECTED"  # DETECTED, OCR_PENDING, TENTATIVE, CONFIRMED, NEEDS_REVIEW, UNREADABLE
+    isSyntacticMatch: bool = False
+    standardNormalizedPlate: Optional[str] = None
     stateCode: Optional[str] = None
     stateName: Optional[str] = None
     rtoCode: Optional[str] = None

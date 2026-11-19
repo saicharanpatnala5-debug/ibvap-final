@@ -521,7 +521,15 @@ export const ANPRRegistryView: React.FC<ANPRRegistryViewProps> = ({
     URL.revokeObjectURL(url);
   };
 
-  const getStatusBadge = (status: PlateStatus, formatType?: string, isAiAssisted?: boolean) => {
+  const getStatusBadge = (status: PlateStatus, formatType?: string, isAiAssisted?: boolean, recognitionState?: string) => {
+    if (recognitionState === 'OCR_PENDING') {
+      return (
+        <span className="inline-flex items-center gap-1 rounded bg-neutral-800/90 border border-neutral-700/80 px-2 py-0.5 text-[11px] font-medium text-neutral-300">
+          <Clock className="h-3 w-3 text-neutral-400 animate-pulse" />
+          OCR Pending
+        </span>
+      );
+    }
     if (status === 'Plate not legible at this distance' || formatType === 'distance_gated') {
       return (
         <span className="inline-flex items-center gap-1 rounded bg-neutral-800/90 border border-neutral-700/80 px-2 py-0.5 text-[11px] font-medium text-neutral-300" title="Physical resolution limit: vehicle is distant">
@@ -530,11 +538,11 @@ export const ANPRRegistryView: React.FC<ANPRRegistryViewProps> = ({
         </span>
       );
     }
-    if (status === 'Valid format') {
+    if (recognitionState === 'CONFIRMED' || (status === 'Valid format' && recognitionState !== 'NEEDS_REVIEW')) {
       return (
         <span className="inline-flex items-center gap-1 rounded bg-emerald-950/80 border border-emerald-700/60 px-2 py-0.5 text-[11px] font-semibold text-emerald-300">
           <CheckCircle2 className="h-3 w-3" />
-          Format Valid
+          Confirmed
           {isAiAssisted && (
             <span className="ml-1 inline-flex items-center gap-0.5 rounded bg-cyan-900/80 border border-cyan-600/70 px-1 py-0 text-[9px] font-bold text-cyan-200">
               <Sparkles className="h-2.5 w-2.5 text-cyan-300" />
@@ -544,7 +552,15 @@ export const ANPRRegistryView: React.FC<ANPRRegistryViewProps> = ({
         </span>
       );
     }
-    if (status === 'Low confidence - needs review' || (status as string).includes('needs review') || (status as string).includes('Invalid format')) {
+    if (recognitionState === 'TENTATIVE') {
+      return (
+        <span className="inline-flex items-center gap-1 rounded bg-sky-950/80 border border-sky-700/60 px-2 py-0.5 text-[11px] font-semibold text-sky-300">
+          <CheckCircle2 className="h-3 w-3 text-sky-400" />
+          Tentative
+        </span>
+      );
+    }
+    if (recognitionState === 'NEEDS_REVIEW' || status === 'Low confidence - needs review' || (status as string).includes('needs review') || (status as string).includes('Invalid format')) {
       return (
         <span className="inline-flex items-center gap-1 rounded bg-amber-950/80 border border-amber-700/60 px-2 py-0.5 text-[11px] font-semibold text-amber-300">
           <AlertTriangle className="h-3 w-3" />
@@ -1091,7 +1107,7 @@ export const ANPRRegistryView: React.FC<ANPRRegistryViewProps> = ({
                         {/* Right: Validation & Confidence */}
                         <div className="flex flex-col items-end gap-1">
                           <div className="flex items-center gap-1.5">
-                            {getStatusBadge(record.status, record.formatType, record.isAiAssisted)}
+                            {getStatusBadge(record.status, record.formatType, record.isAiAssisted, record.recognitionState)}
                             {record.confidence > 0 ? (
                               <span className="font-mono text-xs text-neutral-400">
                                 {record.confidence}% OCR
@@ -1170,7 +1186,7 @@ export const ANPRRegistryView: React.FC<ANPRRegistryViewProps> = ({
                     </h2>
                   </div>
 
-                  <div>{getStatusBadge(activeRecord.status, activeRecord.formatType)}</div>
+                  <div>{getStatusBadge(activeRecord.status, activeRecord.formatType, activeRecord.isAiAssisted, activeRecord.recognitionState)}</div>
                 </div>
 
                 {/* Visual Telemetry: Plate Display + Crops */}
