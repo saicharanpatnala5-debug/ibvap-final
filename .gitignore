@@ -20,7 +20,6 @@ samples/debug_detections/
 samples/debug_videos/
 samples/debug_crops/
 samples/debug_crops_round4/
-samples/golden_plates.json
 samples/tracks_diagnosis_summary.json
 docs/anpr_review.html
 docs/detection_review.html
