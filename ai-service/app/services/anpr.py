@@ -12,7 +12,7 @@ from app.models.schemas import ANPRResult, ImageANPRPlateItem, BoundingBox
 from app.services.appearance import extract_entity_appearance
 
 # Standard Indian License Plate Format: State Code (2) + District/RTO (1-2) + Series (1-3) + Number (4)
-# Example: DL01AB1234, MH12CD5678, KA04E9999, HR12AX8522, UP14BQ208
+# Example: DL01AB1234, MH12CD5678, KA04E9999, HR12AX8522, KA01MW4498, TN55CZ5446
 STANDARD_PLATE_REGEX = re.compile(r"^([A-Z]{2})([0-9]{1,2})([A-Z]{1,3})([0-9]{4})$")
 
 # Bharat (BH) Series Format: Year (2) + BH (2) + Number (4) + Series (1-2)
@@ -102,6 +102,7 @@ KNOWN_RTO_NAMES: Dict[str, str] = {
     "KA04": "Yeshwanthpur RTO (Bengaluru North)",
     "KA05": "Jayanagar RTO (Bengaluru South)",
     "KA19": "Mangaluru RTO (Dakshina Kannada)",
+    "KA51": "Electronic City RTO (Bengaluru South)",
     # Maharashtra (MH)
     "MH01": "Mumbai Central RTO (Tardeo)",
     "MH02": "Mumbai West RTO (Andheri)",
@@ -120,6 +121,7 @@ KNOWN_RTO_NAMES: Dict[str, str] = {
     # Tamil Nadu (TN)
     "TN01": "Chennai Central RTO",
     "TN07": "Chennai South RTO",
+    "TN55": "Pudukkottai RTO (Tamil Nadu)",
     # Telangana (TS)
     "TS07": "Ranga Reddy RTO (Hyderabad)",
     "TS09": "Khairatabad RTO (Hyderabad Central)",
@@ -165,7 +167,7 @@ def query_awiros_ocr(crop_bgr: np.ndarray, is_dual_row: Optional[bool] = None) -
             data=payload,
             headers={"Content-Type": "application/json"}
         )
-        with urllib.request.urlopen(req, timeout=3.0) as resp:
+        with urllib.request.urlopen(req, timeout=8.0) as resp:
             data = json.loads(resp.read().decode("utf-8"))
             if data.get("status") == "ok":
                 return data

@@ -40,6 +40,9 @@ core_client = CoreServiceClient()
 shared_detector: Optional[SurveillanceDetector] = None
 UPLOAD_DIR = os.path.join(os.getcwd(), "data", "uploads")
 os.makedirs(UPLOAD_DIR, exist_ok=True)
+ROOT_WORKSPACE = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+VIDEO_CACHE_DIR = os.path.join(ROOT_WORKSPACE, ".cache", "video_analysis")
+os.makedirs(VIDEO_CACHE_DIR, exist_ok=True)
 
 
 def get_shared_detector() -> SurveillanceDetector:
@@ -323,6 +326,183 @@ async def detect_frame(
         "weapons": weapons_out,
         "count": len(detections),
     }
+
+
+@app.post("/video/analyze")
+async def analyze_video_endpoint(
+    request: Request,
+    file: Optional[UploadFile] = File(None),
+    video_path: Optional[str] = Form(None),
+    step_sec: float = Form(0.20),
+):
+    """
+    Authoritative server-side video analysis endpoint for "Analyze & Play" mode:
+    - Extracts detections, tracking IDs, kinematics, and ANPR per keyframe (default step_sec=0.20)
+    - Caches results indexed by video SHA-256 hash in .cache/video_analysis/
+    - Enables smooth, silky 60 FPS playback interpolation in frontend
+    """
+    import hashlib
+    import json
+    from app.services.low_light import compute_frame_luminance
+
+    target_video_file = None
+    v_hash = None
+
+    if file is not None:
+        contents = await file.read()
+        v_hash = hashlib.sha256(contents).hexdigest()[:16]
+        cache_file = os.path.join(VIDEO_CACHE_DIR, f"{v_hash}.json")
+        if os.path.exists(cache_file):
+            try:
+                with open(cache_file, "r", encoding="utf-8") as f:
+                    return json.load(f)
+            except Exception:
+                pass
+
+        target_video_file = os.path.join(UPLOAD_DIR, f"{v_hash}.mp4")
+        with open(target_video_file, "wb") as f:
+            f.write(contents)
+    elif video_path:
+        clean_p = video_path.strip().replace("\\", "/")
+        if os.path.isabs(clean_p) and os.path.exists(clean_p):
+            target_video_file = clean_p
+        else:
+            candidates = [
+                os.path.join(ROOT_WORKSPACE, clean_p),
+                os.path.join(ROOT_WORKSPACE, clean_p.lstrip("/")),
+                os.path.join(ROOT_WORKSPACE, "samples", os.path.basename(clean_p)),
+                clean_p,
+            ]
+            for c in candidates:
+                if os.path.exists(c):
+                    target_video_file = c
+                    break
+
+        if not target_video_file:
+            raise HTTPException(status_code=404, detail=f"Video path '{video_path}' not found.")
+
+        # Compute hash from first 8MB + file size
+        file_size = os.path.getsize(target_video_file)
+        with open(target_video_file, "rb") as f:
+            head = f.read(8 * 1024 * 1024)
+        v_hash = hashlib.sha256(head + str(file_size).encode()).hexdigest()[:16]
+        cache_file = os.path.join(VIDEO_CACHE_DIR, f"{v_hash}.json")
+        if os.path.exists(cache_file):
+            try:
+                with open(cache_file, "r", encoding="utf-8") as f:
+                    return json.load(f)
+            except Exception:
+                pass
+    else:
+        raise HTTPException(status_code=400, detail="Either 'file' upload or 'video_path' is required.")
+
+    cap = cv2.VideoCapture(target_video_file)
+    if not cap.isOpened():
+        raise HTTPException(status_code=400, detail="Could not open video file.")
+
+    fps = cap.get(cv2.CAP_PROP_FPS) or 30.0
+    total_frames = int(cap.get(cv2.CAP_PROP_FRAME_COUNT) or 0)
+    duration = total_frames / fps if fps > 0 else 5.0
+    width = int(cap.get(cv2.CAP_PROP_FRAME_WIDTH) or 1280)
+    height = int(cap.get(cv2.CAP_PROP_FRAME_HEIGHT) or 720)
+
+    detector = SurveillanceDetector()
+    engine = FastALPREngine.get_instance()
+
+    cached_frames = []
+    step_frames = max(1, int(round(step_sec * fps)))
+    total_steps = int(np.ceil(total_frames / step_frames))
+
+    for step_idx in range(total_steps):
+        f_idx = min(total_frames - 1, step_idx * step_frames)
+        cap.set(cv2.CAP_PROP_POS_FRAMES, f_idx)
+        ret, frame = cap.read()
+        if not ret or frame is None:
+            break
+
+        timestamp_sec = round(f_idx / fps, 2)
+        avg_lum = compute_frame_luminance(frame)
+        is_night = avg_lum < settings.LOW_LIGHT_LUMINANCE_THRESHOLD
+
+        ents, _ = detector.process_frame(frame, timestamp_sec)
+
+        tracked_objects = []
+        plate_result = None
+
+        for ent in ents:
+            # Crop vehicle for ANPR if vehicle class
+            anpr_dict = None
+            if getattr(ent, "anpr", None):
+                anpr_dict = ent.anpr.dict() if hasattr(ent.anpr, "dict") else ent.anpr
+            elif ent.class_name in ["car", "truck", "bus", "truck/bus", "two-wheeler", "motorcycle"]:
+                bx = ent.bbox
+                vx1 = max(0, int((bx.x - bx.width * 0.08) * width))
+                vy1 = max(0, int((bx.y - bx.height * 0.08) * height))
+                vx2 = min(width, int((bx.x + bx.width * 1.08) * width))
+                vy2 = min(height, int((bx.y + bx.height * 1.08) * height))
+                v_crop = frame[vy1:vy2, vx1:vx2]
+                if v_crop.shape[0] >= 20 and v_crop.shape[1] >= 30:
+                    res = engine.process_vehicle_crop(v_crop, track_id=ent.id, vehicle_class=ent.class_name)
+                    if res.isReadable and res.plateText:
+                        anpr_dict = res.dict() if hasattr(res, "dict") else res
+                        ent.anpr = res
+
+            ent_dict = {
+                "id": ent.id,
+                "class": ent.class_name,
+                "confidence": round(ent.confidence / 100.0 if ent.confidence > 1 else ent.confidence, 2),
+                "bbox": {
+                    "x": ent.bbox.x,
+                    "y": ent.bbox.y,
+                    "width": ent.bbox.width,
+                    "height": ent.bbox.height,
+                },
+                "velocity": getattr(ent, "velocity", 0.0),
+                "direction": getattr(ent, "direction", "Stationary"),
+                "speed": getattr(ent, "speed", "0 px/s"),
+                "state": getattr(ent, "state", "confirmed"),
+                "appearance": ent.appearance.dict() if getattr(ent, "appearance", None) and hasattr(ent.appearance, "dict") else getattr(ent, "appearance", None),
+                "anpr": anpr_dict,
+            }
+            tracked_objects.append(ent_dict)
+
+            if anpr_dict and anpr_dict.get("isReadable") and anpr_dict.get("plateText"):
+                plate_result = {
+                    "plate": anpr_dict.get("plateText"),
+                    "confidence": anpr_dict.get("confidence"),
+                    "cropUrl": anpr_dict.get("plateCropDataUrl") or anpr_dict.get("cropDataUrl"),
+                    "isValidFormat": anpr_dict.get("isValidFormat"),
+                    "formatType": anpr_dict.get("formatType"),
+                    "validationStatus": anpr_dict.get("validationStatus"),
+                }
+
+        cached_frames.append({
+            "timestamp": timestamp_sec,
+            "objects": tracked_objects,
+            "luminance": round(avg_lum, 1),
+            "isNight": is_night,
+            "plateResult": plate_result,
+        })
+
+    cap.release()
+
+    res_data = {
+        "status": "ok",
+        "videoId": v_hash,
+        "duration": round(duration, 2),
+        "fps": fps,
+        "totalFrames": len(cached_frames),
+        "frames": cached_frames,
+        "isComplete": True,
+    }
+
+    try:
+        with open(cache_file, "w", encoding="utf-8") as f:
+            json.dump(res_data, f)
+    except Exception as e:
+        print(f"[VideoAnalyze] Cache write warning: {e}")
+
+    return res_data
 
 
 @app.post("/anpr/read-crop")

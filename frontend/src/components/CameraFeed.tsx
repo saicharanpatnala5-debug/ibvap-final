@@ -18,6 +18,7 @@ import {
   Info,
   Trash2,
   Edit2,
+  X,
 } from 'lucide-react';
 import {
   AlertIncident,
@@ -189,6 +190,34 @@ export const CameraFeed: React.FC<CameraFeedProps> = ({
     formatType?: string;
     validationStatus?: string;
   } | null>(null);
+  const latestPlateTimeoutRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+
+  const updateLatestReadPlate = useCallback(
+    (
+      plateData: {
+        plate: string;
+        confidence: number;
+        cropUrl?: string;
+        timestamp: number;
+        isValidFormat?: boolean;
+        formatType?: string;
+        validationStatus?: string;
+      } | null
+    ) => {
+      if (latestPlateTimeoutRef.current) {
+        clearTimeout(latestPlateTimeoutRef.current);
+        latestPlateTimeoutRef.current = null;
+      }
+      setLatestReadPlate(plateData);
+      if (plateData) {
+        latestPlateTimeoutRef.current = setTimeout(() => {
+          setLatestReadPlate(null);
+        }, 6000);
+      }
+    },
+    []
+  );
+
   const autoOpenedPlatesRef = useRef<Set<string>>(new Set());
 
   // Decoupled smooth rendering & interpolation refs
@@ -441,6 +470,7 @@ export const CameraFeed: React.FC<CameraFeedProps> = ({
   // Handle jump-to-time request from Vehicle Registry or Timeline
   useEffect(() => {
     if (seekToTime !== undefined && seekToTime !== null && videoRef.current) {
+      updateLatestReadPlate(null);
       const vid = videoRef.current;
       vid.currentTime = seekToTime;
       setCurrentTime(seekToTime);
@@ -478,6 +508,7 @@ export const CameraFeed: React.FC<CameraFeedProps> = ({
   // Step frames forwards or backwards (approx 1/30s = 0.0333s)
   const stepFrame = (forward: boolean) => {
     if (!videoRef.current) return;
+    updateLatestReadPlate(null);
     videoRef.current.pause();
     setIsPlaying(false);
     const step = 1 / 30;
@@ -506,6 +537,7 @@ export const CameraFeed: React.FC<CameraFeedProps> = ({
   };
 
   const handleSeek = (e: React.ChangeEvent<HTMLInputElement>) => {
+    updateLatestReadPlate(null);
     const time = parseFloat(e.target.value);
     if (videoRef.current) {
       videoRef.current.currentTime = time;
@@ -668,7 +700,7 @@ export const CameraFeed: React.FC<CameraFeedProps> = ({
               const bestGuess = anprResult.plateText || (anprResult.formatType === 'distance_gated' ? 'Plate not legible at this distance' : 'Plate not detected / obscured');
 
               if (anprResult.isValidFormat || (anprResult.isReadable && anprResult.plateText && anprResult.plateText.length >= 4)) {
-                setLatestReadPlate({
+                updateLatestReadPlate({
                   plate: anprResult.plateText,
                   confidence: anprResult.confidence,
                   cropUrl: bestCrop,
@@ -1096,6 +1128,8 @@ export const CameraFeed: React.FC<CameraFeedProps> = ({
               const obj = disp.track;
               const bbox = disp.bbox;
               const isProvisional = !!obj.isProvisional;
+              // Clean presentation: Suppress provisional motion boxes when not in debug mode
+              if (isProvisional && !isDebugMode) continue;
               const isPedestrian = obj.class === 'pedestrian' || obj.class === 'person';
               const isTwoWheeler = obj.class === 'two-wheeler' || obj.class === 'motorcycle' || obj.class === 'bicycle';
               const isThreeWheeler = obj.class === 'three-wheeler' || obj.class === 'auto-rickshaw';
@@ -1127,8 +1161,8 @@ export const CameraFeed: React.FC<CameraFeedProps> = ({
             ctx.save();
             ctx.globalAlpha = Math.max(0.05, Math.min(1, disp.alpha));
 
-            // Trajectory trail: shown in debug mode or when motion trails enabled
-            if (isDebugMode || (!reducedMotion && obj.trajectory.length > 1)) {
+            // Trajectory trail: shown strictly in debug mode
+            if (isDebugMode && obj.trajectory.length > 1) {
               ctx.save();
               ctx.lineWidth = isDebugMode ? 2 : 1.5;
               ctx.strokeStyle = isProvisional
@@ -1961,13 +1995,24 @@ export const CameraFeed: React.FC<CameraFeedProps> = ({
               </span>
             </span>
           </div>
-          <button
-            type="button"
-            onClick={() => onSelectPlate(latestReadPlate.plate, latestReadPlate.cropUrl)}
-            className="rounded bg-emerald-500 hover:bg-emerald-400 text-neutral-950 px-3 py-1 font-semibold text-xs transition-colors shadow-sm"
-          >
-            View Vehicle Dossier
-          </button>
+          <div className="flex items-center gap-2">
+            <button
+              type="button"
+              onClick={() => onSelectPlate(latestReadPlate.plate, latestReadPlate.cropUrl)}
+              className="rounded bg-emerald-500 hover:bg-emerald-400 text-neutral-950 px-3 py-1 font-semibold text-xs transition-colors shadow-sm"
+            >
+              View Vehicle Dossier
+            </button>
+            <button
+              type="button"
+              onClick={() => updateLatestReadPlate(null)}
+              className="rounded p-1 text-emerald-300 hover:text-white hover:bg-emerald-900/50 transition-colors"
+              title="Dismiss notification"
+              aria-label="Dismiss notification"
+            >
+              <X className="h-4 w-4" />
+            </button>
+          </div>
         </div>
       )}
 

@@ -761,9 +761,32 @@ async function callGemini(
   );
 
   const response = await Promise.race([geminiCall, timeoutPromise]);
-  const replyText = response?.text?.trim() || '';
+  const candidate = (response as any)?.candidates?.[0];
+
+  if (candidate?.finishReason === 'SAFETY') {
+    throw new Error('BLOCKED_BY_SAFETY');
+  }
+
+  let replyText = '';
+  if (candidate?.content?.parts && Array.isArray(candidate.content.parts)) {
+    const textParts = candidate.content.parts
+      .filter((p: any) => p.text && !p.thought)
+      .map((p: any) => p.text);
+    replyText = textParts.join('').trim();
+  }
+
+  if (!replyText && (response as any)?.text) {
+    try {
+      replyText = (response as any).text.trim();
+    } catch {}
+  }
+
   if (!replyText) {
-    throw new Error('EMPTY_RESPONSE');
+    if (candidate?.finishReason === 'MAX_TOKENS') {
+      replyText = '[Response truncated due to token limit]';
+    } else {
+      throw new Error('EMPTY_RESPONSE');
+    }
   }
 
   return {
@@ -784,65 +807,94 @@ async function streamGemini(
   options: UnifiedChatOptions,
   callbacks: StreamCallbacks
 ): Promise<void> {
-  const client = new GoogleGenAI({ apiKey: config.apiKey });
-  const contents: any[] = [];
+  try {
+    const client = new GoogleGenAI({ apiKey: config.apiKey });
+    const contents: any[] = [];
 
-  if (options.history && options.history.length > 0) {
-    for (const h of options.history.slice(-10)) {
-      contents.push({
-        role: h.sender === 'user' ? 'user' : 'model',
-        parts: [{ text: h.text }],
-      });
-    }
-  }
-
-  const currentParts: any[] = [];
-  let visionUsed = false;
-  if (options.images && options.images.length > 0) {
-    visionUsed = true;
-    for (const img of options.images) {
-      currentParts.push({
-        inlineData: {
-          mimeType: img.mimeType,
-          data: img.dataBase64,
-        },
-      });
-      if (img.caption) {
-        currentParts.push({ text: img.caption });
+    if (options.history && options.history.length > 0) {
+      for (const h of options.history.slice(-10)) {
+        contents.push({
+          role: h.sender === 'user' ? 'user' : 'model',
+          parts: [{ text: h.text }],
+        });
       }
     }
-  }
 
-  currentParts.push({
-    text: options.message || 'Please analyze this surveillance scene.',
-  });
-
-  contents.push({
-    role: 'user',
-    parts: currentParts,
-  });
-
-  const streamResponse = await client.models.generateContentStream({
-    model: config.model,
-    contents,
-    config: {
-      systemInstruction: options.systemInstruction,
-      temperature: options.temperature ?? 0.3,
-    },
-  });
-
-  for await (const chunk of streamResponse) {
-    if (chunk.text) {
-      callbacks.onChunk(chunk.text);
+    const currentParts: any[] = [];
+    let visionUsed = false;
+    if (options.images && options.images.length > 0) {
+      visionUsed = true;
+      for (const img of options.images) {
+        currentParts.push({
+          inlineData: {
+            mimeType: img.mimeType,
+            data: img.dataBase64,
+          },
+        });
+        if (img.caption) {
+          currentParts.push({ text: img.caption });
+        }
+      }
     }
-  }
 
-  callbacks.onDone({
-    provider: config.provider,
-    model: config.model,
-    source: 'gemini',
-    visionUsed,
-  });
+    currentParts.push({
+      text: options.message || 'Please analyze this surveillance scene.',
+    });
+
+    contents.push({
+      role: 'user',
+      parts: currentParts,
+    });
+
+    const streamResponse = await client.models.generateContentStream({
+      model: config.model,
+      contents,
+      config: {
+        systemInstruction: options.systemInstruction,
+        temperature: options.temperature ?? 0.3,
+      },
+    });
+
+    let hasReceivedAnyText = false;
+    for await (const chunk of streamResponse) {
+      const candidate = (chunk as any)?.candidates?.[0];
+      if (candidate?.finishReason === 'SAFETY') {
+        callbacks.onError(new Error('BLOCKED_BY_SAFETY'), false);
+        return;
+      }
+
+      let chunkText = '';
+      if (candidate?.content?.parts && Array.isArray(candidate.content.parts)) {
+        chunkText = candidate.content.parts
+          .filter((p: any) => p.text && !p.thought)
+          .map((p: any) => p.text)
+          .join('');
+      } else if (chunk.text) {
+        try {
+          chunkText = chunk.text;
+        } catch {}
+      }
+
+      if (chunkText) {
+        hasReceivedAnyText = true;
+        callbacks.onChunk(chunkText);
+      }
+    }
+
+    if (!hasReceivedAnyText) {
+      callbacks.onError(new Error('EMPTY_RESPONSE'), true);
+      return;
+    }
+
+    callbacks.onDone({
+      provider: config.provider,
+      model: config.model,
+      source: 'gemini',
+      visionUsed,
+    });
+  } catch (err: any) {
+    callbacks.onError(err, true);
+  }
 }
 
 /**

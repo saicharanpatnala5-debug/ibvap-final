@@ -706,7 +706,7 @@ export const ANPRRegistryView: React.FC<ANPRRegistryViewProps> = ({
         <div className="grid grid-cols-2 sm:grid-cols-4 lg:grid-cols-8 gap-2 mt-3 p-3 bg-neutral-950/60 rounded-lg border border-neutral-800/70 text-xs">
           <div>
             <span className="text-[10px] text-neutral-500 uppercase block font-medium">Vehicles Seen</span>
-            <span id="telemetry-vehicles-seen" className="font-mono font-bold text-neutral-200">{telemetry.total_vehicles_detected || metrics.total}</span>
+            <span id="telemetry-vehicles-seen" className="font-mono font-bold text-neutral-200">{metrics.total > 0 ? metrics.total : (telemetry.total_vehicles_detected || 0)}</span>
           </div>
           <div>
             <span className="text-[10px] text-neutral-500 uppercase block font-medium">Plates Localized</span>

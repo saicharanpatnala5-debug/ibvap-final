@@ -152,7 +152,7 @@ export function sanitizePlateText(rawText: string, ocrConf: number): PlateValida
     .replace(/[^A-Z0-9]/g, '')
     .trim();
 
-  if (clean.length < 8 || clean.length > 12) {
+  if (clean.length < 7 || clean.length > 12) {
     return unreadableResult;
   }
 

@@ -5,6 +5,8 @@ build/
 coverage/
 test-results/
 playwright-report/
+artifacts/
+.cache/
 # Video footage and media captures
 samples/*.mp4
 samples/*.avi

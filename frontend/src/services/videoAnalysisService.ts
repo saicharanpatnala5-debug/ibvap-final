@@ -125,14 +125,57 @@ class VideoAnalysisService {
       const vW = video.videoWidth || 1280;
       const vH = video.videoHeight || 720;
 
-      // Analysis step: sample every 0.2s (5 FPS keyframes with 60 FPS interpolation) for fast pre-analysis
+      // 1. Attempt authoritative Server-Side Video Analysis (YOLO26s + ByteTrack + Awiros ANPR)
+      try {
+        const videoSrcUrl = typeof videoSource === 'string' ? videoSource : (video.currentSrc || video.src);
+        if (videoSrcUrl && !videoSrcUrl.startsWith('blob:')) {
+          const res = await fetch('/api/vision/video/analyze', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
+            body: new URLSearchParams({
+              video_path: videoSrcUrl,
+              step_sec: '0.20',
+            }),
+            signal: AbortSignal.timeout(60000),
+          });
+
+          if (res.ok) {
+            const srvData = await res.json();
+            if (srvData.status === 'ok' && srvData.frames && srvData.frames.length > 0) {
+              const serverResult: VideoAnalysisResult = {
+                videoId,
+                duration: srvData.duration || duration,
+                fps: srvData.fps || 10,
+                totalFrames: srvData.frames.length,
+                frames: srvData.frames.map((f: any) => ({
+                  timestamp: f.timestamp,
+                  objects: f.objects || [],
+                  luminance: f.luminance || 100,
+                  isNight: Boolean(f.isNight),
+                  plateResult: f.plateResult,
+                })),
+                isComplete: true,
+              };
+              this.cache.set(videoId, serverResult);
+              this.analyzingState.set(videoId, false);
+              this.progressState.set(videoId, 100);
+              if (onProgress) onProgress(100);
+              return serverResult;
+            }
+          }
+        }
+      } catch (srvErr) {
+        console.warn('[VideoAnalysisService] Server-side analysis skipped/unavailable, falling back to local analysis:', srvErr);
+      }
+
+      // 2. Local Fallback: sample every 0.2s (5 FPS keyframes with 60 FPS interpolation)
       const stepSec = 0.20;
       const totalSteps = Math.ceil(duration / stepSec);
 
-      // Reusable offscreen canvas
+      // Reusable offscreen canvas with full resolution preservation
       const canvas = document.createElement('canvas');
-      canvas.width = Math.min(640, vW);
-      canvas.height = Math.min(360, vH);
+      canvas.width = vW;
+      canvas.height = vH;
       const ctx = canvas.getContext('2d', { willReadFrequently: true });
 
       const model = await getDetectionModel();
@@ -167,19 +210,20 @@ class VideoAnalysisService {
         // Run multi-object tracker
         const tracked = tracker.update(rawDets, Date.now() + Math.round(targetTime * 1000));
 
-        // ANPR pass on vehicles
+        // ANPR pass on all vehicles (multi-vehicle support, no break)
         let plateRes: { plate: string; confidence: number; cropUrl?: string } | undefined;
         for (const trk of tracked) {
-          if (['car', 'truck', 'bus', 'motorcycle'].includes(trk.class)) {
-            const anpr = await extractAndReadLicensePlate(video, trk.bbox);
-            if (anpr.isReadable && anpr.plateText !== 'Unreadable') {
+          if (['car', 'truck', 'bus', 'motorcycle', 'truck/bus', 'two-wheeler', 'auto-rickshaw'].some((c) => trk.class.includes(c))) {
+            const anpr = await extractAndReadLicensePlate(video, trk.bbox, trk.id, trk.class);
+            if (anpr.isReadable && anpr.plateText && anpr.plateText !== 'Unreadable') {
               trk.anpr = anpr;
-              plateRes = {
-                plate: anpr.plateText,
-                confidence: anpr.confidence,
-                cropUrl: anpr.cropDataUrl,
-              };
-              break;
+              if (!plateRes || anpr.confidence > plateRes.confidence) {
+                plateRes = {
+                  plate: anpr.plateText,
+                  confidence: anpr.confidence,
+                  cropUrl: anpr.plateCropDataUrl || anpr.cropDataUrl,
+                };
+              }
             }
           }
         }

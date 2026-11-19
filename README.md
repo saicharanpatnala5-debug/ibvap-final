@@ -39,7 +39,12 @@ flowchart TD
         YOLO["Ultralytics YOLO26 (Fast/Balanced/High)"]
         ByteTrack["ByteTrack Multi-Object Kinematics & Re-ID"]
         LowLight["CLAHE Adaptive Night Enhancement"]
-        FastALPR["Fast-ALPR ONNX (YOLO-v9-t + CCT-S-v2)"]
+        FastALPR["Fast-ALPR ONNX Multi-Scale Plate Localization"]
+    end
+
+    subgraph AwirosOCR["Indian ANPR Specialist Service (awiros-service/)"]
+        PaddleOCR["PaddlePaddle PP-OCRv5 SVTR_HGNet (Port 8001)"]
+        IndianOcrModel["Awiros/anpr-ocr (1-row & 2-row HSRP plates)"]
     end
 
     subgraph CoreService["System of Record (core-service/)"]

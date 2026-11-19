@@ -328,8 +328,9 @@ const aiRateLimiter = rateLimit({
 
 // Gemini model preferences in priority order (official stable & flash models)
 export const PREFERRED_GEMINI_MODELS = [
-  'gemini-2.5-flash',
-  'gemini-2.5-flash-lite',
+  'gemini-3.8-flash',
+  'gemini-3.5-flash',
+  'gemini-3.5-flash-lite',
   'gemini-2.0-flash',
   'gemini-1.5-flash',
 ];
@@ -1318,8 +1319,24 @@ app.post('/api/ai/set-key', keySetupRateLimiter, async (req, res) => {
         }
         fs.writeFileSync(localEnvFile, envContent, { mode: 0o600 });
         console.log(`[IBVAP Gateway] LLM credentials written to ${localEnvFile} (mode 0600)`);
+
+        // Also persist to gateway/.env if it exists
+        const gatewayEnvFile = path.resolve(__dirname, '.env');
+        if (fs.existsSync(gatewayEnvFile) && chosenProvider === 'gemini') {
+          let envStr = fs.readFileSync(gatewayEnvFile, 'utf-8');
+          if (/^GEMINI_API_KEY=.*$/m.test(envStr)) {
+            envStr = envStr.replace(/^GEMINI_API_KEY=.*$/m, `GEMINI_API_KEY=${clean}`);
+          } else {
+            envStr += `\nGEMINI_API_KEY=${clean}\n`;
+          }
+          if (/^GEMINI_MODEL=.*$/m.test(envStr)) {
+            envStr = envStr.replace(/^GEMINI_MODEL=.*$/m, `GEMINI_MODEL=${probe.model}`);
+          }
+          fs.writeFileSync(gatewayEnvFile, envStr, 'utf-8');
+          console.log(`[IBVAP Gateway] GEMINI_API_KEY persisted to ${gatewayEnvFile}`);
+        }
       } catch (err: any) {
-        console.warn('[IBVAP Gateway] Could not write .env.local:', err.message);
+        console.warn('[IBVAP Gateway] Could not write environment files:', err.message);
       }
     }
 
@@ -1386,9 +1403,9 @@ app.post('/api/ai/remove-key', async (req, res) => {
   });
 });
 
-// POST /api/ai/chat - Conversational interactive surveillance assistant
+// POST /api/ai/chat and /api/chat - Conversational interactive surveillance assistant
 app.post(
-  '/api/ai/chat',
+  ['/api/ai/chat', '/api/chat'],
   aiRateLimiter,
   aiAccessControl,
   frameJsonParser,
