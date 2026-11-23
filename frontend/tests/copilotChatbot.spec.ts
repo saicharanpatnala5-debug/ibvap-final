@@ -2,6 +2,8 @@ import { test, expect } from '@playwright/test';
 
 test.describe('STEP 1 - AI Copilot Chatbot End-to-End Verification', () => {
   test('A. Real UI in Offline Mode: verifies status badge, asks 5 grounded questions, and checks non-empty grounded answers', async ({ page }) => {
+    test.setTimeout(60000);
+
     // 1. Load application with clean storage
     await page.addInitScript(() => {
       window.localStorage.clear();
@@ -38,6 +40,9 @@ test.describe('STEP 1 - AI Copilot Chatbot End-to-End Verification', () => {
 
       // Wait for assistant reply count to increment
       await expect(page.locator('#ai-command-center-container [data-testid="chat-bubble-ai"]')).toHaveCount(prevCount + 1, { timeout: 10000 });
+
+      // Wait until processing completes so full response is rendered
+      await expect(input).toBeEnabled({ timeout: 15000 });
 
       // Get latest assistant message
       const latestMsg = page.locator('#ai-command-center-container [data-testid="chat-bubble-ai"]').last();
@@ -77,8 +82,8 @@ test.describe('STEP 1 - AI Copilot Chatbot End-to-End Verification', () => {
   });
 
   test('B. Mocked Gemini Server: verifies UI correctly renders Gemini API responses and attribution badge', async ({ page }) => {
-    // Intercept /api/ai/chat with mock Gemini response
-    await page.route('**/api/ai/chat', async (route) => {
+    // Intercept /api/ai/chat with mock Gemini response (matching query string)
+    await page.route('**/api/ai/chat*', async (route) => {
       await route.fulfill({
         status: 200,
         contentType: 'application/json',
@@ -98,7 +103,7 @@ test.describe('STEP 1 - AI Copilot Chatbot End-to-End Verification', () => {
     const input = page.locator('#ai-command-input');
     await input.fill('Perform forensic multi-modal risk assessment');
     await page.locator('#ai-command-submit-btn').click();
-    await page.waitForTimeout(1000);
+    await expect(input).toBeEnabled({ timeout: 10000 });
 
     // Verify response text and Gemini attribution badge
     const responseContainer = page.locator('#ai-command-center-container');

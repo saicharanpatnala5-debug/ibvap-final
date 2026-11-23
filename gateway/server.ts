@@ -652,7 +652,24 @@ export function countEntities(entities: any[]): {
   };
 }
 
-export function computeOfflineTrackerFallback(context: any): string {
+export function computeOfflineTrackerFallback(context: any, message?: string, cameraName?: string): string {
+  const p = (message || '').trim();
+
+  // If the query asks about specific telemetry aspects (plates, alerts, zones, recommendations, weapons, timestamps):
+  if (
+    p &&
+    (/\b(plates?|anpr|license|registration|vahan|rto|review|unreadable)\b/i.test(p) ||
+     /\bwhy\b/i.test(p) ||
+     (/\b(reason|cause|triggered|fired)\b/i.test(p) && /\b(alert|incident|breach|loiter|alarm)\b/i.test(p)) ||
+     /\b(zones?|perimeter|shoulder|boundary|geofence|fences?)\b/i.test(p) ||
+     /\b(recommend|action|dispatch|escalat|mitigat|suggest)\b/i.test(p) ||
+     /\b(weapons?|firearms?|guns?|knives?|threats?)\b/i.test(p) ||
+     /\b(?:at\s+(\d+(?:\.\d+)?)\s*(?:s|sec|seconds?)?|time\s+(\d+(?:\.\d+)?)|timestamp\s+(\d+(?:\.\d+)?))\b/i.test(p))
+  ) {
+    const grounded = generateGroundedFallbackResponse(p, context, cameraName);
+    return `Offline mode: tracker data only. To enable visual understanding, set your Gemini API key.\n\n${grounded}`;
+  }
+
   const vis = Array.isArray(context?.entities) ? context.entities : [];
   const clip = Array.isArray(context?.clipTotalEntities) && context.clipTotalEntities.length > 0
     ? context.clipTotalEntities
@@ -1526,7 +1543,7 @@ ${compactTelemetry}`;
                     res.setHeader('Connection', 'keep-alive');
                   }
                   if (!res.writableEnded) {
-                    const fallbackText = computeOfflineTrackerFallback(enrichedContext);
+                    const fallbackText = computeOfflineTrackerFallback(enrichedContext, message, cameraName);
                     res.write(`data: ${JSON.stringify({ text: fallbackText, done: true, source: 'fallback', reason: err.message })}\n\n`);
                     res.end();
                   }
@@ -1560,7 +1577,7 @@ ${compactTelemetry}`;
     }
 
     // Offline (no key or all providers failed): minimal honest tracker-only fallback
-    const fallbackText = computeOfflineTrackerFallback(enrichedContext);
+    const fallbackText = computeOfflineTrackerFallback(enrichedContext, message, cameraName);
     if (isStreamRequested) {
       if (!res.headersSent) {
         res.setHeader('Content-Type', 'text/event-stream');

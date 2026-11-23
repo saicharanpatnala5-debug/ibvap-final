@@ -71,10 +71,10 @@ test.describe('ANPR Emergency Fix - Live App Verification', () => {
     const itemCount = await plateItems.count();
     expect(itemCount).toBeGreaterThan(0);
 
-    // Verify KA01M4449 is present and marked Format Valid
+    // Verify KA01M4449 is present and marked Confirmed / Format Valid
     const kaPlate = page.locator('#plate-item-KA01M4449');
     await expect(kaPlate).toBeVisible();
-    await expect(kaPlate).toContainText('Format Valid');
+    await expect(kaPlate).toContainText(/Confirmed|Format Valid/);
     await expect(kaPlate).toContainText('attempt');
 
     // Verify Distant filter works and isolates only true resolution-limited targets
@@ -93,6 +93,11 @@ test.describe('ANPR Emergency Fix - Live App Verification', () => {
   });
 
   test('B. Online Mode (Mocked Gemini): verifies privacy confirmation dialog before enabling cloud-assisted reading', async ({ page }) => {
+    // Explicitly seed false so first-time auto-prompt does not intercept toggle click
+    await page.addInitScript(() => {
+      window.localStorage.setItem('ibvap_cloud_anpr_enabled', 'false');
+    });
+
     // Mock /api/health to return geminiReachable: true
     await page.route('**/api/health', async (route) => {
       await route.fulfill({

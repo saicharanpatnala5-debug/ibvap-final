@@ -698,8 +698,8 @@ export const ANPRRegistryView: React.FC<ANPRRegistryViewProps> = ({
           </div>
         </div>
 
-        {/* Stats Grid: Total Logged Reads, Format Valid, Watchlist Flagged, Electric Vehicles (EV) */}
-        <div className="grid grid-cols-2 sm:grid-cols-4 gap-3 mt-5 pt-4 border-t border-neutral-800/70">
+        {/* Stats Grid: Total Logged Reads, Format Valid, Needs Review, Distant Targets, Watchlist Flagged, Electric Vehicles (EV) */}
+        <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-6 gap-3 mt-5 pt-4 border-t border-neutral-800/70">
           <div className="rounded-lg bg-neutral-950/70 border border-neutral-800/80 p-3">
             <span className="text-[11px] font-medium text-neutral-400 block">Total Plates Logged</span>
             <span id="anpr-total-plates-metric" className="text-xl font-bold text-neutral-100 font-mono">{metrics.total} Logged Reads</span>
@@ -707,6 +707,14 @@ export const ANPRRegistryView: React.FC<ANPRRegistryViewProps> = ({
           <div className="rounded-lg bg-neutral-950/70 border border-neutral-800/80 p-3">
             <span className="text-[11px] font-medium text-neutral-400 block">Format Valid</span>
             <span id="anpr-format-valid-metric" className="text-xl font-bold text-emerald-400 font-mono">{metrics.formatValid}</span>
+          </div>
+          <div className="rounded-lg bg-neutral-950/70 border border-neutral-800/80 p-3">
+            <span className="text-[11px] font-medium text-neutral-400 block">Needs Review</span>
+            <span id="anpr-needs-review-metric" className="text-xl font-bold text-amber-400 font-mono">{metrics.needsReview}</span>
+          </div>
+          <div className="rounded-lg bg-neutral-950/70 border border-neutral-800/80 p-3">
+            <span className="text-[11px] font-medium text-neutral-400 block">Distant (Resolution Limited)</span>
+            <span id="anpr-distant-metric" className="text-xl font-bold text-neutral-400 font-mono">{metrics.distant}</span>
           </div>
           <div className="rounded-lg bg-neutral-950/70 border border-neutral-800/80 p-3">
             <span className="text-[11px] font-medium text-neutral-400 block">Watchlist Flagged</span>
@@ -773,7 +781,7 @@ export const ANPRRegistryView: React.FC<ANPRRegistryViewProps> = ({
               </div>
               <p className="text-[11px] text-neutral-400 mt-0.5">
                 {!isGeminiOnline
-                  ? `Local OCR active: Cloud ANPR unavailable (${geminiOfflineReason || 'no API key configured'}).`
+                  ? `Local OCR active: Cloud ANPR unavailable (Disabled: Gemini API is offline - ${geminiOfflineReason || 'no API key configured'}).`
                   : !cloudAnprEnabled
                   ? 'Local OCR active (Cloud-assisted reading disabled by operator).'
                   : 'Automatically enhances unvalidated or low-confidence reads via server-side Gemini Vision.'}

@@ -748,9 +748,9 @@ export const CameraFeed: React.FC<CameraFeedProps> = ({
                     detectionConfidence: anprResult.detectionConfidence,
                   });
                 }
+                // Record plate in autoOpened set without forcefully popping open a blocking modal
                 if (anprResult.isValidFormat && !autoOpenedPlatesRef.current.has(anprResult.plateText)) {
                   autoOpenedPlatesRef.current.add(anprResult.plateText);
-                  onSelectPlate(anprResult.plateText, bestCrop);
                 }
               } else if (anprResult.formatType === 'distance_gated') {
                 if (onPlateDetected && !autoOpenedPlatesRef.current.has(`dist-${track.id}`)) {
