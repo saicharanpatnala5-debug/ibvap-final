@@ -187,8 +187,19 @@ if (fs.existsSync(jarPath)) {
 }
 
 // Gateway + Frontend (Port 3000)
+const isProduction = process.argv.includes('--prod') || process.env.NODE_ENV === 'production';
 const npmCmd = process.platform === 'win32' ? 'npm.cmd' : 'npm';
-startProcess('gateway', npmCmd, ['--workspace=gateway', 'run', 'dev'], ROOT_DIR);
+if (isProduction) {
+  console.log('[Launcher] Starting Gateway in PRODUCTION mode (serving pre-built frontend/dist)');
+  const gatewayDist = path.join(GATEWAY_DIR, 'dist', 'server.js');
+  if (fs.existsSync(gatewayDist)) {
+    startProcess('gateway', 'node', [gatewayDist], GATEWAY_DIR, { NODE_ENV: 'production' });
+  } else {
+    startProcess('gateway', npmCmd, ['--workspace=gateway', 'run', 'start'], ROOT_DIR, { NODE_ENV: 'production' });
+  }
+} else {
+  startProcess('gateway', npmCmd, ['--workspace=gateway', 'run', 'dev'], ROOT_DIR);
+}
 
 // Health readiness checker: waits until gateway (3000), ai-service (8000), and core-service (8080) are healthy
 const http = require('http');
