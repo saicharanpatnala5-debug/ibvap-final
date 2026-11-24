@@ -35,6 +35,8 @@ import {
 } from './services/storageService';
 
 export default function App() {
+  const showTopology = import.meta.env.VITE_ENABLE_TOPOLOGY_LABS === 'true';
+
   // Navigation
   const [activeTab, setActiveTab] = useState<ActiveTab>('monitoring');
 
@@ -807,7 +809,7 @@ export default function App() {
           </div>
         )}
 
-        {activeTab === 'topology' && (
+        {activeTab === 'topology' && showTopology && (
           <div className="h-[calc(100vh-140px)] pb-28">
             <TopologyView
               cameras={cameras}

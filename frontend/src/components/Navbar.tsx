@@ -38,7 +38,9 @@ export const Navbar: React.FC<NavbarProps> = ({
   onLoadDemoScenario,
   onResetPlatform,
 }) => {
-  // Exactly 6 primary navigation items - strict <= 6 items requirement
+  const showTopology = import.meta.env.VITE_ENABLE_TOPOLOGY_LABS === 'true';
+
+  // Navigation items conforming strictly to SIH PRD requirements (Labs features hidden by default)
   const navItems = [
     {
       id: 'monitoring' as ActiveTab,
@@ -72,12 +74,16 @@ export const Navbar: React.FC<NavbarProps> = ({
       icon: Sparkles,
       iconClass: 'text-amber-400',
     },
-    {
-      id: 'topology' as ActiveTab,
-      label: 'Topology',
-      icon: Radio,
-      badge: 'Labs',
-    },
+    ...(showTopology
+      ? [
+          {
+            id: 'topology' as ActiveTab,
+            label: 'Topology',
+            icon: Radio,
+            badge: 'Labs',
+          },
+        ]
+      : []),
   ];
 
   return (

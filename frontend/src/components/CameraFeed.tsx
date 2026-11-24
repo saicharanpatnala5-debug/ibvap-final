@@ -250,8 +250,9 @@ export const CameraFeed: React.FC<CameraFeedProps> = ({
   const [isAnalyzingVideo, setIsAnalyzingVideo] = useState<boolean>(() => videoAnalysisService.isAnalyzing(camera.id));
   const [analysisProgress, setAnalysisProgress] = useState<number>(() => videoAnalysisService.getProgress(camera.id));
 
-  // Weapon Detection (Beta) state
-  const [weaponDetectionActive, setWeaponDetectionActive] = useState<boolean>(Boolean(camera.weaponDetectionEnabled));
+  // Weapon Detection (Beta) state - gated behind feature flag (default false)
+  const showWeaponsBeta = import.meta.env.VITE_ENABLE_WEAPONS_BETA === 'true';
+  const [weaponDetectionActive, setWeaponDetectionActive] = useState<boolean>(showWeaponsBeta && Boolean(camera.weaponDetectionEnabled));
   const detectedWeaponsRef = useRef<PossibleWeaponEntity[]>([]);
   const lastWeaponAlertTimeRef = useRef<number>(0);
 
@@ -1693,21 +1694,23 @@ export const CameraFeed: React.FC<CameraFeedProps> = ({
             <span>Overlay {showDetectionsOverlay ? 'ON' : 'OFF'}</span>
           </button>
 
-          {/* Weapon Detection (Beta) Toggle */}
-          <button
-            type="button"
-            id={`toggle-weapon-btn-${camera.id}`}
-            onClick={handleToggleWeaponDetection}
-            className={`flex items-center gap-1 rounded-lg px-2.5 py-1 text-xs font-medium border transition-colors ${
-              weaponDetectionActive
-                ? 'border-purple-500/60 bg-purple-950/50 text-purple-300 shadow-sm shadow-purple-900/30'
-                : 'border-neutral-800 bg-neutral-900 text-neutral-400 hover:text-neutral-200'
-            }`}
-            title="Toggle weapon detection candidate scanner (Beta)"
-          >
-            <ShieldAlert className="h-3.5 w-3.5" />
-            <span>Weapons (Beta) {weaponDetectionActive ? 'ON' : 'OFF'}</span>
-          </button>
+          {/* Weapon Detection (Beta) Toggle - Gated behind feature flag */}
+          {showWeaponsBeta && (
+            <button
+              type="button"
+              id={`toggle-weapon-btn-${camera.id}`}
+              onClick={handleToggleWeaponDetection}
+              className={`flex items-center gap-1 rounded-lg px-2.5 py-1 text-xs font-medium border transition-colors ${
+                weaponDetectionActive
+                  ? 'border-purple-500/60 bg-purple-950/50 text-purple-300 shadow-sm shadow-purple-900/30'
+                  : 'border-neutral-800 bg-neutral-900 text-neutral-400 hover:text-neutral-200'
+              }`}
+              title="Toggle weapon detection candidate scanner (Beta)"
+            >
+              <ShieldAlert className="h-3.5 w-3.5" />
+              <span>Weapons (Beta) {weaponDetectionActive ? 'ON' : 'OFF'}</span>
+            </button>
+          )}
 
           {/* Events Drawer Toggle */}
           <button
