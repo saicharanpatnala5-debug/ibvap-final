@@ -8,6 +8,7 @@ import jakarta.annotation.PostConstruct;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.http.HttpStatus;
 import org.springframework.http.ResponseEntity;
+import org.springframework.security.crypto.bcrypt.BCryptPasswordEncoder;
 import org.springframework.web.bind.annotation.*;
 
 import java.nio.charset.StandardCharsets;
@@ -20,6 +21,7 @@ import java.util.UUID;
 @RestController
 @RequestMapping("/api/auth")
 public class AuthController {
+    private static final BCryptPasswordEncoder BCRYPT = new BCryptPasswordEncoder(10);
     private final UserRepository userRepository;
     private final AuditService auditService;
 
@@ -33,29 +35,38 @@ public class AuthController {
         this(null, auditService);
     }
 
+    public static String hashPassword(String rawPassword) {
+        if (rawPassword == null) return null;
+        return BCRYPT.encode(rawPassword);
+    }
+
     public static String hashPassword(String rawPassword, String salt) {
-        try {
-            MessageDigest md = MessageDigest.getInstance("SHA-256");
-            md.update(salt.getBytes(StandardCharsets.UTF_8));
-            byte[] bytes = md.digest(rawPassword.getBytes(StandardCharsets.UTF_8));
-            StringBuilder sb = new StringBuilder();
-            for (byte b : bytes) {
-                sb.append(String.format("%02x", b));
-            }
-            return "sha256$" + salt + "$" + sb.toString();
-        } catch (NoSuchAlgorithmException e) {
-            throw new RuntimeException("SHA-256 not supported", e);
-        }
+        // Industry-standard BCrypt with per-password secure random salt and work factor 10
+        return hashPassword(rawPassword);
     }
 
     public static boolean verifyPassword(String rawPassword, String storedHash) {
         if (storedHash == null || rawPassword == null) return false;
+        if (storedHash.startsWith("$2a$") || storedHash.startsWith("$2b$") || storedHash.startsWith("$2y$")) {
+            return BCRYPT.matches(rawPassword, storedHash);
+        }
         if (storedHash.startsWith("sha256$")) {
             String[] parts = storedHash.split("\\$");
             if (parts.length == 3) {
                 String salt = parts[1];
-                String computed = hashPassword(rawPassword, salt);
-                return computed.equals(storedHash);
+                try {
+                    MessageDigest md = MessageDigest.getInstance("SHA-256");
+                    md.update(salt.getBytes(StandardCharsets.UTF_8));
+                    byte[] bytes = md.digest(rawPassword.getBytes(StandardCharsets.UTF_8));
+                    StringBuilder sb = new StringBuilder();
+                    for (byte b : bytes) {
+                        sb.append(String.format("%02x", b));
+                    }
+                    String computed = "sha256$" + salt + "$" + sb.toString();
+                    return computed.equals(storedHash);
+                } catch (NoSuchAlgorithmException e) {
+                    return false;
+                }
             }
         }
         return storedHash.equals(rawPassword);

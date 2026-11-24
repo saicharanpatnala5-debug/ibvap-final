@@ -77,7 +77,7 @@ public class DatabaseConfig {
             config.setMaximumPoolSize(10);
         } else {
             new File("./data").mkdirs();
-            String fileH2 = "jdbc:h2:file:./data/ibvap;DB_CLOSE_DELAY=-1;MODE=PostgreSQL";
+            String fileH2 = "jdbc:h2:file:./data/ibvap;DB_CLOSE_DELAY=-1;AUTO_SERVER=TRUE;MODE=PostgreSQL";
             ACTIVE_DATABASE_ENGINE = "H2_FILE_FALLBACK";
             ACTIVE_DATABASE_URL = fileH2;
             log.warn("[IBVAP Core] PostgreSQL is unreachable on configured URL; operating with persistent local database at {}", fileH2);
