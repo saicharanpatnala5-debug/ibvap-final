@@ -425,29 +425,56 @@ export class AlertEngine {
     let additiveScore = ruleWeight;
 
     // PRD Section 12 Inward Direction Contribution (+20)
-    const isHeadingInward = track.direction && (
-      track.direction.toLowerCase().includes('in') ||
-      track.direction.toLowerCase().includes('south') ||
-      track.direction.toLowerCase().includes('down') ||
-      track.direction.toLowerCase().includes('towards')
-    );
+    // Strictly defined relative to the zone: Velocity vector v points inward toward the zone centroid C
+    let isHeadingInward = false;
+    let inwardDetail = 'Trajectory vector points inward toward secured perimeter core';
+    const zonePolygon = zone ? ((zone as any).points || (zone as any).polygon) : null;
+    if (zone && zonePolygon && zonePolygon.length >= 3 && track.trajectory && track.trajectory.length >= 2) {
+      const cx = zonePolygon.reduce((acc: number, p: any) => acc + p.x, 0) / zonePolygon.length;
+      const cy = zonePolygon.reduce((acc: number, p: any) => acc + p.y, 0) / zonePolygon.length;
+      const pCurr = track.trajectory[track.trajectory.length - 1];
+      const pPrev = track.trajectory[Math.max(0, track.trajectory.length - 3)];
+      const vx = pCurr.x - pPrev.x;
+      const vy = pCurr.y - pPrev.y;
+      const rx = cx - pCurr.x;
+      const ry = cy - pCurr.y;
+      const vMag = Math.sqrt(vx * vx + vy * vy);
+      const rMag = Math.sqrt(rx * rx + ry * ry);
+      if (vMag > 0.0001 && rMag > 0.0001) {
+        const cosTheta = (vx * rx + vy * ry) / (vMag * rMag);
+        if (cosTheta > 0.35) {
+          isHeadingInward = true;
+          const angleDeg = Math.round(Math.acos(Math.max(-1, Math.min(1, cosTheta))) * (180 / Math.PI));
+          inwardDetail = `Trajectory vector points inward toward zone centroid (${angleDeg}° angle to zone center)`;
+        }
+      }
+    } else if (track.direction) {
+      const d = track.direction.toLowerCase();
+      if (d.includes('in') || d.includes('south') || d.includes('down') || d.includes('towards')) {
+        isHeadingInward = true;
+        inwardDetail = `Trajectory vector directed inward (${track.direction}) toward sector`;
+      }
+    }
+
     if (isHeadingInward && ruleType !== 'wrong_direction') {
       factors.push({
         id: 'prd_sec12_inward',
         label: 'Inward Direction (+20)',
         score: 20,
-        description: 'Trajectory vector points inward toward secured perimeter core',
+        description: inwardDetail,
       });
       additiveScore += 20;
     }
 
     // PRD Section 12 Time of Day / Low Lux Contribution (+15)
+    // Strictly derived from optical pixel luminance (< 45 lux) OR operator camera profile,
+    // NEVER from host laptop wall clock!
     if (isNightMode) {
       factors.push({
         id: 'prd_sec12_night',
         label: 'After-Hours / Low-Lux Environment (+15)',
         score: 15,
-        description: 'Activity recorded outside standard operational hours in low lux lighting',
+        description: 'Derived from optical frame analysis (< 45 lux average) or operator after-hours camera profile',
       });
       additiveScore += 15;
     }

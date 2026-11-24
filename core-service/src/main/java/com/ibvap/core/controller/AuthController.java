@@ -10,6 +10,9 @@ import org.springframework.http.HttpStatus;
 import org.springframework.http.ResponseEntity;
 import org.springframework.web.bind.annotation.*;
 
+import java.nio.charset.StandardCharsets;
+import java.security.MessageDigest;
+import java.security.NoSuchAlgorithmException;
 import java.util.Map;
 import java.util.Optional;
 import java.util.UUID;
@@ -30,6 +33,34 @@ public class AuthController {
         this(null, auditService);
     }
 
+    public static String hashPassword(String rawPassword, String salt) {
+        try {
+            MessageDigest md = MessageDigest.getInstance("SHA-256");
+            md.update(salt.getBytes(StandardCharsets.UTF_8));
+            byte[] bytes = md.digest(rawPassword.getBytes(StandardCharsets.UTF_8));
+            StringBuilder sb = new StringBuilder();
+            for (byte b : bytes) {
+                sb.append(String.format("%02x", b));
+            }
+            return "sha256$" + salt + "$" + sb.toString();
+        } catch (NoSuchAlgorithmException e) {
+            throw new RuntimeException("SHA-256 not supported", e);
+        }
+    }
+
+    public static boolean verifyPassword(String rawPassword, String storedHash) {
+        if (storedHash == null || rawPassword == null) return false;
+        if (storedHash.startsWith("sha256$")) {
+            String[] parts = storedHash.split("\\$");
+            if (parts.length == 3) {
+                String salt = parts[1];
+                String computed = hashPassword(rawPassword, salt);
+                return computed.equals(storedHash);
+            }
+        }
+        return storedHash.equals(rawPassword);
+    }
+
     @PostConstruct
     public void initUsers() {
         if (userRepository != null) {
@@ -39,8 +70,12 @@ public class AuthController {
                             ? System.getenv("ADMIN_PASSWORD").trim() : "admin123";
                     String operatorPass = System.getenv("OPERATOR_PASSWORD") != null && !System.getenv("OPERATOR_PASSWORD").isBlank()
                             ? System.getenv("OPERATOR_PASSWORD").trim() : "operator123";
-                    User admin = new User("usr-admin", "admin", adminPass, "ADMIN", "System Administrator");
-                    User operator = new User("usr-operator", "operator", operatorPass, "OPERATOR", "Security Operator");
+                    
+                    String adminSalt = UUID.randomUUID().toString().substring(0, 8);
+                    String operatorSalt = UUID.randomUUID().toString().substring(0, 8);
+
+                    User admin = new User("usr-admin", "admin", hashPassword(adminPass, adminSalt), "ADMIN", "System Administrator");
+                    User operator = new User("usr-operator", "operator", hashPassword(operatorPass, operatorSalt), "OPERATOR", "Security Operator");
                     userRepository.save(admin);
                     userRepository.save(operator);
                 }
@@ -64,7 +99,7 @@ public class AuthController {
                 Optional<User> userOpt = userRepository.findByUsername(username);
                 if (userOpt.isPresent()) {
                     User user = userOpt.get();
-                    if (!user.getPasswordHash().equals(password)) {
+                    if (!verifyPassword(password, user.getPasswordHash())) {
                         auditService.log(username, "LOGIN_FAILED", "AUTH", username, Map.of("reason", "invalid_password"));
                         return ResponseEntity.status(HttpStatus.UNAUTHORIZED).body(Map.of("error", "Invalid credentials"));
                     }

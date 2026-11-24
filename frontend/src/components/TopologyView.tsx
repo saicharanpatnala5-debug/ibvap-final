@@ -93,7 +93,7 @@ export const TopologyView: React.FC<TopologyViewProps> = ({
                   </div>
 
                   <div className="mt-3 pt-3 border-t border-neutral-800/80 flex items-center justify-between text-xs text-neutral-400">
-                    <span>Virtual Fences: {cam.zones.length}</span>
+                    <span>Virtual Fences: {(cam.zones || []).length}</span>
                     <span className="text-amber-400/80 group-hover:text-amber-400 font-medium">
                       View Feed →
                     </span>
@@ -120,7 +120,7 @@ export const TopologyView: React.FC<TopologyViewProps> = ({
                   </div>
                   <div className="flex items-center gap-6 text-neutral-400">
                     <span>Status: <strong className="text-emerald-400 font-normal">Active Ingestion</strong></span>
-                    <span>Zones: {cam.zones.length}</span>
+                    <span>Zones: {(cam.zones || []).length}</span>
                     <span>FPS: {cam.fps}</span>
                   </div>
                 </div>

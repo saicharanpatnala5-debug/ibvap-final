@@ -162,8 +162,8 @@ export function saveStoredCameras(cameras: CameraFeedItem[]) {
   try {
     const sanitized = cameras.slice(0, 20).map((c) => ({
       ...c,
-      sourceUrl: c.sourceType === 'stream' ? c.sourceUrl : c.sourceUrl.startsWith('blob:') ? '' : c.sourceUrl,
-      status: c.sourceType === 'file' && c.sourceUrl.startsWith('blob:') ? 'paused' : c.status,
+      sourceUrl: c.sourceType === 'stream' ? (c.sourceUrl || '') : (c.sourceUrl && c.sourceUrl.startsWith('blob:') ? '' : (c.sourceUrl || '')),
+      status: c.sourceType === 'file' && c.sourceUrl && c.sourceUrl.startsWith('blob:') ? 'paused' : c.status,
     }));
     localStorage.setItem(STORAGE_KEYS.CAMERAS, wrapWithEnvelope(sanitized));
   } catch (err) {

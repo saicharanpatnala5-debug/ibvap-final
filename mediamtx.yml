@@ -1,0 +1,4 @@
+protocols: [tcp]
+rtspAddress: :8554
+paths:
+  all:

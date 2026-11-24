@@ -677,10 +677,10 @@ As per platform governance, the AI will not execute actions autonomously. Please
     const camAlerts = alerts.filter((a) => a.cameraId === cam.id);
     const topAlert = camAlerts.sort((a, b) => b.riskScore - a.riskScore)[0];
     const nightFactor = cam.isNightMode ? 'Active night-vision / curfew profile (+15 pts)' : 'Standard daylight profile';
-    const zoneCount = cam.zones.length;
+    const zoneCount = (cam.zones || []).length;
 
     const evidenceList = [
-      `Sensor Status: ${cam.status.toUpperCase()} (${cam.fps} FPS, ${cam.zones.length} configured virtual zones)`,
+      `Sensor Status: ${cam.status.toUpperCase()} (${cam.fps} FPS, ${(cam.zones || []).length} configured virtual zones)`,
       `Environmental Context: ${nightFactor}`,
       `Total Logged Incidents: ${camAlerts.length} event(s)`,
     ];

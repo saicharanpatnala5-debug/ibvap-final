@@ -2206,15 +2206,23 @@ async function startServer() {
   if (process.env.NODE_ENV === 'production') {
     const serviceToken = process.env.SERVICE_TOKEN?.trim();
     const defaultTokens = ['ibvap-internal-secret-token-change-in-prod', 'default-token', 'secret', ''];
+    if (process.env.STRICT_PROD === 'true' && (!serviceToken || defaultTokens.includes(serviceToken))) {
+      console.error('[SECURITY ERROR] Production mode cannot start with default or empty SERVICE_TOKEN. Configure SERVICE_TOKEN in environment.');
+      process.exit(1);
+    }
     if (!serviceToken || defaultTokens.includes(serviceToken)) {
       process.env.SERVICE_TOKEN = 'ibvap-prod-token-' + Buffer.from(Date.now().toString()).toString('hex');
       console.log('[IBVAP Gateway] Production mode: active with secure auto-generated SERVICE_TOKEN.');
     }
   }
 
-  const frontendRoot = fs.existsSync(path.resolve(process.cwd(), 'frontend'))
-    ? path.resolve(process.cwd(), 'frontend')
-    : path.resolve(__dirname, '../frontend');
+  const candidateFrontendDirs = [
+    path.resolve(process.cwd(), 'frontend'),
+    path.resolve(process.cwd(), '../frontend'),
+    path.resolve(__dirname, '../../frontend'),
+    path.resolve(__dirname, '../frontend'),
+  ];
+  const frontendRoot = candidateFrontendDirs.find((d) => fs.existsSync(path.join(d, 'dist', 'index.html')) || fs.existsSync(d)) || candidateFrontendDirs[0];
 
   const distPath = path.resolve(frontendRoot, 'dist');
   const distIndex = path.join(distPath, 'index.html');

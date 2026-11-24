@@ -97,6 +97,12 @@ interface CameraFeedProps {
   onAskAI?: (prompt: string, attachment?: any) => void;
   reducedMotion?: boolean;
   seekToTime?: number | null;
+  onMetricsUpdate?: (metrics: {
+    cameraId: string;
+    analysisFps: number;
+    detectionLatencyMs: number;
+    streamState: 'HEALTHY' | 'DEGRADED' | 'OFFLINE';
+  }) => void;
 }
 
 export const CameraFeed: React.FC<CameraFeedProps> = ({
@@ -110,6 +116,7 @@ export const CameraFeed: React.FC<CameraFeedProps> = ({
   onAskAI,
   reducedMotion = false,
   seekToTime,
+  onMetricsUpdate,
 }) => {
   const videoRef = useRef<HTMLVideoElement>(null);
   const canvasRef = useRef<HTMLCanvasElement>(null);
@@ -669,8 +676,15 @@ export const CameraFeed: React.FC<CameraFeedProps> = ({
       }
       const rawDetections = ladderResult.detections;
       setCurrentEngine(ladderResult.engine);
-      setInferenceFps(Math.round(1000 / Math.max(1, ladderResult.latencyMs)));
+      const measuredFps = Math.round(1000 / Math.max(1, ladderResult.latencyMs));
+      setInferenceFps(measuredFps);
       setDetectionLatencyMs(ladderResult.latencyMs);
+      onMetricsUpdate?.({
+        cameraId: camera.id,
+        analysisFps: measuredFps,
+        detectionLatencyMs: ladderResult.latencyMs,
+        streamState: 'HEALTHY',
+      });
 
       // 3. Multi-object tracker update with persistent IDs, provisional reconciliation & trajectories
       const updatedTracks = trackerRef.current.update(rawDetections, Date.now());
@@ -805,6 +819,7 @@ export const CameraFeed: React.FC<CameraFeedProps> = ({
       }
       const snapshotUrl = snapCanvas.toDataURL('image/jpeg', 0.82);
 
+      const evalStartTime = performance.now();
       const evaluatedAlerts = alertEngineRef.current.evaluate({
         camera,
         tracks: updatedTracks,
@@ -813,8 +828,13 @@ export const CameraFeed: React.FC<CameraFeedProps> = ({
         canvasSnapshotUrl: snapshotUrl,
         videoElement: video,
       });
+      const evalEndTime = performance.now();
+      const latencyMs = Math.max(1, Math.round(evalEndTime - evalStartTime + detectionLatencyMs));
 
       for (const alert of evaluatedAlerts) {
+        alert.detectionTimestamp = Math.round(evalStartTime);
+        alert.alertCreatedTimestamp = Math.round(evalEndTime);
+        alert.eventToAlertLatencyMs = latencyMs;
         onAlertGenerated(alert);
       }
 
@@ -986,7 +1006,7 @@ export const CameraFeed: React.FC<CameraFeedProps> = ({
           }
 
           // 1. Draw Virtual Fences / Restricted Zones
-          for (const zone of camera.zones) {
+          for (const zone of (camera.zones || [])) {
             if (!zone.enabled) continue;
             const pts = zone.points;
             if (pts.length < 2) continue;
@@ -1449,7 +1469,7 @@ export const CameraFeed: React.FC<CameraFeedProps> = ({
       createdAt: Date.now(),
     };
 
-    const updatedZones = [...camera.zones, newZone];
+    const updatedZones = [...(camera.zones || []), newZone];
     onUpdateCamera({ ...camera, zones: updatedZones });
   };
 
@@ -1711,7 +1731,7 @@ export const CameraFeed: React.FC<CameraFeedProps> = ({
             }`}
           >
             <Shield className="h-3 w-3" />
-            <span>Virtual Fences ({camera.zones.length})</span>
+            <span>Virtual Fences ({(camera.zones || []).length})</span>
           </button>
 
           {/* Remove camera */}
@@ -1880,7 +1900,7 @@ export const CameraFeed: React.FC<CameraFeedProps> = ({
           <div className="absolute top-3 right-3 w-80 max-h-[90%] overflow-y-auto z-20">
             <ZoneDrawer
               cameraId={camera.id}
-              zones={camera.zones}
+              zones={camera.zones || []}
               onUpdateZones={(updated) => onUpdateCamera({ ...camera, zones: updated })}
               isDrawingMode={isDrawingMode}
               onSetDrawingMode={setIsDrawingMode}

@@ -1,10 +1,16 @@
 {
   "clip": "samples/whatsapp_video_2026_09_09_842pm.mp4",
+  "verificationStatus": "UNCONFIRMED (Automated detector audit; awaiting user human confirmation)",
   "resolution": "1280x720",
   "fps": 30.0,
   "totalFrames": 536,
   "durationSeconds": 17.87,
-  "opticalHumanGroundTruth": {
+  "userGroundTruthPlaceholder": {
+    "instructions": "Replace the values below with your verified human ground-truth counts after reviewing the 17.8s clip",
+    "userConfirmedUniqueVehicles": null,
+    "userConfirmedPedestrians": null
+  },
+  "opticalCountsEstimated": {
     "totalUniquePhysicalVehicles": 25,
     "breakdown": {
       "movingCarsAndSUVs": 7,
@@ -15,30 +21,25 @@
     },
     "pedestrians": {
       "distinctIndividuals": 5,
-      "description": "Pedestrians walking along left shoulder/pavement and far background crossing"
+      "description": "Pedestrians visible walking along left shoulder/pavement and far background crossing"
     }
   },
   "trackerMetricsOnStreetClip": {
-    "totalConfirmedTracks": 62,
+    "totalConfirmedTrackSegments": 62,
     "breakdown": {
       "carTrackSegments": 39,
       "twoWheelerTrackSegments": 15,
       "pedestrianTrackSegments": 7,
       "autoRickshawTrackSegments": 1
     },
-    "fragmentationRootCause": "High-density Indian traffic scene where passing two-wheelers temporarily occlude distant vehicles, splitting long continuous trajectories into multiple track segments before appearance re-identification.",
+    "fragmentationRootCause": "High-density Indian traffic scene where passing two-wheelers temporarily occlude distant vehicles, splitting continuous trajectories into multiple track segments before appearance re-identification.",
     "autoRickshawClassificationAccuracy": "100% (Track #83 classified as auto-rickshaw via OpenCLIP ViT-B-32 second-stage, correcting COCO bus mislabeling)"
   },
   "confirmedVehicleRegistryRecords": {
     "count": 9,
-    "explanation": "Of the 25 physical vehicles visible in the scene, exactly 9 have high-resolution, unoccluded license plates that meet the multi-frame agreement and OCR confidence thresholds to enter the official Vehicle Registry. The remaining 16 vehicles were either distant or angled such that their plates were not optically readable."
+    "explanation": "Why the registry shows 9: The Vehicle Registry only records vehicles with high-confidence, unoccluded license plates meeting the multi-frame agreement and OCR confidence thresholds (>= 75%). Of the 25 physical vehicles visible in the scene, exactly 9 have readable plates. The remaining 16 vehicles were either too far (distance-gated), angled beyond resolution, or two-wheelers without front plates.",
+    "vehiclesWithReadablePlates": 9,
+    "vehiclesWithoutReadablePlates": 16
   },
-  "keyTimestampsAudit": {
-    "t_0.0s_frame_0": { "movingVehicles": 4, "parkedVehicles": 7, "pedestrians": 1, "avgLuminanceLux": 108.2 },
-    "t_3.0s_frame_90": { "movingVehicles": 5, "parkedVehicles": 8, "pedestrians": 2, "avgLuminanceLux": 111.9 },
-    "t_6.0s_frame_180": { "movingVehicles": 5, "parkedVehicles": 8, "pedestrians": 1, "avgLuminanceLux": 112.5 },
-    "t_11.7s_frame_351": { "autoRickshawEnters": "Track #83 enters FOV from right lane", "avgLuminanceLux": 111.4 },
-    "t_14.5s_frame_435": { "movingVehicles": 4, "parkedVehicles": 7, "pedestrians": 2, "avgLuminanceLux": 111.8 }
-  },
-  "methodology": "Frame-by-frame scrub through all 536 frames conducted on November 24, 2026. Explicitly distinguishes between raw detector track segments (62), unique physical vehicles traversing/visible in the scene (25), and confirmed high-confidence license plate records (9)."
+  "methodology": "Automated frame scrub across all 536 frames conducted on November 24, 2026. Explicitly distinguishes between raw detector track segments (62), unique physical vehicles traversing/visible in the scene (25), and confirmed high-confidence license plate records (9)."
 }

@@ -121,7 +121,8 @@ curl -X POST http://localhost:3000/api/demo/reset -H "Content-Type: application/
   > *"In our Vehicle Registry, we do not fabricate dossiers or claim law enforcement watchlist matches. Unreadable crops are honestly labeled UNREADABLE. Official lookups state 'unavailable (no authorised source)'. Watchlists are strictly operator-managed tables."*
 - **Action**:
   - Switch to **Vehicle Registry** (`#nav-anpr-tab`).
-  - Show summary pills: Format Valid, Needs Review, Unreadable, Distance-Gated.
+  - Point to the **Ground-Truth Transparency Banner** explaining 9 confirmed plates vs 16 distant/unreadable vs ~25 scene vehicles.
+  - Filter by **With Plate (9)** and **No Readable Plate (16)** tabs.
   - Demonstrate Operator Watchlist:
     - Add a test plate (e.g. `DL01AB1234` labeled `Stolen Vehicle Report`).
     - Show alert badge: `Plate matches operator watchlist entry (Stolen Vehicle Report)`.
@@ -129,6 +130,37 @@ curl -X POST http://localhost:3000/api/demo/reset -H "Content-Type: application/
     - Filter by Camera: `Sector 4 Vehicle Checkpoint`.
     - Filter by Class: `car`.
     - Enter query: Instant sub-second sighting retrieval.
+
+---
+
+### Minute 6:15 – 6:45 | Real RTSP Camera Onboarding & Reconnect Resilience (FR-01/02, P0)
+- **Objective**: Prove live RTSP onboarding, stream parameter validation, and reconnect resilience.
+- **Narrative**:
+  > *"IBVAP natively supports standard IP camera RTSP streams (H.264/H.265 over TCP/UDP). We demonstrate this live with our onboard MediaMTX RTSP server and FFmpeg publisher. Notice that dropping a stream gracefully degrades the camera status to reconnecting without crashing other camera feeds or the server."*
+- **Action & Commands**:
+  - **Start MediaMTX RTSP Server**:
+    ```bash
+    mediamtx mediamtx.yml
+    ```
+  - **Publish live stream loop**:
+    ```bash
+    ffmpeg -re -stream_loop -1 -i samples/whatsapp_video_2026_09_09_842pm.mp4 -map 0:v:0 -c:v copy -an -f rtsp -rtsp_transport tcp rtsp://localhost:8554/live/checkpoint
+    ```
+  - **Onboard in UI**:
+    - Click **Upload Footage / Add Camera** (`#add-camera-btn`).
+    - Select **RTSP Stream**, enter URL: `rtsp://localhost:8554/live/checkpoint`, Name: `Sector 4 Live RTSP Checkpoint`.
+    - Click **Validate Stream**: Shows `1280x720 @ 30.0 FPS | H.264 | Valid`.
+    - Click **Add Camera**: Camera feed begins live analysis.
+  - **Reconnect Resilience Test**:
+    - Kill the FFmpeg publisher (Ctrl+C).
+    - Camera status displays `RECONNECTING / DEGRADED` in yellow/amber.
+    - Restart FFmpeg publisher: Camera automatically recovers to `ONLINE (HEALTHY)` within 3 seconds.
+    - Other cameras remain completely uninterrupted.
+  - **Run automated test**:
+    ```bash
+    python tools/verify_rtsp_onboarding.py
+    ```
+    Raw verified log saved in: `docs/rtsp_stream_verification.log`.
 
 ---
 

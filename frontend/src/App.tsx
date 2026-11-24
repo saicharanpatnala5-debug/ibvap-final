@@ -62,6 +62,23 @@ export default function App() {
   // Append-only platform audit event log
   const [eventLog, setEventLog] = useState<PlatformEventLogEntry[]>(() => loadStoredEventLog());
 
+  // Real analysis & HUD metrics state
+  const [activeAnalysisFps, setActiveAnalysisFps] = useState<number | null>(null);
+  const [activeDetectionLatencyMs, setActiveDetectionLatencyMs] = useState<number | null>(null);
+  const [cameraStreamState, setCameraStreamState] = useState<'HEALTHY' | 'DEGRADED' | 'OFFLINE'>('HEALTHY');
+  const [alertLatencySamples, setAlertLatencySamples] = useState<number[]>([]);
+  const [rawLatencyLogs, setRawLatencyLogs] = useState<Array<{
+    id: string;
+    rule: string;
+    cameraName: string;
+    detectedAt: number;
+    alertedAt: number;
+    latencyMs: number;
+    humanTime: string;
+  }>>([]);
+  const [showLatencyModal, setShowLatencyModal] = useState<boolean>(false);
+  const [activeDatabaseEngine, setActiveDatabaseEngine] = useState<string | null>(null);
+
   // Auto-sync state changes with storage
   useEffect(() => {
     saveStoredCameras(cameras);
@@ -74,6 +91,33 @@ export default function App() {
   useEffect(() => {
     saveStoredPlateRecords(plateRecords);
   }, [plateRecords]);
+
+  // Check active database engine from /api/health
+  useEffect(() => {
+    const checkDb = () => {
+      fetch('/api/health')
+        .then((r) => r.ok ? r.json() : null)
+        .then((data) => {
+          const dbEngine = data?.services?.database?.engine || data?.services?.coreService?.services?.database?.engine;
+          if (dbEngine) {
+            setActiveDatabaseEngine(dbEngine);
+          }
+        })
+        .catch(() => {});
+    };
+    checkDb();
+    const iv = setInterval(checkDb, 10000);
+    return () => clearInterval(iv);
+  }, []);
+
+  // Compute median & p95 over real events
+  const latencyMetrics = React.useMemo(() => {
+    if (alertLatencySamples.length === 0) return { median: null, p95: null, count: 0 };
+    const sorted = [...alertLatencySamples].sort((a, b) => a - b);
+    const median = sorted[Math.floor(sorted.length * 0.5)];
+    const p95 = sorted[Math.min(sorted.length - 1, Math.floor(sorted.length * 0.95))];
+    return { median, p95, count: sorted.length };
+  }, [alertLatencySamples]);
 
   // Hydrate from PostgreSQL database via Core Service on mount
   useEffect(() => {
@@ -192,6 +236,23 @@ export default function App() {
       if (existing) return prev;
       return [newAlert, ...prev];
     });
+
+    // Collect real event-to-alert latency measurement sample
+    if (newAlert.eventToAlertLatencyMs !== undefined) {
+      setAlertLatencySamples((prev) => [...prev, newAlert.eventToAlertLatencyMs!].slice(-100));
+      setRawLatencyLogs((prev) => [
+        {
+          id: newAlert.id,
+          rule: newAlert.ruleType || newAlert.title,
+          cameraName: newAlert.cameraName,
+          detectedAt: newAlert.detectionTimestamp || Date.now(),
+          alertedAt: newAlert.alertCreatedTimestamp || Date.now(),
+          latencyMs: newAlert.eventToAlertLatencyMs!,
+          humanTime: new Date(newAlert.timestamp).toLocaleTimeString(),
+        },
+        ...prev,
+      ].slice(0, 100));
+    }
 
     // Record into append-only platform event log
     const updatedLog = appendStoredEvent({
@@ -795,6 +856,19 @@ export default function App() {
         onResetPlatform={handleClearAllData}
       />
 
+      {/* Visible Database Fallback Warning Banner (PRD Step 3) */}
+      {activeDatabaseEngine && !activeDatabaseEngine.toLowerCase().includes('postgres') && (
+        <div id="h2-fallback-warning-banner" className="bg-amber-950/90 border-b border-amber-600/70 px-4 py-2 text-xs text-amber-200 flex items-center justify-between shadow-md">
+          <div className="flex items-center gap-2">
+            <span className="font-bold text-amber-400">⚠️ DATABASE WARNING:</span>
+            <span>Running on local H2 fallback database (<code>{activeDatabaseEngine}</code>). Data is stored locally, but production PostgreSQL container is offline. To start production PostgreSQL: <code>docker compose up -d postgres</code>.</span>
+          </div>
+          <span className="font-mono text-[10px] bg-amber-900/80 border border-amber-700 px-2 py-0.5 rounded text-amber-300">
+            H2_FALLBACK_ACTIVE
+          </span>
+        </div>
+      )}
+
       {/* Main Content Area */}
       <main className="mx-auto max-w-[1920px] px-3 py-6 sm:px-6">
         <div className={`pb-28 ${activeTab === 'monitoring' ? 'block' : 'hidden'}`}>
@@ -806,24 +880,50 @@ export default function App() {
           >
             <div className="flex items-center gap-4 flex-wrap">
               <div className="flex items-center gap-2">
-                <span className="flex h-2 w-2 rounded-full bg-emerald-500 animate-pulse" />
+                <span className={`flex h-2 w-2 rounded-full ${cameras.length === 0 ? 'bg-neutral-600' : cameraStreamState === 'HEALTHY' ? 'bg-emerald-500 animate-pulse' : 'bg-amber-500'}`} />
                 <span className="font-semibold text-neutral-300">Camera Health:</span>
-                <span id="metric-camera-health" className="font-mono font-medium text-emerald-400">
-                  {cameras.length > 0 ? (cameras.every((c) => c.status !== 'offline') ? 'ONLINE (HEALTHY)' : 'DEGRADED') : 'STANDBY'}
+                <span id="metric-camera-health" className={`font-mono font-medium ${cameras.length === 0 ? 'text-neutral-500' : cameraStreamState === 'HEALTHY' ? 'text-emerald-400' : 'text-amber-400'}`}>
+                  {cameras.length > 0 ? (cameraStreamState === 'HEALTHY' ? 'ONLINE (HEALTHY)' : cameraStreamState === 'DEGRADED' ? 'DEGRADED' : 'OFFLINE') : 'n/a'}
                 </span>
               </div>
               <div className="h-3 w-px bg-neutral-700 hidden sm:block" />
               <div className="flex items-center gap-1.5">
-                <span className="text-neutral-400">FPS:</span>
+                <span className="text-neutral-400">Analysis FPS:</span>
                 <span id="metric-fps" className="font-mono font-semibold text-amber-300">
-                  {cameras[0]?.fps || 30} FPS
+                  {cameras.length > 0 && activeAnalysisFps !== null && activeAnalysisFps > 0 ? `${activeAnalysisFps} FPS` : 'n/a'}
                 </span>
               </div>
               <div className="h-3 w-px bg-neutral-700 hidden sm:block" />
               <div className="flex items-center gap-1.5">
                 <span className="text-neutral-400">Event-to-Alert Latency:</span>
                 <span id="metric-latency" className="font-mono font-semibold text-cyan-400">
-                  28ms (median, measured)
+                  {latencyMetrics.median !== null
+                    ? `${latencyMetrics.median}ms (median) / ${latencyMetrics.p95}ms (p95)`
+                    : 'n/a'}
+                </span>
+                {latencyMetrics.count > 0 && (
+                  <button
+                    type="button"
+                    onClick={() => setShowLatencyModal(true)}
+                    className="ml-1 text-[10px] text-cyan-400 underline hover:text-cyan-300"
+                    title="View raw latency measurement audit log"
+                  >
+                    (raw log: {latencyMetrics.count} events)
+                  </button>
+                )}
+              </div>
+              <div className="h-3 w-px bg-neutral-700 hidden sm:block" />
+              <div className="flex items-center gap-1.5">
+                <span className="text-neutral-400">Database:</span>
+                <span
+                  id="metric-database"
+                  className={`font-mono font-semibold px-1.5 py-0.5 rounded text-[10px] border ${
+                    activeDatabaseEngine && activeDatabaseEngine.toLowerCase().includes('postgres')
+                      ? 'bg-emerald-950/70 border-emerald-800/80 text-emerald-400'
+                      : 'bg-amber-950/70 border-amber-800/80 text-amber-300'
+                  }`}
+                >
+                  {activeDatabaseEngine || 'PostgreSQL (Connecting...)'}
                 </span>
               </div>
             </div>
@@ -850,6 +950,11 @@ export default function App() {
             }}
             reducedMotion={a11ySettings.reducedMotion}
             seekTarget={seekTarget}
+            onMetricsUpdate={(m) => {
+              setActiveAnalysisFps(m.analysisFps);
+              setActiveDetectionLatencyMs(m.detectionLatencyMs);
+              setCameraStreamState(m.streamState);
+            }}
           />
         </div>
 
@@ -978,6 +1083,89 @@ export default function App() {
         onSelectPlate={(plate) => setDossierPlate({ plate })}
         onReplayIncident={(camId, time, title) => handleJumpToFootage(camId, time, title)}
       />
+
+      {/* Latency Measurement Raw Audit Log Modal */}
+      {showLatencyModal && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/75 p-4 backdrop-blur-xs">
+          <div className="w-full max-w-2xl rounded-2xl border border-neutral-800 bg-neutral-900 p-6 shadow-2xl">
+            <div className="flex items-center justify-between border-b border-neutral-800 pb-3 mb-4">
+              <div>
+                <h3 className="text-sm font-bold text-neutral-100">Measured Event-to-Alert Latency Audit Log</h3>
+                <p className="text-xs text-neutral-400 mt-0.5">
+                  PRD Section 20 Target: &le; 2000 ms. Measured from frame bounding-box detection to alert persistence & UI presentation.
+                </p>
+              </div>
+              <button
+                type="button"
+                onClick={() => setShowLatencyModal(false)}
+                className="rounded-lg p-1.5 text-neutral-400 hover:bg-neutral-800 hover:text-white"
+              >
+                ✕
+              </button>
+            </div>
+
+            <div className="mb-4 grid grid-cols-3 gap-3 text-center">
+              <div className="rounded-xl border border-neutral-800 bg-neutral-950/60 p-3">
+                <span className="text-[10px] text-neutral-400 uppercase font-semibold block">Total Events Audited</span>
+                <span className="text-lg font-mono font-bold text-neutral-100">{latencyMetrics.count}</span>
+              </div>
+              <div className="rounded-xl border border-neutral-800 bg-neutral-950/60 p-3">
+                <span className="text-[10px] text-neutral-400 uppercase font-semibold block">Median Latency</span>
+                <span className="text-lg font-mono font-bold text-cyan-400">
+                  {latencyMetrics.median !== null ? `${latencyMetrics.median} ms` : 'n/a'}
+                </span>
+              </div>
+              <div className="rounded-xl border border-neutral-800 bg-neutral-950/60 p-3">
+                <span className="text-[10px] text-neutral-400 uppercase font-semibold block">P95 Latency</span>
+                <span className="text-lg font-mono font-bold text-cyan-400">
+                  {latencyMetrics.p95 !== null ? `${latencyMetrics.p95} ms` : 'n/a'}
+                </span>
+              </div>
+            </div>
+
+            <div className="max-h-72 overflow-y-auto font-mono text-xs border border-neutral-800 rounded-lg">
+              <table className="w-full text-left">
+                <thead className="bg-neutral-800/80 text-neutral-300 text-[11px] sticky top-0">
+                  <tr>
+                    <th className="p-2">Time</th>
+                    <th className="p-2">Rule / Event</th>
+                    <th className="p-2">Camera</th>
+                    <th className="p-2 text-right">Measured Latency</th>
+                  </tr>
+                </thead>
+                <tbody className="divide-y divide-neutral-800">
+                  {rawLatencyLogs.length === 0 ? (
+                    <tr>
+                      <td colSpan={4} className="p-4 text-center text-neutral-500 font-sans">
+                        No alert events generated yet in this session.
+                      </td>
+                    </tr>
+                  ) : (
+                    rawLatencyLogs.map((log) => (
+                      <tr key={log.id} className="hover:bg-neutral-800/40">
+                        <td className="p-2 text-neutral-400">{log.humanTime}</td>
+                        <td className="p-2 text-neutral-200">{log.rule}</td>
+                        <td className="p-2 text-neutral-400">{log.cameraName}</td>
+                        <td className="p-2 text-right font-bold text-cyan-400">{log.latencyMs} ms</td>
+                      </tr>
+                    ))
+                  )}
+                </tbody>
+              </table>
+            </div>
+
+            <div className="mt-4 flex justify-end">
+              <button
+                type="button"
+                onClick={() => setShowLatencyModal(false)}
+                className="rounded-lg bg-neutral-800 px-4 py-2 text-xs font-semibold text-neutral-200 hover:bg-neutral-700 transition-colors"
+              >
+                Close Audit Log
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
 
       {/* Persistent AI Command Bar */}
       {activeTab !== 'command' && (

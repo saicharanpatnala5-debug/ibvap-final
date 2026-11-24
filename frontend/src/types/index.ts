@@ -198,6 +198,20 @@ export interface AlertIncident {
   auditTrail: AlertAuditEntry[];
   direction?: string;
   speed?: string;
+  detectionTimestamp?: number;
+  alertCreatedTimestamp?: number;
+  eventToAlertLatencyMs?: number;
+}
+
+export interface EventLatencyLogEntry {
+  id: string;
+  alertId: string;
+  ruleType: string;
+  cameraName: string;
+  detectionTimestampMs: number;
+  alertCreatedTimestampMs: number;
+  latencyMs: number;
+  humanTime: string;
 }
 
 export interface CameraFeedItem {

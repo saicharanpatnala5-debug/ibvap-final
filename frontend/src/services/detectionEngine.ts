@@ -982,6 +982,10 @@ export class LightweightMotionTracker {
     this.ctx = this.canvas.getContext('2d', { willReadFrequently: true });
   }
 
+  public reset(): void {
+    this.prevFrameData = null;
+  }
+
   public detectMotion(video: HTMLVideoElement): MotionRegion[] {
     if (!this.ctx || video.readyState < 2) return [];
     this.ctx.drawImage(video, 0, 0, this.width, this.height);

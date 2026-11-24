@@ -15,6 +15,12 @@ interface CameraGridProps {
   onAskAI?: (prompt: string, attachment?: any) => void;
   reducedMotion?: boolean;
   seekTarget?: { cameraId: string; time: number } | null;
+  onMetricsUpdate?: (metrics: {
+    cameraId: string;
+    analysisFps: number;
+    detectionLatencyMs: number;
+    streamState: 'HEALTHY' | 'DEGRADED' | 'OFFLINE';
+  }) => void;
 }
 
 export const CameraGrid: React.FC<CameraGridProps> = ({
@@ -29,6 +35,7 @@ export const CameraGrid: React.FC<CameraGridProps> = ({
   onAskAI,
   reducedMotion = false,
   seekTarget,
+  onMetricsUpdate,
 }) => {
   const [layoutColumns, setLayoutColumns] = useState<'auto' | '1' | '2' | '3'>('auto');
 
@@ -185,6 +192,7 @@ export const CameraGrid: React.FC<CameraGridProps> = ({
             onAskAI={onAskAI}
             reducedMotion={reducedMotion}
             seekToTime={seekTarget?.cameraId === camera.id ? seekTarget.time : undefined}
+            onMetricsUpdate={onMetricsUpdate}
           />
         ))}
       </div>

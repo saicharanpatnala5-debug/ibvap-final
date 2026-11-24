@@ -48,6 +48,10 @@ tools/tracks_*.json
 target/
 *.class
 *.jar
+data/
+**/data/
+auto.crt
+auto.key
 *.war
 *.nar
 *.ear
