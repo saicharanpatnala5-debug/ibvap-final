@@ -17,6 +17,7 @@ import {
   User,
   X,
   Zap,
+  Play,
 } from 'lucide-react';
 import { AlertIncident, CameraFeedItem } from '../types';
 
@@ -26,6 +27,7 @@ interface InvestigationModalProps {
   incident: AlertIncident | null;
   allCameras: CameraFeedItem[];
   onSelectPlate: (plate: string) => void;
+  onReplayIncident?: (cameraId: string, videoTime: number, label: string) => void;
 }
 
 export const InvestigationModal: React.FC<InvestigationModalProps> = ({
@@ -34,6 +36,7 @@ export const InvestigationModal: React.FC<InvestigationModalProps> = ({
   incident,
   allCameras,
   onSelectPlate,
+  onReplayIncident,
 }) => {
   if (!isOpen || !incident) return null;
 
@@ -119,6 +122,20 @@ export const InvestigationModal: React.FC<InvestigationModalProps> = ({
           </div>
 
           <div className="flex items-center gap-2">
+            {onReplayIncident && (
+              <button
+                id="replay-clip-modal-btn"
+                type="button"
+                onClick={() => {
+                  onClose();
+                  onReplayIncident(incident.cameraId, Math.max(0, (incident.videoTime || 0) - 3), incident.title);
+                }}
+                className="flex items-center gap-1.5 rounded-lg border border-amber-600/50 bg-amber-500/10 px-3 py-1.5 text-xs font-medium text-amber-300 hover:bg-amber-500/20"
+              >
+                <Play className="h-3.5 w-3.5 fill-current" />
+                Replay Evidence Clip
+              </button>
+            )}
             <button
               id="export-incident-btn"
               type="button"

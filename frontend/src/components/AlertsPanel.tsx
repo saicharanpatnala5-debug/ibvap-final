@@ -17,6 +17,7 @@ import {
   Car,
   User,
   Plus,
+  Play,
 } from 'lucide-react';
 import { AlertIncident, AlertSeverity } from '../types';
 
@@ -26,6 +27,7 @@ interface AlertsPanelProps {
   onEscalateAlert: (alertId: string) => void;
   onCloseAlert: (alertId: string) => void;
   onInvestigateAlert: (alert: AlertIncident) => void;
+  onReplayAlert?: (alert: AlertIncident) => void;
   onSelectPlate: (plate: string, cropUrl?: string) => void;
   onOpenAddCamera?: () => void;
 }
@@ -36,6 +38,7 @@ export const AlertsPanel: React.FC<AlertsPanelProps> = ({
   onEscalateAlert,
   onCloseAlert,
   onInvestigateAlert,
+  onReplayAlert,
   onSelectPlate,
   onOpenAddCamera,
 }) => {
@@ -464,6 +467,16 @@ export const AlertsPanel: React.FC<AlertsPanelProps> = ({
                         Close
                       </button>
                     )}
+                    <button
+                      type="button"
+                      id={`replay-btn-${alert.id}`}
+                      onClick={() => onReplayAlert ? onReplayAlert(alert) : onInvestigateAlert(alert)}
+                      className="rounded-md bg-neutral-800 hover:bg-neutral-700 px-2.5 py-1 text-xs font-medium text-neutral-200 transition-colors flex items-center gap-1"
+                      title="1-click replay incident clip on monitored feed"
+                    >
+                      <Play className="h-3 w-3 text-amber-400" />
+                      Replay
+                    </button>
                     <button
                       type="button"
                       id={`investigate-btn-${alert.id}`}

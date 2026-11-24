@@ -11,6 +11,7 @@ import {
 
 describe('STEP 1 - Gemini API Key Loading & In-App Management', () => {
   const localEnvPath = path.resolve(__dirname, '../.env.local');
+  const notepadEnvPath = path.resolve(__dirname, '../.env.txt');
   const originalKey = process.env.GEMINI_API_KEY;
   const originalModel = process.env.GEMINI_MODEL;
 
@@ -20,6 +21,11 @@ describe('STEP 1 - Gemini API Key Loading & In-App Management', () => {
     if (fs.existsSync(localEnvPath)) {
       try {
         fs.unlinkSync(localEnvPath);
+      } catch {}
+    }
+    if (fs.existsSync(notepadEnvPath)) {
+      try {
+        fs.unlinkSync(notepadEnvPath);
       } catch {}
     }
   });
@@ -34,6 +40,11 @@ describe('STEP 1 - Gemini API Key Loading & In-App Management', () => {
     if (fs.existsSync(localEnvPath)) {
       try {
         fs.unlinkSync(localEnvPath);
+      } catch {}
+    }
+    if (fs.existsSync(notepadEnvPath)) {
+      try {
+        fs.unlinkSync(notepadEnvPath);
       } catch {}
     }
   });

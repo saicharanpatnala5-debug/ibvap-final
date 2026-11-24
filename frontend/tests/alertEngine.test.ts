@@ -1,5 +1,5 @@
 import { describe, it, expect, beforeEach } from 'vitest';
-import { AlertEngine } from '../src/services/alertEngine';
+import { AlertEngine, addOperatorWatchlistEntry, clearOperatorWatchlist } from '../src/services/alertEngine';
 import { CameraFeedItem, TrackedObject, VirtualZone } from '../src/types';
 
 describe('AlertEngine Unit Tests (Deliverable 6)', () => {
@@ -8,6 +8,7 @@ describe('AlertEngine Unit Tests (Deliverable 6)', () => {
   let mockPolygonZone: VirtualZone;
 
   beforeEach(() => {
+    clearOperatorWatchlist();
     engine = new AlertEngine({ loiterDwellThresholdSec: 30.0 });
 
     mockPolygonZone = {
@@ -204,6 +205,7 @@ describe('AlertEngine Unit Tests (Deliverable 6)', () => {
   });
 
   it('8. triggers watchlist plate match with critical severity', () => {
+    addOperatorWatchlistEntry('DL01AB1234', 'Flagged Stolen Vehicle');
     const trackWithPlate = createTrack({
       id: 77,
       class: 'car',

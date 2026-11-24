@@ -67,12 +67,21 @@ export class AlertEngine {
   private lastAlertTimes: Map<string, number> = new Map();
   private recentAlertsInWindow: { cameraId: string; time: number }[] = [];
   private personZoneDwellTracker: Map<string, number> = new Map(); // "trackId:zoneId" -> firstSeenTime
+  private personZoneConfirmationCount: Map<string, number> = new Map();
   private defaultLoiterDwellSec: number = 30.0;
+  private minConfirmationTicks: number = 1;
 
-  constructor(config?: { loiterDwellThresholdSec?: number }) {
+  constructor(config?: { loiterDwellThresholdSec?: number; minConfirmationTicks?: number }) {
     if (config?.loiterDwellThresholdSec !== undefined) {
       this.defaultLoiterDwellSec = config.loiterDwellThresholdSec;
     }
+    if (config?.minConfirmationTicks !== undefined) {
+      this.minConfirmationTicks = config.minConfirmationTicks;
+    }
+  }
+
+  public setConfirmationTicks(ticks: number) {
+    this.minConfirmationTicks = ticks;
   }
 
   public setLoiterDwellThreshold(sec: number) {
@@ -161,8 +170,22 @@ export class AlertEngine {
           if (!isAllowed) continue;
         }
 
-        const isInsidePolygon = zone.type === 'polygon' && this.isPointInPolygon(track.bbox, zone.points);
+        const isPoly = zone.type === 'polygon';
+        const isPerson = track.class === 'pedestrian' || track.class === 'person';
+        const isInsidePolygon = isPoly && this.isPointInPolygon(track.bbox, zone.points);
         const hasCrossedLine = zone.type === 'line' && this.hasCrossedTripwire(track, zone.points);
+
+        // Confirmation logic: a person entering a restricted polygon requires multi-frame confirmation
+        if (isPoly && isPerson && isInsidePolygon) {
+          const confKey = `conf:${track.id}:${zone.id}`;
+          const currentCount = (this.personZoneConfirmationCount.get(confKey) || 0) + 1;
+          this.personZoneConfirmationCount.set(confKey, currentCount);
+          if (currentCount < this.minConfirmationTicks) {
+            continue; // Wait for confirmation ticks
+          }
+        } else if (isPoly && isPerson && !isInsidePolygon) {
+          this.personZoneConfirmationCount.delete(`conf:${track.id}:${zone.id}`);
+        }
 
         // ---------------------------------------------------------
         // Rule 2: Restricted Zone Entry (Intrusion / Line Crossing)
@@ -170,7 +193,6 @@ export class AlertEngine {
         if (isInsidePolygon || hasCrossedLine) {
           const cooldownKey = `track:${track.id}:zone_entry:${zone.id}`;
           if (this.checkCooldown(cooldownKey, videoTime, 10.0)) {
-            const isPoly = zone.type === 'polygon';
             const alert = this.createIncident({
               camera,
               track,
@@ -195,7 +217,6 @@ export class AlertEngine {
         // Rule 3: Person Loitering (>= 30 Seconds inside Zone)
         // STRICT RULE: ONLY FOR PEDESTRIANS / PERSONS. NEVER VEHICLES.
         // ---------------------------------------------------------
-        const isPerson = track.class === 'pedestrian' || track.class === 'person';
         if (isPerson && isInsidePolygon) {
           const dwellKey = `${track.id}:${zone.id}`;
           const firstSeen = this.personZoneDwellTracker.get(dwellKey);
@@ -386,28 +407,66 @@ export class AlertEngine {
       durationSec = 1.0,
     } = params;
 
-    // Transparent formula: score = weight * (confidence / 100) * durationFactor
-    const durationFactor = Math.min(1.2, 1.0 + (durationSec > 10 ? 0.1 : 0.0) + (isNightMode ? 0.05 : 0.0));
-    const rawScore = Math.round(ruleWeight * (track.confidence / 100.0) * durationFactor);
-    const riskScore = Math.min(100, Math.max(10, rawScore));
-
+    // PRD Section 12 Risk Contributions:
+    // Restricted Zone Intrusion: +30
+    // Inward direction: +20
+    // Time of day / Night: +15
+    // Dwell threshold / loitering: +15
+    // Multi-event correlation / sequence: +10
     const factors: RiskFactor[] = [
       {
         id: ruleType,
         label: title,
-        score: riskScore,
+        score: ruleType === 'zone_entry' ? 30 : ruleType === 'zone_loitering' ? 15 : ruleWeight,
         description,
       },
     ];
 
+    let additiveScore = ruleWeight;
+
+    // PRD Section 12 Inward Direction Contribution (+20)
+    const isHeadingInward = track.direction && (
+      track.direction.toLowerCase().includes('in') ||
+      track.direction.toLowerCase().includes('south') ||
+      track.direction.toLowerCase().includes('down') ||
+      track.direction.toLowerCase().includes('towards')
+    );
+    if (isHeadingInward && ruleType !== 'wrong_direction') {
+      factors.push({
+        id: 'prd_sec12_inward',
+        label: 'Inward Direction (+20)',
+        score: 20,
+        description: 'Trajectory vector points inward toward secured perimeter core',
+      });
+      additiveScore += 20;
+    }
+
+    // PRD Section 12 Time of Day / Low Lux Contribution (+15)
     if (isNightMode) {
       factors.push({
-        id: 'low_ambient_light',
-        label: 'Low Ambient Light Environment',
-        score: 5,
-        description: 'Target activity captured under night schedule / low lux lighting',
+        id: 'prd_sec12_night',
+        label: 'After-Hours / Low-Lux Environment (+15)',
+        score: 15,
+        description: 'Activity recorded outside standard operational hours in low lux lighting',
       });
+      additiveScore += 15;
     }
+
+    // PRD Section 12 Dwell Contribution (+15)
+    if (durationSec && durationSec >= 5.0 && ruleType !== 'zone_loitering') {
+      factors.push({
+        id: 'prd_sec12_dwell',
+        label: 'Sustained Sector Dwell (+15)',
+        score: 15,
+        description: `Target sustained static presence for ${Math.round(durationSec)}s inside sector`,
+      });
+      additiveScore += 15;
+    }
+
+    // Transparent formula: score = additiveScore * (confidence / 100) * durationFactor
+    const durationFactor = Math.min(1.2, 1.0 + (durationSec > 10 ? 0.1 : 0.0));
+    const rawScore = Math.round(additiveScore * (track.confidence / 100.0) * durationFactor);
+    const riskScore = Math.min(100, Math.max(10, rawScore));
 
     // Capture tight crop of object
     const entityCropUrl = this.extractEntityCrop(videoElement, track.bbox);
@@ -455,5 +514,6 @@ export class AlertEngine {
     this.lastAlertTimes.clear();
     this.recentAlertsInWindow = [];
     this.personZoneDwellTracker.clear();
+    this.personZoneConfirmationCount.clear();
   }
 }
