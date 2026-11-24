@@ -1,6 +1,8 @@
 package com.ibvap.core.service;
 
 import com.ibvap.core.model.VehicleRecord;
+import com.ibvap.core.repository.VehicleRecordRepository;
+import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.stereotype.Service;
 
 import java.time.Instant;
@@ -14,20 +16,26 @@ public class VehicleRegistryService {
     public static final String CURRENT_SCHEMA_VERSION = "v8.0.0";
     public static final String CURRENT_RUN_ID = "r8-release-20261115";
 
-    // Registered vehicles known in National/RTO registry (reference simulated DB)
+    private final VehicleRecordRepository vehicleRepository;
+    private final AuditService auditService;
+
+    // Reference simulated registry DB
     private final Map<String, VehicleRecord> registryDb = new ConcurrentHashMap<>();
 
-    // Real observations logged from live cameras/streams (starts EMPTY)
-    private final Map<String, VehicleRecord> observedPlates = new ConcurrentHashMap<>();
-
-    private final AuditService auditService;
+    // In-memory fallback
+    private final Map<String, VehicleRecord> fallbackObserved = new ConcurrentHashMap<>();
 
     // Standard Indian vehicle plate regex: e.g. DL01AB1234 or HR26DK8337 or MH12DE1433
     private static final Pattern VALID_IN_PLATE = Pattern.compile("^[A-Z]{2}[0-9]{1,2}[A-Z]{1,3}[0-9]{4}$");
 
-    public VehicleRegistryService(AuditService auditService) {
+    @Autowired(required = false)
+    public VehicleRegistryService(VehicleRecordRepository vehicleRepository, AuditService auditService) {
+        this.vehicleRepository = vehicleRepository;
         this.auditService = auditService;
-        // Clean empty state on start per master spec
+    }
+
+    public VehicleRegistryService(AuditService auditService) {
+        this(null, auditService);
     }
 
     public static String normalize(String plate) {
@@ -36,21 +44,30 @@ public class VehicleRegistryService {
     }
 
     public List<VehicleRecord> getAllObserved() {
-        return observedPlates.values().stream()
+        if (vehicleRepository != null) {
+            try {
+                return vehicleRepository.findAllByOrderByRecordedAtDesc().stream()
+                        .filter(v -> CURRENT_SCHEMA_VERSION.equals(v.getSchemaVersion()))
+                        .collect(Collectors.toList());
+            } catch (Exception ignored) {}
+        }
+        return fallbackObserved.values().stream()
                 .filter(v -> CURRENT_SCHEMA_VERSION.equals(v.getSchemaVersion()))
                 .collect(Collectors.toList());
     }
 
     public Optional<VehicleRecord> getObservedByPlate(String plate) {
         String norm = normalize(plate);
-        return Optional.ofNullable(observedPlates.get(norm))
+        if (vehicleRepository != null) {
+            try {
+                return vehicleRepository.findTopByNormalizedPlateOrderByRecordedAtDesc(norm)
+                        .filter(v -> CURRENT_SCHEMA_VERSION.equals(v.getSchemaVersion()));
+            } catch (Exception ignored) {}
+        }
+        return Optional.ofNullable(fallbackObserved.get(norm))
                 .filter(v -> CURRENT_SCHEMA_VERSION.equals(v.getSchemaVersion()));
     }
 
-    /**
-     * Record an ANPR observation from AI-service or camera stream.
-     * Enforces dossier integrity: UNREADABLE or LOW_CONFIDENCE plates never get attached to fake dossiers.
-     */
     public VehicleRecord recordObservation(VehicleRecord observation) {
         if (observation.getSchemaVersion() != null && !CURRENT_SCHEMA_VERSION.equals(observation.getSchemaVersion())) {
             return null;
@@ -79,7 +96,6 @@ public class VehicleRegistryService {
             observation.setMake(null);
             observation.setModel(null);
         } else {
-            // Check reference registry database for dossier
             VehicleRecord known = registryDb.get(norm);
             if (known != null) {
                 observation.setStatus(known.getStatus());
@@ -98,7 +114,16 @@ public class VehicleRegistryService {
         }
 
         observation.setRecordedAt(Instant.now());
-        observedPlates.put(norm.isEmpty() ? "UNREADABLE-" + UUID.randomUUID() : norm, observation);
+
+        if (vehicleRepository != null) {
+            try {
+                observation = vehicleRepository.save(observation);
+            } catch (Exception ignored) {
+                fallbackObserved.put(norm.isEmpty() ? "UNREADABLE-" + UUID.randomUUID() : norm, observation);
+            }
+        } else {
+            fallbackObserved.put(norm.isEmpty() ? "UNREADABLE-" + UUID.randomUUID() : norm, observation);
+        }
 
         auditService.log("anpr_service", "RECORD_OBSERVATION", "VEHICLE", norm,
                 Map.of("confidence", conf, "status", observation.getStatus(), "cameraId", observation.getCameraId() != null ? observation.getCameraId() : ""));
@@ -106,22 +131,19 @@ public class VehicleRegistryService {
         return observation;
     }
 
-    /**
-     * Operator manually corrects a misread plate number
-     */
     public Optional<VehicleRecord> correctPlate(String oldPlate, String correctedPlate, String operator) {
         String oldNorm = normalize(oldPlate);
-        VehicleRecord existing = observedPlates.remove(oldNorm);
-        if (existing == null) {
+        Optional<VehicleRecord> existingOpt = getObservedByPlate(oldNorm);
+        if (existingOpt.isEmpty()) {
             return Optional.empty();
         }
 
+        VehicleRecord existing = existingOpt.get();
         String newNorm = normalize(correctedPlate);
         existing.setPlateNumber(correctedPlate);
         existing.setNormalizedPlate(newNorm);
-        existing.setConfidence(1.0); // manual verification
+        existing.setConfidence(1.0);
 
-        // Re-evaluate against registry
         VehicleRecord known = registryDb.get(newNorm);
         if (known != null) {
             existing.setStatus(known.getStatus());
@@ -136,7 +158,17 @@ public class VehicleRegistryService {
             existing.setStatus("UNREGISTERED");
         }
 
-        observedPlates.put(newNorm, existing);
+        if (vehicleRepository != null) {
+            try {
+                existing = vehicleRepository.save(existing);
+            } catch (Exception ignored) {
+                fallbackObserved.remove(oldNorm);
+                fallbackObserved.put(newNorm, existing);
+            }
+        } else {
+            fallbackObserved.remove(oldNorm);
+            fallbackObserved.put(newNorm, existing);
+        }
 
         auditService.log(operator != null ? operator : "operator", "CORRECT_PLATE", "VEHICLE", newNorm,
                 Map.of("oldPlate", oldNorm, "newPlate", newNorm));
@@ -144,9 +176,6 @@ public class VehicleRegistryService {
         return Optional.of(existing);
     }
 
-    /**
-     * Seed registry database (e.g. for watchlist or verified database)
-     */
     public void registerKnownVehicle(VehicleRecord vehicle) {
         String norm = normalize(vehicle.getPlateNumber());
         vehicle.setNormalizedPlate(norm);
@@ -159,7 +188,12 @@ public class VehicleRegistryService {
     }
 
     public void clear() {
-        observedPlates.clear();
+        if (vehicleRepository != null) {
+            try {
+                vehicleRepository.deleteAll();
+            } catch (Exception ignored) {}
+        }
+        fallbackObserved.clear();
         registryDb.clear();
     }
 }

@@ -1170,9 +1170,13 @@ app.get('/api/registry/vahan/:plateNumber', async (req, res) => {
 });
 
 // Proxy routes to Java Core Service (System of Record)
-app.all('/api/core/*', async (req, res) => {
-  const subpath = req.path.replace(/^\/api\/core/, '');
-  const targetUrl = `${CORE_SERVICE_URL}/api${subpath}${req.url.includes('?') ? req.url.slice(req.url.indexOf('?')) : ''}`;
+const forwardToCore = async (req: express.Request, res: express.Response) => {
+  let subpath = req.path;
+  if (subpath.startsWith('/api/core')) {
+    subpath = subpath.replace(/^\/api\/core/, '/api');
+  }
+  const queryString = req.url.includes('?') ? req.url.slice(req.url.indexOf('?')) : '';
+  const targetUrl = `${CORE_SERVICE_URL}${subpath}${queryString}`;
 
   try {
     const headers: Record<string, string> = {};
@@ -1212,7 +1216,21 @@ app.all('/api/core/*', async (req, res) => {
       timestamp: Date.now(),
     });
   }
-});
+};
+
+app.all([
+  '/api/core', '/api/core/*',
+  '/api/cameras', '/api/cameras/*',
+  '/api/zones', '/api/zones/*',
+  '/api/alerts', '/api/alerts/*',
+  '/api/incidents', '/api/incidents/*',
+  '/api/events', '/api/events/*',
+  '/api/search', '/api/search/*',
+  '/api/demo', '/api/demo/*',
+  '/api/audit', '/api/audit/*',
+  '/api/auth', '/api/auth/*',
+  '/api/vehicles', '/api/vehicles/*',
+], forwardToCore);
 
 // Proxy routes to Python AI-Service (YOLO / Vision Analytics)
 app.all('/api/vision/*', async (req, res) => {

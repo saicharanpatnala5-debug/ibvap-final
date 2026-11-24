@@ -1,8 +1,12 @@
 package com.ibvap.core.model;
 
+import jakarta.persistence.*;
 import java.time.Instant;
 
+@Entity
+@Table(name = "cameras")
 public class Camera {
+    @Id
     private String id;
     private String name;
     private String location;

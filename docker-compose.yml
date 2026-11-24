@@ -1,6 +1,24 @@
 version: '3.8'
 
 services:
+  postgres:
+    image: postgres:16-alpine
+    container_name: ibvap-postgres
+    environment:
+      - POSTGRES_DB=ibvap
+      - POSTGRES_USER=ibvap
+      - POSTGRES_PASSWORD=ibvap_secret
+    ports:
+      - "5432:5432"
+    volumes:
+      - postgres-data:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U ibvap"]
+      interval: 5s
+      timeout: 5s
+      retries: 5
+    restart: unless-stopped
+
   core-service:
     build:
       context: ./core-service
@@ -11,6 +29,12 @@ services:
     environment:
       - SERVER_PORT=8080
       - SPRING_PROFILES_ACTIVE=prod
+      - SPRING_DATASOURCE_URL=jdbc:postgresql://postgres:5432/ibvap
+      - SPRING_DATASOURCE_USERNAME=ibvap
+      - SPRING_DATASOURCE_PASSWORD=ibvap_secret
+    depends_on:
+      postgres:
+        condition: service_healthy
     restart: unless-stopped
     healthcheck:
       test: ["CMD-SHELL", "curl -f http://localhost:8080/api/health || exit 1"]
@@ -65,3 +89,4 @@ services:
 
 volumes:
   ai-uploads:
+  postgres-data:

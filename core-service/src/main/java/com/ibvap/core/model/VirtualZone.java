@@ -1,13 +1,23 @@
 package com.ibvap.core.model;
 
+import com.ibvap.core.config.JpaConverters;
+import jakarta.persistence.*;
+import java.util.ArrayList;
 import java.util.List;
 
+@Entity
+@Table(name = "virtual_zones")
 public class VirtualZone {
+    @Id
     private String id;
     private String cameraId;
     private String name;
     private String type; // RESTRICTED, WARNING, ENTRY, BUFFER
-    private List<Point2D> polygon;
+
+    @Convert(converter = JpaConverters.Point2DListConverter.class)
+    @Column(columnDefinition = "TEXT")
+    private List<Point2D> polygon = new ArrayList<>();
+
     private String color;
     private boolean active;
 
@@ -40,7 +50,7 @@ public class VirtualZone {
         this.cameraId = cameraId;
         this.name = name;
         this.type = type;
-        this.polygon = polygon;
+        this.polygon = polygon != null ? new ArrayList<>(polygon) : new ArrayList<>();
     }
 
     public String getId() { return id; }
@@ -55,8 +65,13 @@ public class VirtualZone {
     public String getType() { return type; }
     public void setType(String type) { this.type = type; }
 
-    public List<Point2D> getPolygon() { return polygon; }
-    public void setPolygon(List<Point2D> polygon) { this.polygon = polygon; }
+    public List<Point2D> getPolygon() {
+        return polygon != null ? polygon : new ArrayList<>();
+    }
+
+    public void setPolygon(List<Point2D> polygon) {
+        this.polygon = polygon != null ? new ArrayList<>(polygon) : new ArrayList<>();
+    }
 
     public String getColor() { return color; }
     public void setColor(String color) { this.color = color; }

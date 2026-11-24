@@ -1,9 +1,15 @@
 package com.ibvap.core.model;
 
+import com.ibvap.core.config.JpaConverters;
+import jakarta.persistence.*;
 import java.time.Instant;
+import java.util.HashMap;
 import java.util.Map;
 
+@Entity
+@Table(name = "alert_incidents")
 public class AlertIncident {
+    @Id
     private String id;
     private String cameraId;
     private String cameraName;
@@ -12,7 +18,11 @@ public class AlertIncident {
     private String description;
     private Instant timestamp;
     private String status;    // OPEN, ACKNOWLEDGED, RESOLVED
-    private Map<String, Object> metadata;
+
+    @Convert(converter = JpaConverters.JsonMapConverter.class)
+    @Column(columnDefinition = "TEXT")
+    private Map<String, Object> metadata = new HashMap<>();
+
     private String schemaVersion = "v8.0.0";
     private String runId = "r8-release-20261115";
 
@@ -58,8 +68,13 @@ public class AlertIncident {
     public String getStatus() { return status; }
     public void setStatus(String status) { this.status = status; }
 
-    public Map<String, Object> getMetadata() { return metadata; }
-    public void setMetadata(Map<String, Object> metadata) { this.metadata = metadata; }
+    public Map<String, Object> getMetadata() {
+        return metadata != null ? metadata : new HashMap<>();
+    }
+
+    public void setMetadata(Map<String, Object> metadata) {
+        this.metadata = metadata != null ? metadata : new HashMap<>();
+    }
 
     public String getSchemaVersion() { return schemaVersion; }
     public void setSchemaVersion(String schemaVersion) { this.schemaVersion = schemaVersion; }

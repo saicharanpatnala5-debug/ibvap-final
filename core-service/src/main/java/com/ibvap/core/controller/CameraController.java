@@ -11,9 +11,16 @@ import java.util.List;
 @RequestMapping("/api/cameras")
 public class CameraController {
     private final CameraService cameraService;
+    private final com.ibvap.core.service.ZoneService zoneService;
+
+    @org.springframework.beans.factory.annotation.Autowired(required = false)
+    public CameraController(CameraService cameraService, com.ibvap.core.service.ZoneService zoneService) {
+        this.cameraService = cameraService;
+        this.zoneService = zoneService;
+    }
 
     public CameraController(CameraService cameraService) {
-        this.cameraService = cameraService;
+        this(cameraService, null);
     }
 
     @GetMapping
@@ -26,6 +33,14 @@ public class CameraController {
         return cameraService.getById(id)
                 .map(ResponseEntity::ok)
                 .orElse(ResponseEntity.notFound().build());
+    }
+
+    @GetMapping("/{id}/zones")
+    public ResponseEntity<List<com.ibvap.core.model.VirtualZone>> getCameraZones(@PathVariable String id) {
+        if (zoneService != null) {
+            return ResponseEntity.ok(zoneService.getByCameraId(id));
+        }
+        return ResponseEntity.ok(List.of());
     }
 
     @PostMapping

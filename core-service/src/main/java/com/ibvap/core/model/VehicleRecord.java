@@ -1,14 +1,20 @@
 package com.ibvap.core.model;
 
+import jakarta.persistence.*;
 import java.time.Instant;
+import java.util.UUID;
 
+@Entity
+@Table(name = "vehicle_records")
 public class VehicleRecord {
+    @Id
+    private String id;
     private String plateNumber;
     private String normalizedPlate;
     private String status; // VERIFIED, WATCHLIST, STOLEN, UNREGISTERED, UNREADABLE, LOW_CONFIDENCE
     private String owner;
     private String state;
-    private String vehicleType; // SEDAN, SUV, TRUCK, MOTORCYCLE, COMMERCIAL
+    private String vehicleType; // SEDAN, SUV, TRUCK, MOTORCYCLE, COMMERCIAL, AUTO_RICKSHAW
     private String make;
     private String model;
     private String color;
@@ -17,14 +23,23 @@ public class VehicleRecord {
     private String cameraName;
     private Long trackId;
     private Double timestampInSource;
+
+    @Column(columnDefinition = "TEXT")
     private String plateCropBase64;
+
+    @Column(columnDefinition = "TEXT")
     private String vehicleCropBase64;
+
     private Instant recordedAt;
+
+    @Column(columnDefinition = "TEXT")
     private String notes;
+
     private String schemaVersion = "v8.0.0";
     private String runId = "r8-release-20261115";
 
     public VehicleRecord() {
+        this.id = UUID.randomUUID().toString();
         this.recordedAt = Instant.now();
         this.status = "UNREGISTERED";
         this.confidence = 1.0;
@@ -43,6 +58,9 @@ public class VehicleRecord {
         this.make = make;
         this.model = model;
     }
+
+    public String getId() { return id; }
+    public void setId(String id) { this.id = id; }
 
     public String getPlateNumber() { return plateNumber; }
     public void setPlateNumber(String plateNumber) {
