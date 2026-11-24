@@ -704,29 +704,74 @@ export async function performLadderSurveillanceInference(
 
 /**
  * Merges multi-pass detections using Non-Maximum Suppression (IoU threshold)
+ * and containment suppression (drops person/motorcycle boxes inside vehicle boxes).
+ * Corrects COCO misclassifications where auto-rickshaws / tuk-tuks are labeled 'bus'.
  */
 export function applyNmsDetections(
   detections: RawDetection[],
   iouThreshold = 0.40
 ): RawDetection[] {
+  // First pass: Tuk-tuk / auto-rickshaw correction:
+  // If classified as 'bus' or 'truck', but is small (< 0.14 area) and upright (aspect < 1.45),
+  // in Indian CCTV footage it's an auto-rickshaw (tuk-tuk), NEVER a transit bus!
+  for (const d of detections) {
+    if (d.class === 'bus' || d.class === 'truck' || d.class === 'truck/bus') {
+      const area = d.bbox.width * d.bbox.height;
+      const aspect = d.bbox.width / Math.max(0.01, d.bbox.height);
+      if (area < 0.14 && aspect < 1.45) {
+        d.class = 'auto-rickshaw';
+      }
+    }
+  }
+
   // Sort descending by confidence
   const sorted = [...detections].sort((a, b) => b.confidence - a.confidence);
   const selected: RawDetection[] = [];
 
   for (const candidate of sorted) {
     let shouldKeep = true;
-    for (const kept of selected) {
-      // Must be same class or vehicle family to suppress
-      const sameFamily =
-        candidate.class === kept.class ||
-        (['car', 'truck', 'bus'].includes(candidate.class) &&
-          ['car', 'truck', 'bus'].includes(kept.class));
 
-      if (sameFamily) {
-        const iou = calculateIoU(candidate.bbox, kept.bbox);
-        if (iou > iouThreshold) {
+    for (const kept of selected) {
+      const iou = calculateIoU(candidate.bbox, kept.bbox);
+
+      // 1. Class-Agnostic NMS: if two boxes overlap heavily, keep higher confidence
+      if (iou > iouThreshold) {
+        const isRiderPair =
+          (candidate.class === 'person' && ['two-wheeler', 'motorcycle', 'bicycle'].includes(kept.class)) ||
+          (kept.class === 'person' && ['two-wheeler', 'motorcycle', 'bicycle'].includes(candidate.class));
+        if (!isRiderPair) {
           shouldKeep = false;
           break;
+        }
+      }
+
+      // 2. Containment Suppression:
+      // Compute intersection area between candidate and kept
+      const xA = Math.max(candidate.bbox.x, kept.bbox.x);
+      const yA = Math.max(candidate.bbox.y, kept.bbox.y);
+      const xB = Math.min(candidate.bbox.x + candidate.bbox.width, kept.bbox.x + kept.bbox.width);
+      const yB = Math.min(candidate.bbox.y + candidate.bbox.height, kept.bbox.y + kept.bbox.height);
+      const interArea = Math.max(0, xB - xA) * Math.max(0, yB - yA);
+      const candArea = candidate.bbox.width * candidate.bbox.height;
+
+      if (candArea > 0 && interArea > 0) {
+        const containment = interArea / candArea;
+
+        // If candidate is mostly inside kept (>= 45% of candidate is inside kept)
+        if (containment >= 0.45) {
+          const isFourWheelVehicle = ['car', 'truck', 'bus', 'truck/bus', 'auto-rickshaw', 'three-wheeler'].includes(kept.class);
+
+          // A person or motorcycle or car mostly inside a vehicle box is spurious and must be dropped
+          if (isFourWheelVehicle) {
+            shouldKeep = false;
+            break;
+          }
+
+          // Any object >= 65% contained inside another object is dropped
+          if (containment >= 0.65) {
+            shouldKeep = false;
+            break;
+          }
         }
       }
     }

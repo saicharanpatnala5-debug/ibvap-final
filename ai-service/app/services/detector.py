@@ -167,37 +167,74 @@ class SurveillanceDetector:
         if self.model and hasattr(self.model, "names") and self.model.names:
             self.target_class_ids = [k for k, v in self.model.names.items() if v in ALLOWED_CLASSES]
 
-    def _filter_duplicate_vehicles(self, detections: list[dict], iou_thresh: float = 0.50) -> list[dict]:
+    def _filter_duplicate_vehicles(self, detections: list[dict], iou_thresh: float = 0.40) -> list[dict]:
         """
-        Suppresses duplicate boxes across overlapping vehicle classes (e.g. car vs truck).
-        Keeps the detection with highest confidence.
+        Suppresses duplicate boxes across overlapping vehicle/person classes (class-agnostic NMS
+        and containment suppression). A person or motorcycle box mostly inside a vehicle box is dropped.
+        Auto-rickshaws misclassified as bus/truck are re-mapped.
         """
-        veh_classes = {"car", "truck", "bus", "motorcycle"}
-        vehicles = [d for d in detections if d["class"] in veh_classes]
-        non_vehicles = [d for d in detections if d["class"] not in veh_classes]
-        if len(vehicles) <= 1:
-            return detections
+        if not detections:
+            return []
 
-        vehicles.sort(key=lambda x: x["conf"], reverse=True)
-        kept_vehicles = []
-        for v in vehicles:
-            b1 = v["bbox"]
-            suppress = False
-            for kv in kept_vehicles:
-                b2 = kv["bbox"]
+        # 1. First-pass tuk-tuk / auto-rickshaw size & aspect ratio correction
+        for d in detections:
+            cls = d.get("class", "").lower()
+            if cls in ["bus", "truck", "truck/bus"]:
+                b = d["bbox"]
+                area = b.width * b.height
+                aspect = b.width / max(0.01, b.height)
+                if area < 0.14 and aspect < 1.45:
+                    d["class"] = "auto-rickshaw"
+
+        # Sort descending by confidence
+        sorted_dets = sorted(detections, key=lambda x: x.get("conf", 0.0), reverse=True)
+        selected = []
+
+        for cand in sorted_dets:
+            b1 = cand["bbox"]
+            cand_area = b1.width * b1.height
+            cand_cls = cand.get("class", "").lower()
+            should_keep = True
+
+            for kept in selected:
+                b2 = kept["bbox"]
+                kept_cls = kept.get("class", "").lower()
+
+                # IoU
                 xA = max(b1.x, b2.x)
                 yA = max(b1.y, b2.y)
                 xB = min(b1.x + b1.width, b2.x + b2.width)
                 yB = min(b1.y + b1.height, b2.y + b2.height)
                 inter = max(0.0, xB - xA) * max(0.0, yB - yA)
-                union = (b1.width * b1.height) + (b2.width * b2.height) - inter
-                if union > 0 and (inter / union) > iou_thresh:
-                    suppress = True
-                    break
-            if not suppress:
-                kept_vehicles.append(v)
+                union = cand_area + (b2.width * b2.height) - inter
+                iou = inter / union if union > 0 else 0.0
 
-        return non_vehicles + kept_vehicles
+                # Class-agnostic NMS
+                if iou > iou_thresh:
+                    # Allow person + two-wheeler only
+                    is_rider_pair = (cand_cls == "person" and kept_cls in ["motorcycle", "bicycle", "two-wheeler"]) or \
+                                    (kept_cls == "person" and cand_cls in ["motorcycle", "bicycle", "two-wheeler"])
+                    if not is_rider_pair:
+                        should_keep = False
+                        break
+
+                # Containment suppression
+                if cand_area > 0 and inter > 0:
+                    containment = inter / cand_area
+                    if containment >= 0.45:
+                        is_four_wheel = kept_cls in ["car", "truck", "bus", "truck/bus", "auto-rickshaw", "three-wheeler", "van"]
+                        if is_four_wheel:
+                            # Person or bike or spurious car inside vehicle box is dropped
+                            should_keep = False
+                            break
+                        if containment >= 0.65:
+                            should_keep = False
+                            break
+
+            if should_keep:
+                selected.append(cand)
+
+        return selected
 
     def _map_indian_traffic_classes(
         self,

@@ -23,14 +23,39 @@ import {
   VirtualZone,
 } from '../types';
 
-export const OPERATOR_WATCHLIST = new Set<string>([
-  'MH12AB4029',
-  '7XYZ892',
-  'KA01NV663',
-  'DL01AB1234',
-  'HR51AZ3919',
-  'UP16BC9999',
-]);
+export interface WatchlistEntry {
+  plate: string;
+  label: string;
+  addedBy?: string;
+  addedAt?: number;
+}
+
+// Operator-managed watchlist table (empty by default per PRD Step 4)
+export const OPERATOR_WATCHLIST_MAP = new Map<string, WatchlistEntry>();
+
+export function addOperatorWatchlistEntry(plate: string, label: string, operator = 'operator') {
+  const norm = plate.toUpperCase().replace(/[^A-Z0-9]/g, '');
+  OPERATOR_WATCHLIST_MAP.set(norm, { plate: norm, label, addedBy: operator, addedAt: Date.now() });
+}
+
+export function removeOperatorWatchlistEntry(plate: string) {
+  const norm = plate.toUpperCase().replace(/[^A-Z0-9]/g, '');
+  OPERATOR_WATCHLIST_MAP.delete(norm);
+}
+
+export function clearOperatorWatchlist() {
+  OPERATOR_WATCHLIST_MAP.clear();
+}
+
+// Backward compatibility export (now reading from the operator-managed map)
+export const OPERATOR_WATCHLIST = {
+  has(plate: string): boolean {
+    return OPERATOR_WATCHLIST_MAP.has(plate.toUpperCase().replace(/[^A-Z0-9]/g, ''));
+  },
+  get size(): number {
+    return OPERATOR_WATCHLIST_MAP.size;
+  }
+};
 
 interface AlertCooldownKey {
   trackId: number;
@@ -87,22 +112,24 @@ export class AlertEngine {
       }
 
       // ---------------------------------------------------------
-      // Rule 1: Watchlist Plate Match
+      // Rule 1: Watchlist Plate Match (Operator-managed table)
       // ---------------------------------------------------------
       if (track.anpr && track.anpr.plateText && track.anpr.isReadable) {
         const cleanPlate = track.anpr.plateText.toUpperCase().replace(/[^A-Z0-9]/g, '');
-        if (OPERATOR_WATCHLIST.has(cleanPlate)) {
-          const cooldownKey = `track:${track.id}:watchlist`;
-          if (this.checkCooldown(cooldownKey, videoTime, 10.0)) {
+        const watchlistEntry = OPERATOR_WATCHLIST_MAP.get(cleanPlate);
+        if (watchlistEntry) {
+          // Deduplicate per (rule, plate, 30s window) to avoid spam on loops
+          const cooldownKey = `plate:${cleanPlate}:watchlist`;
+          if (this.checkCooldown(cooldownKey, videoTime, 30.0)) {
             const alert = this.createIncident({
               camera,
               track,
               videoTime,
               ruleType: 'watchlist_plate',
-              title: `Security Watchlist Match: ${cleanPlate}`,
-              ruleWeight: 95,
+              title: `Watchlist Match: ${cleanPlate}`,
+              ruleWeight: 90,
               severity: 'critical',
-              description: `Plate '${cleanPlate}' detected on ${track.class.toUpperCase()} #${track.id} matches law enforcement watchlist`,
+              description: `Plate '${cleanPlate}' matches operator watchlist entry (${watchlistEntry.label})`,
               isNightMode,
               canvasSnapshotUrl,
               videoElement,

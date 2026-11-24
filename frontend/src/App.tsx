@@ -197,7 +197,7 @@ export default function App() {
     }
   };
 
-  // Continuous ANPR detection handler for vehicles seen in playback
+  // Continuous ANPR detection handler for vehicles seen in playback (Strict Gating & One Vehicle One Identity)
   const handlePlateDetected = (plateInfo: {
     plate: string;
     confidence: number;
@@ -229,126 +229,73 @@ export default function App() {
     visualCharacteristics?: string;
     detectionConfidence?: number;
   }) => {
-    // ANPR Fix 3 - Step 3: Reject pedestrian tracks; strictly vehicle classes only
+    // 1. Strictly vehicle classes only
     const rawClass = (plateInfo.objectClass || '').toLowerCase().trim();
     if (rawClass === 'person' || rawClass === 'pedestrian') {
       return;
     }
 
-    const isDistanceGated =
-      plateInfo.formatType === 'distance_gated' ||
-      plateInfo.validationStatus === 'Plate not legible at this distance';
-
     const rawPlate = plateInfo.plate || '';
-    const cleanPlate = isDistanceGated || rawPlate.includes('not legible') || rawPlate.includes('not detected') || rawPlate === 'UNRESOLVED' || rawPlate === 'UNREADABLE'
-      ? ''
-      : rawPlate.toUpperCase().replace(/[^A-Z0-9]/g, '');
+    const cleanPlate = rawPlate.toUpperCase().replace(/[^A-Z0-9]/g, '');
 
-    let status: PlateStatus = 'Unreadable';
-    let isValid = false;
-    let formatType: any = plateInfo.formatType || 'invalid';
-
-    if (isDistanceGated) {
-      status = 'Plate not legible at this distance';
-      formatType = 'distance_gated';
-    } else if (plateInfo.formatType === 'standard' || plateInfo.formatType === 'bharat') {
-      status = 'Valid format';
-      isValid = true;
-    } else if (plateInfo.validationStatus?.toLowerCase().includes('needs review') || cleanPlate.length >= 4) {
-      status = 'Low confidence - needs review';
-      isValid = false;
-    } else {
-      const statusInfo = determinePlateStatus(cleanPlate, plateInfo.confidence);
-      status = statusInfo.status;
-      isValid = statusInfo.isValidFormat;
-      formatType = statusInfo.formatType || 'invalid';
+    // 2. Strict plate candidate gating:
+    // Reject placeholder strings and partial junk reads (e.g. KA52, KKA51, MH5H51).
+    // Valid Indian plates are minimum 8 alphanumeric chars and must match valid format with high confidence.
+    const isStandardLength = cleanPlate.length >= 8 && cleanPlate.length <= 11;
+    const isValidFormat = (plateInfo.formatType === 'standard' || plateInfo.formatType === 'bharat') && isStandardLength;
+    if (!isValidFormat || plateInfo.confidence < 75) {
+      return;
     }
 
-    const dossier = isValid ? lookupVehicleDossier(cleanPlate) : null;
+    const status: PlateStatus = 'Valid format';
+    // For real footage: Never attach fake owner/make/model dossiers. Only simulated seeds get dossiers.
+    const dossier = lookupVehicleDossier(cleanPlate);
     const cam = cameras.find((c) => c.id === plateInfo.cameraId);
-    const resolvedDisplayPlate = cleanPlate || (isDistanceGated ? 'Distant Target' : 'Plate not detected');
-    const resolvedBestGuess = (!isDistanceGated && plateInfo.bestGuessPlate && plateInfo.bestGuessPlate !== 'UNRESOLVED' && !plateInfo.bestGuessPlate.includes('not legible'))
-      ? plateInfo.bestGuessPlate
-      : resolvedDisplayPlate;
 
     setPlateRecords((prev) => {
-      // Find matching record by track ID or near-identical plate text within 12s video time
+      // 3. One Vehicle = One Identity matching:
+      // Match by exact normalized plate OR edit distance <= 1 across all records
       const existingIdx = prev.findIndex((r) => {
-        const timeDiff = Math.abs((r.videoTime || 0) - plateInfo.videoTime);
-        if (plateInfo.trackId && r.trackId === plateInfo.trackId && timeDiff < 12) return true;
-        if (!isDistanceGated && cleanPlate && r.plateNumber && r.plateNumber !== 'UNRESOLVED' && r.plateNumber !== 'UNREADABLE' && r.plateNumber !== 'Distant Target' && r.plateNumber !== 'Plate not detected') {
-          if (r.plateNumber === cleanPlate && timeDiff < 12) return true;
-          // Levenshtein distance <= 2 for optical OCR variations of the same plate
-          if (timeDiff < 12 && Math.abs(r.plateNumber.length - cleanPlate.length) <= 2) {
-            let diff = 0;
-            const minLen = Math.min(r.plateNumber.length, cleanPlate.length);
-            for (let i = 0; i < minLen; i++) {
-              if (r.plateNumber[i] !== cleanPlate[i]) diff++;
-            }
-            if (diff <= 2) return true;
+        if (!r.plateNumber || r.plateNumber.length < 8) return false;
+        if (r.plateNumber === cleanPlate) return true;
+        if (Math.abs(r.plateNumber.length - cleanPlate.length) <= 1) {
+          let diff = 0;
+          const minLen = Math.min(r.plateNumber.length, cleanPlate.length);
+          for (let i = 0; i < minLen; i++) {
+            if (r.plateNumber[i] !== cleanPlate[i]) diff++;
           }
+          if (diff <= 1) return true;
         }
         return false;
       });
 
       if (existingIdx >= 0) {
+        // Vehicle already exists in registry - update sightings and confidence, DO NOT create new record!
         const existing = prev[existingIdx];
-        // Upgrade condition 1: New read is Valid format while existing was not
-        // Upgrade condition 2: Existing was distance-gated/unresolved, new read is a candidate plate
-        // Upgrade condition 3: New read has significantly higher confidence (+5%)
-        const isExistingUnresolved = existing.formatType === 'distance_gated' || existing.plateNumber === 'Distant Target' || existing.plateNumber === 'UNRESOLVED' || existing.plateNumber === 'Plate not detected';
-        const shouldUpgrade =
-          (isValid && !existing.isValidFormat) ||
-          (isExistingUnresolved && cleanPlate.length >= 4) ||
-          (cleanPlate && plateInfo.confidence > existing.confidence + 5) ||
-          ((plateInfo.attempts || 1) > (existing.attempts || 1));
-
-        if (shouldUpgrade) {
-          const updated = [...prev];
-          updated[existingIdx] = {
-            ...existing,
-            plateNumber: cleanPlate || existing.plateNumber,
-            status,
-            formatValidationStatus: plateInfo.validationStatus || status,
-            isValidFormat: isValid || existing.isValidFormat,
-            formatType: formatType !== 'invalid' ? formatType : existing.formatType,
-            confidence: Math.max(existing.confidence, plateInfo.confidence),
-            cropUrl: plateInfo.cropUrl || existing.cropUrl,
-            vehicleThumbnailUrl: plateInfo.vehicleThumbnailUrl || plateInfo.cropUrl || existing.vehicleThumbnailUrl,
-            charConfidences: plateInfo.charConfidences || existing.charConfidences,
-            scaleUsed: plateInfo.scaleUsed || existing.scaleUsed,
-            attempts: Math.max(existing.attempts || 1, plateInfo.attempts || 1),
-            bestGuessPlate: cleanPlate || existing.bestGuessPlate || resolvedBestGuess,
-            isAiAssisted: plateInfo.isAiAssisted ?? existing.isAiAssisted,
-            dossier: dossier || existing.dossier,
-            videoTime: plateInfo.videoTime,
-            isDualRow: plateInfo.isDualRow ?? existing.isDualRow,
-            stateCode: plateInfo.stateCode || existing.stateCode,
-            stateName: plateInfo.stateName || existing.stateName,
-            rtoCode: plateInfo.rtoCode || existing.rtoCode,
-            rtoOffice: plateInfo.rtoOffice || existing.rtoOffice,
-            ocrModel: plateInfo.ocrModel || existing.ocrModel,
-            vehicleClass: plateInfo.objectClass || existing.vehicleClass,
-            vehicleColor: plateInfo.vehicleColor || existing.vehicleColor,
-            vehicleColorHex: plateInfo.vehicleColorHex || existing.vehicleColorHex,
-            vehicleCategory: plateInfo.vehicleCategory || existing.vehicleCategory,
-            bodyType: plateInfo.bodyType || existing.bodyType,
-            visualCharacteristics: plateInfo.visualCharacteristics || existing.visualCharacteristics,
-            detectionConfidence: plateInfo.detectionConfidence || existing.detectionConfidence,
-          };
-          saveStoredPlateRecords(updated);
-          return updated;
-        }
-        return prev;
+        const updated = [...prev];
+        updated[existingIdx] = {
+          ...existing,
+          confidence: Math.max(existing.confidence, plateInfo.confidence),
+          cropUrl: (plateInfo.confidence > existing.confidence && plateInfo.cropUrl) ? plateInfo.cropUrl : existing.cropUrl,
+          vehicleThumbnailUrl: (plateInfo.confidence > existing.confidence && plateInfo.vehicleThumbnailUrl) ? plateInfo.vehicleThumbnailUrl : existing.vehicleThumbnailUrl,
+          videoTime: plateInfo.videoTime,
+          attempts: (existing.attempts || 1) + 1,
+        };
+        saveStoredPlateRecords(updated);
+        return updated;
       }
 
+      // 4. Create new vehicle registry record
+      const visualClassEstimate = plateInfo.objectClass ? `Estimate: ${plateInfo.objectClass}` : 'Vehicle (Visual Estimate)';
+      const visualColorEstimate = plateInfo.vehicleColor ? `Estimate: ${plateInfo.vehicleColor}` : undefined;
+
       const newRecord: PlateRegistryRecord = {
-        id: `rec-${cleanPlate || 'track-' + (plateInfo.trackId || 'veh')}-${Date.now()}-${Math.random().toString(36).slice(2, 6)}`,
-        plateNumber: resolvedDisplayPlate,
+        id: `rec-${cleanPlate}-${Date.now()}-${Math.random().toString(36).slice(2, 6)}`,
+        plateNumber: cleanPlate,
         status,
-        formatValidationStatus: plateInfo.validationStatus || status,
-        isValidFormat: isValid,
-        formatType,
+        formatValidationStatus: plateInfo.validationStatus || 'Valid format',
+        isValidFormat: true,
+        formatType: plateInfo.formatType || 'standard',
         confidence: plateInfo.confidence,
         cameraId: plateInfo.cameraId,
         cameraName: plateInfo.cameraName || cam?.name || 'Surveillance Node',
@@ -360,23 +307,40 @@ export default function App() {
         charConfidences: plateInfo.charConfidences,
         scaleUsed: plateInfo.scaleUsed,
         attempts: plateInfo.attempts || 1,
-        bestGuessPlate: resolvedBestGuess,
+        bestGuessPlate: cleanPlate,
         isAiAssisted: Boolean(plateInfo.isAiAssisted),
-        dossier,
+        dossier: dossier || null,
         isDualRow: plateInfo.isDualRow,
         stateCode: plateInfo.stateCode,
         stateName: plateInfo.stateName,
         rtoCode: plateInfo.rtoCode,
         rtoOffice: plateInfo.rtoOffice,
         ocrModel: plateInfo.ocrModel,
-        vehicleClass: plateInfo.objectClass,
-        vehicleColor: plateInfo.vehicleColor,
+        vehicleClass: visualClassEstimate,
+        vehicleColor: visualColorEstimate,
         vehicleColorHex: plateInfo.vehicleColorHex,
         vehicleCategory: plateInfo.vehicleCategory,
         bodyType: plateInfo.bodyType,
         visualCharacteristics: plateInfo.visualCharacteristics,
         detectionConfidence: plateInfo.detectionConfidence,
+        officialLookupStatus: dossier ? 'Simulated Demo Record' : 'unavailable (no authorised source)',
       };
+
+      // Persist sighting to Core Service PostgreSQL DB
+      fetch('/api/core/vehicles/records', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          plateNumber: cleanPlate,
+          confidence: plateInfo.confidence / 100.0,
+          cameraId: plateInfo.cameraId,
+          cameraName: plateInfo.cameraName || cam?.name || 'Surveillance Node',
+          vehicleType: plateInfo.objectClass,
+          color: plateInfo.vehicleColor,
+          timestampInSource: plateInfo.videoTime,
+          trackId: plateInfo.trackId,
+        }),
+      }).catch(() => {});
 
       const updated = [newRecord, ...prev].slice(0, 80);
       saveStoredPlateRecords(updated);

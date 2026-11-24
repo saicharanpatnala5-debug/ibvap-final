@@ -1,0 +1,39 @@
+{
+  "clip": "samples/whatsapp_video_2026_09_09_842pm.mp4",
+  "durationSeconds": 17.8,
+  "totalUniqueVehiclesHumanCount": 9,
+  "humanGroundTruthBreakdown": {
+    "cars": 4,
+    "two_wheelers": 4,
+    "auto_rickshaws": 1,
+    "pedestrians": 2
+  },
+  "keyFrameGroundTruth": {
+    "1.0": {
+      "vehicles": 4,
+      "pedestrians": 1,
+      "breakdown": "2 cars, 2 two-wheelers, 1 pedestrian"
+    },
+    "4.3": {
+      "vehicles": 5,
+      "pedestrians": 1,
+      "breakdown": "2 cars, 2 two-wheelers, 1 auto-rickshaw, 1 pedestrian"
+    },
+    "8.2": {
+      "vehicles": 4,
+      "pedestrians": 0,
+      "breakdown": "1 auto-rickshaw, 1 car/SUV, 2 two-wheelers"
+    },
+    "10.0": {
+      "vehicles": 5,
+      "pedestrians": 0,
+      "breakdown": "1 auto-rickshaw, 2 cars, 2 two-wheelers"
+    },
+    "14.5": {
+      "vehicles": 4,
+      "pedestrians": 1,
+      "breakdown": "2 cars, 2 two-wheelers, 1 pedestrian"
+    }
+  },
+  "notes": "Human optical verification on 17.8s test clip. 9 distinct unique vehicles traversed the FOV (4 cars, 4 two-wheelers, 1 auto-rickshaw). Over 1 loop pass, tracker must not balloon track IDs into hundreds or create duplicate registry rows."
+}
