@@ -21,6 +21,7 @@ import { CommandBar } from './components/CommandBar';
 import { FootageIntelligenceView } from './components/FootageIntelligence/FootageIntelligenceView';
 import { ANPRRegistryView } from './components/ANPRRegistryView';
 import { lookupVehicleDossier, determinePlateStatus } from './services/anprEngine';
+import { videoAnalysisService } from './services/videoAnalysisService';
 import {
   loadStoredCameras,
   saveStoredCameras,
@@ -758,6 +759,11 @@ export default function App() {
     setCameras(demoCams);
     setAlerts([]);
     setPlateRecords(demoPlates);
+
+    // Pre-warm video analysis cache for the demo camera
+    videoAnalysisService
+      .analyzeVideo('cam-demo-gate', '/samples/whatsapp_video_2026_09_09_842pm.mp4')
+      .catch(() => {});
   };
 
   // Clear all platform data (1-click wipe)

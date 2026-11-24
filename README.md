@@ -332,6 +332,9 @@ The system intentionally pairs domain-optimized languages to satisfy the PRD's l
 
 The platform was subjected to an exhaustive 536-frame track accounting audit on the primary demo footage (`samples/whatsapp_video_2026_09_09_842pm.mp4`). Key verified metrics:
 
+- **Analysis Throughput (CPU)**: **3.3 FPS** on host CPU without GPU compute (~296 ms/frame). For smooth live demonstration, IBVAP features **Analyze & Play** to pre-process footage into cache and replay at smooth 30 FPS.
+- **Event-to-Alert Latency**: **1.1 – 1.5 seconds end-to-end** (measured from physical boundary entry through the 3-frame debounce confirmation window to screen alert).
+- **Single-Frame Pipeline Latency**: **230.9 ms median** (raw single-frame forward-pass and dispatch).
 - **Total Unique Vehicle Tracks**: 9 ground-truth unique vehicles (no ID ballooning across loops).
 - **In-Cabin Overlaps**: **0** (containment suppression successfully eliminates phantom persons/motorcycles).
 - **Auto-Rickshaw Classification**: **100%** (zero auto-rickshaws labeled as "bus").

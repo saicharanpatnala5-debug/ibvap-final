@@ -300,6 +300,25 @@ export const CameraFeed: React.FC<CameraFeedProps> = ({
       setIsAnalyzingVideo(false);
     }
   };
+
+  // Auto-activate cached pre-analysis for seamless playback if available
+  useEffect(() => {
+    let isSubscribed = true;
+    if (camera.sourceType === 'file' && camera.sourceUrl && !isPreAnalyzed) {
+      videoAnalysisService
+        .analyzeVideo(camera.id, camera.sourceUrl)
+        .then((res) => {
+          if (isSubscribed && res && res.isComplete) {
+            setIsPreAnalyzed(true);
+          }
+        })
+        .catch(() => {});
+    }
+    return () => {
+      isSubscribed = false;
+    };
+  }, [camera.id, camera.sourceUrl, camera.sourceType]);
+
   const lastRenderTimeRef = useRef<number>(performance.now());
   const renderFpsRef = useRef<number>(60);
   const frameCountRef = useRef<number>(0);

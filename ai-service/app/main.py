@@ -40,7 +40,8 @@ core_client = CoreServiceClient()
 shared_detector: Optional[SurveillanceDetector] = None
 UPLOAD_DIR = os.path.join(os.getcwd(), "data", "uploads")
 os.makedirs(UPLOAD_DIR, exist_ok=True)
-ROOT_WORKSPACE = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+# App is in ai-service/app/main.py -> dirname is ai-service/app -> dirname is ai-service -> dirname is ibvap-final root workspace
+ROOT_WORKSPACE = os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 VIDEO_CACHE_DIR = os.path.join(ROOT_WORKSPACE, ".cache", "video_analysis")
 os.makedirs(VIDEO_CACHE_DIR, exist_ok=True)
 
@@ -425,6 +426,9 @@ async def analyze_video_endpoint(
                 os.path.join(ROOT_WORKSPACE, clean_p),
                 os.path.join(ROOT_WORKSPACE, clean_p.lstrip("/")),
                 os.path.join(ROOT_WORKSPACE, "samples", os.path.basename(clean_p)),
+                os.path.join(os.getcwd(), clean_p),
+                os.path.join(os.getcwd(), clean_p.lstrip("/")),
+                os.path.join(os.getcwd(), "samples", os.path.basename(clean_p)),
                 clean_p,
             ]
             for c in candidates:

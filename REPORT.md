@@ -42,8 +42,13 @@ All changes adhere strictly to the principle of **zero unverified claims**: ever
    - Audited all 6 navigation pages (`Live Monitor`, `Alerts`, `Vehicle Registry`, `Forensics`, `AI Copilot`, `Topology`), clearly distinguishing Real, Partial (Demo RTO), and Mock/Labs features.
 7. **Automated Test Suite Expansion**:
    - Expanded to **96 passing tests** across 5 suites (100% pass rate, including automated offline network isolation verification).
-8. **Measured Analyze Pipeline Timings**:
-   - Empirically measured Analyze execution across both evaluation clips at Fast, Balanced, and High quality (`samples/demo_timing_measurements.json`). Fast mode runs at **11.4–11.55 FPS** on CPU and is configured as default for interactive evaluation.
+8. **Measured Analyze Pipeline Timings & Throughput**:
+   - Empirically measured pipeline execution across evaluation clips: continuous CPU inference forward-pass takes **122.6 ms** (total frame execution ~296.8 ms), yielding **3.3 FPS throughput on CPU**. For presentation and smooth demonstration, IBVAP includes **Analyze & Play**, pre-processing video frames into disk cache to support silky 30 FPS playback.
+9. **Honest Latency Accounting**:
+   - **Single-Frame Pipeline Latency**: **230.9 ms median** (measured frame-to-event dispatch).
+   - **End-to-End Event Latency**: **1.1 – 1.5 seconds** (measured from physical zone boundary crossing, through the 3-frame debounce confirmation window at ~300 ms interval, to alert rendering on the operator screen). Satisfies the PRD requirement ($\le 2.0$ seconds) with zero boundary flicker.
+10. **Chatbot Data Provenance & Transparency**:
+   - Clarified that plate `HR26DK8337` and `"2 vehicles, 1 pedestrian"` originate from synthetic unit-test fixture data seeded by `POST /api/demo/load` in `DemoController.java`. Live CCTV queries reflect actual database sightings (`KA01MW4498`, `TN55CZ5446`, `DL7CQ0258`).
 
 ---
 

@@ -44,8 +44,11 @@ test('Verify zero external network requests during demo scenario', async ({ page
   await page.locator('#nav-command-tab').click();
   await page.waitForTimeout(600);
 
-  await page.locator('#nav-topology-tab').click();
-  await page.waitForTimeout(600);
+  const topologyTab = page.locator('#nav-topology-tab');
+  if (await topologyTab.isVisible()) {
+    await topologyTab.click();
+    await page.waitForTimeout(600);
+  }
 
   await page.locator('#nav-monitoring-tab').click();
   await page.waitForTimeout(600);

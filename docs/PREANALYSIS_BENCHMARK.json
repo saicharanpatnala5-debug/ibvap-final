@@ -1,0 +1,20 @@
+{
+  "whatsapp_video_2026_09_09_842pm.mp4": {
+    "duration_sec": 17.87,
+    "total_frames_analyzed": 90,
+    "analysis_time_sec": 86.1,
+    "measured_analysis_fps": 1.05,
+    "model": "yolo26s.pt",
+    "imgsz": 640,
+    "device": "cpu"
+  },
+  "whatsapp_video_2026_09_09_533pm.mp4": {
+    "duration_sec": 12.03,
+    "total_frames_analyzed": 61,
+    "analysis_time_sec": 10.96,
+    "measured_analysis_fps": 5.56,
+    "model": "yolo26s.pt",
+    "imgsz": 640,
+    "device": "cpu"
+  }
+}
