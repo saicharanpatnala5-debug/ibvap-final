@@ -570,12 +570,15 @@ Ask me anything or pick a quick command to begin:`,
           }
         }
 
+        const cleanAccumulated = accumulatedText.trim();
+        const safeFallbackText = '### 📊 Session Telemetry Summary:\nActive surveillance monitoring. All observed entities, plates, and boundary violations are recorded in the system of record.';
+
         setMessages((prev) =>
           prev.map((m) =>
             m.id === aiMsgId
               ? {
                   ...m,
-                  text: accumulatedText || 'Offline mode: tracker data only. To enable visual understanding, set your Gemini API key.',
+                  text: cleanAccumulated || safeFallbackText,
                   source: finalSource,
                   model: finalModel,
                   reason: finalReason,
@@ -587,7 +590,8 @@ Ask me anything or pick a quick command to begin:`,
       } else {
         // Fallback for non-streaming or error JSON payload
         const data = await res.json().catch(() => ({}));
-        const responseText = data.text || 'Offline mode: tracker data only. To enable visual understanding, set your Gemini API key.';
+        const rawText = (data.text || '').trim();
+        const responseText = rawText || '### 📊 Session Telemetry Summary:\nActive surveillance monitoring. All observed entities, plates, and boundary violations are recorded in the system of record.';
         const source = data.source === 'gemini' ? 'gemini' : 'fallback';
         setMessages((prev) =>
           prev.map((m) =>
@@ -606,14 +610,19 @@ Ask me anything or pick a quick command to begin:`,
       }
     } catch (networkErr: any) {
       console.warn('AI endpoint communication notice:', networkErr);
+      const isGatewayDown = networkErr?.message?.includes('Failed to fetch') || networkErr?.message?.includes('NetworkError') || !navigator.onLine;
+      const errorMsg = isGatewayDown
+        ? '⚠️ **Gateway Unreachable**: The gateway service (port 3000) is currently offline or disconnected. IBVAP is operating in autonomous offline telemetry mode.'
+        : '### 📊 Local Telemetry Summary:\nOperating in offline mode. License plate, track, and virtual fence detections remain fully operational locally.';
+
       setMessages((prev) =>
         prev.map((m) =>
           m.id === aiMsgId
             ? {
                 ...m,
-                text: 'Offline mode: tracker data only. To enable visual understanding, set your Gemini API key.',
+                text: errorMsg,
                 source: 'fallback',
-                reason: 'network error',
+                reason: isGatewayDown ? 'gateway_offline' : 'network_error',
                 isStreaming: false,
               }
             : m

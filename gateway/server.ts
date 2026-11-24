@@ -826,7 +826,11 @@ export function generateGroundedFallbackResponse(
     const timeStr = timeMatch[4] || `${timeVal}s`;
 
     if (timeVal >= 3.0 && timeVal <= 4.8) {
-      return `### ⏱️ Video Time Event ($t = ${timeStr}$):\n- **Event**: Approaching sedan vehicle entering checkpoint corridor.\n- **ANPR Telemetry**: Optical license plate candidate **\`[KA01KW4498]\`** detected and read with 72.1% confidence (standard format).\n- **Tracking Status**: Continuous vehicle bounding box registered without fragmentation.` + fallbackDisclaimer;
+      const topPlate = plates[0]?.plateNumber || alerts.find((a: any) => a?.anprPlate)?.anprPlate;
+      const plateNote = topPlate
+        ? `Optical license plate candidate **\`[${sanitizeTelemetryString(topPlate, 16)}]\`** detected.`
+        : 'Active vehicle registered without readable plate candidate.';
+      return `### ⏱️ Video Time Event ($t = ${timeStr}$):\n- **Event**: Approaching vehicle entering checkpoint corridor.\n- **ANPR Telemetry**: ${plateNote}\n- **Tracking Status**: Continuous vehicle bounding box registered without fragmentation.` + fallbackDisclaimer;
     }
     if (timeVal >= 4.9 && timeVal <= 8.5) {
       return `### ⏱️ Video Time Event ($t = ${timeStr}$):\n- **Event**: Pedestrian #10 traversing roadway toward the shoulder.\n- **Security Violation**: **Loitering Alert #1** fired at $t = 5.2$s after target dwelled inside 'Restricted Perimeter Shoulder' exceeding the 5.0s threshold.\n- **Risk Score**: 75/100 (high severity perimeter boundary breach).` + fallbackDisclaimer;
@@ -917,11 +921,11 @@ export function generateGroundedFallbackResponse(
     }));
 
     if (plateItems.length === 0) {
-      return `### 🚗 License Plate (ANPR) Audit: **${safeCam}**\nNo license plates currently registered in the active session. During live playback:\n- Plates larger than $35 \\times 12$px are optically cropped and OCR scanned.\n- Validated reads (e.g. \`KA01KW4498\`) appear in the Vehicle Registry.\n- Low-confidence or perturbed candidates are tagged with **"Needs review"**.` + fallbackDisclaimer;
+      return `### 🚗 License Plate (ANPR) Audit: **${safeCam}**\nNo license plates currently registered in the active session. During live playback:\n- Plates larger than $35 \\times 12$px are optically cropped and OCR scanned.\n- Validated reads appear in the Vehicle Registry.\n- Low-confidence or perturbed candidates are tagged with **"Needs review"**.` + fallbackDisclaimer;
     }
 
-    const validPlates = plateItems.filter((p: any) => p.status === 'Valid' || p.isValidFormat || p.plateNumber === 'KA01KW4498');
-    const reviewPlates = plateItems.filter((p: any) => p.status !== 'Valid' && !p.isValidFormat && p.plateNumber !== 'KA01KW4498');
+    const validPlates = plateItems.filter((p: any) => p.status === 'Valid' || p.isValidFormat);
+    const reviewPlates = plateItems.filter((p: any) => p.status !== 'Valid' && !p.isValidFormat);
 
     return `### 🚗 License Plate (ANPR) Summary: **${safeCam}**\n- **Total Plate Reads Logged**: **${plateItems.length}**\n- **Validated Plates**: ${validPlates.length > 0 ? validPlates.map((vp: any) => `\`[${sanitizeTelemetryString(vp.plateNumber, 16)}]\` (${vp.confidence || 72}% conf)`).join(', ') : 'None'}\n- **Needs Review / Distance-Gated**: ${reviewPlates.length > 0 ? reviewPlates.map((rp: any) => `\`[${sanitizeTelemetryString(rp.plateNumber, 16)}]\` (${rp.status || 'Needs review'})`).join(', ') : '0 items'}\n\nPlates with format ambiguity display candidate OCR text and optical crops in the **Vehicle Registry** for one-click audit confirmation.` + fallbackDisclaimer;
   }
