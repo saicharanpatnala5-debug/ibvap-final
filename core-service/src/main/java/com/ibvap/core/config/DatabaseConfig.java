@@ -18,6 +18,9 @@ import java.net.Socket;
 public class DatabaseConfig {
     private static final Logger log = LoggerFactory.getLogger(DatabaseConfig.class);
 
+    public static volatile String ACTIVE_DATABASE_ENGINE = "PostgreSQL";
+    public static volatile String ACTIVE_DATABASE_URL = "jdbc:postgresql://localhost:5432/ibvap";
+
     @Value("${spring.datasource.url:jdbc:postgresql://localhost:5432/ibvap}")
     private String configuredUrl;
 
@@ -32,6 +35,8 @@ public class DatabaseConfig {
     public DataSource dataSource() {
         if (configuredUrl != null && configuredUrl.contains("h2:mem")) {
             // Unit test in-memory database
+            ACTIVE_DATABASE_ENGINE = "H2_IN_MEMORY_TEST";
+            ACTIVE_DATABASE_URL = configuredUrl;
             HikariConfig config = new HikariConfig();
             config.setJdbcUrl(configuredUrl);
             config.setDriverClassName("org.h2.Driver");
@@ -62,6 +67,8 @@ public class DatabaseConfig {
 
         HikariConfig config = new HikariConfig();
         if (isPgReachable) {
+            ACTIVE_DATABASE_ENGINE = "PostgreSQL";
+            ACTIVE_DATABASE_URL = configuredUrl;
             log.info("[IBVAP Core] Connected to PostgreSQL at: {}", configuredUrl);
             config.setJdbcUrl(configuredUrl);
             config.setDriverClassName("org.postgresql.Driver");
@@ -71,6 +78,8 @@ public class DatabaseConfig {
         } else {
             new File("./data").mkdirs();
             String fileH2 = "jdbc:h2:file:./data/ibvap;DB_CLOSE_DELAY=-1;MODE=PostgreSQL";
+            ACTIVE_DATABASE_ENGINE = "H2_FILE_FALLBACK";
+            ACTIVE_DATABASE_URL = fileH2;
             log.warn("[IBVAP Core] PostgreSQL is unreachable on configured URL; operating with persistent local database at {}", fileH2);
             config.setJdbcUrl(fileH2);
             config.setDriverClassName("org.h2.Driver");

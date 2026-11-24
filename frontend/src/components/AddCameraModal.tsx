@@ -95,10 +95,17 @@ export const AddCameraModal: React.FC<AddCameraModalProps> = ({
       resetAndClose();
     } else if (activeTab === 'stream') {
       if (!streamUrl.trim()) {
-        setErrorMessage('Please enter an RTSP or HTTP/HLS video stream URL');
+        setErrorMessage('Please enter an RTSP or HTTP/HLS video stream URL (e.g. rtsp://192.168.1.100:554/live or http://...)');
         return;
       }
       const cleanUrl = streamUrl.trim();
+      const isRtsp = cleanUrl.startsWith('rtsp://');
+      const isHttp = cleanUrl.startsWith('http://') || cleanUrl.startsWith('https://');
+      if (!isRtsp && !isHttp) {
+        setErrorMessage('Invalid stream URL protocol. Must begin with rtsp:// or http:// or https://');
+        return;
+      }
+
       const newCamera: CameraFeedItem = {
         id: `cam-${now}-${Math.random().toString(36).substring(2, 6)}`,
         name: defaultName,
@@ -110,6 +117,14 @@ export const AddCameraModal: React.FC<AddCameraModalProps> = ({
         zones: [],
         createdAt: now,
       };
+
+      // Notify gateway and ai-service of stream intake for background decoding
+      fetch('/api/streams/validate', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ url: cleanUrl }),
+      }).catch(() => {});
+
       onAddCamera(newCamera);
       resetAndClose();
     }

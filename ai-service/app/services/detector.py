@@ -218,18 +218,34 @@ class SurveillanceDetector:
                         should_keep = False
                         break
 
-                # Containment suppression
+                # Footpoint-aware containment suppression:
+                # A pedestrian walking on the pavement in front of or behind a car is PRESERVED.
+                # Only true in-cabin reflections/driver artifacts suspended above the bumper are filtered.
                 if cand_area > 0 and inter > 0:
                     containment = inter / cand_area
-                    if containment >= 0.45:
-                        is_four_wheel = kept_cls in ["car", "truck", "bus", "truck/bus", "auto-rickshaw", "three-wheeler", "van"]
-                        if is_four_wheel:
-                            # Person or bike or spurious car inside vehicle box is dropped
+                    is_pedestrian = cand_cls == "person"
+                    is_four_wheel = kept_cls in ["car", "truck", "bus", "truck/bus", "auto-rickshaw", "three-wheeler", "van"]
+
+                    if is_pedestrian and is_four_wheel:
+                        cand_b = cand["bbox"]
+                        kept_b = kept["bbox"]
+                        foot_x = cand_b.x + cand_b.width * 0.5
+                        foot_y = cand_b.y + cand_b.height
+                        kept_bottom_y = kept_b.y + kept_b.height
+
+                        # If pedestrian's feet touch pavement, do not suppress
+                        foot_on_pavement = (foot_y >= (kept_bottom_y - kept_b.height * 0.15)) or (foot_x < kept_b.x) or (foot_x > kept_b.x + kept_b.width)
+                        if foot_on_pavement:
+                            continue
+
+                        # In-cabin check: footpoint suspended inside cabin zone (15% to 75% of vehicle height)
+                        in_cabin_zone = (foot_y >= (kept_b.y + kept_b.height * 0.15)) and (foot_y <= (kept_b.y + kept_b.height * 0.75))
+                        if in_cabin_zone and containment >= 0.60:
                             should_keep = False
                             break
-                        if containment >= 0.65:
-                            should_keep = False
-                            break
+                    elif containment >= 0.70:
+                        should_keep = False
+                        break
 
             if should_keep:
                 selected.append(cand)

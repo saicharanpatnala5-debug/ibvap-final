@@ -37,9 +37,15 @@ public class HealthController {
         resp.put("javaVersion", System.getProperty("java.version"));
         resp.put("timestamp", Instant.now().toString());
 
-        Map<String, String> services = new HashMap<>();
+        Map<String, Object> services = new HashMap<>();
         services.put("core-service", "UP");
-        services.put("database", "UP");
+        
+        Map<String, Object> dbHealth = new HashMap<>();
+        dbHealth.put("status", "UP");
+        dbHealth.put("engine", com.ibvap.core.config.DatabaseConfig.ACTIVE_DATABASE_ENGINE);
+        dbHealth.put("url", com.ibvap.core.config.DatabaseConfig.ACTIVE_DATABASE_URL);
+        services.put("database", dbHealth);
+
         services.put("ai-service", "UP");
         services.put("gateway", "UP");
         resp.put("services", services);

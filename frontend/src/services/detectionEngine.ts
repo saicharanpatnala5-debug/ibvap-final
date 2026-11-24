@@ -745,8 +745,10 @@ export function applyNmsDetections(
         }
       }
 
-      // 2. Containment Suppression:
-      // Compute intersection area between candidate and kept
+      // 2. Footpoint-Aware Containment Suppression:
+      // Computes intersection area and checks entity footpoint relative to pavement.
+      // A pedestrian walking on the road in front of/behind a car is PRESERVED.
+      // Only true in-cabin reflections/driver artifacts suspended above the bumper are filtered.
       const xA = Math.max(candidate.bbox.x, kept.bbox.x);
       const yA = Math.max(candidate.bbox.y, kept.bbox.y);
       const xB = Math.min(candidate.bbox.x + candidate.bbox.width, kept.bbox.x + kept.bbox.width);
@@ -757,21 +759,36 @@ export function applyNmsDetections(
       if (candArea > 0 && interArea > 0) {
         const containment = interArea / candArea;
 
-        // If candidate is mostly inside kept (>= 45% of candidate is inside kept)
-        if (containment >= 0.45) {
-          const isFourWheelVehicle = ['car', 'truck', 'bus', 'truck/bus', 'auto-rickshaw', 'three-wheeler'].includes(kept.class);
+        // Footpoint check (bottom-center of candidate object)
+        const footX = candidate.bbox.x + candidate.bbox.width * 0.5;
+        const footY = candidate.bbox.y + candidate.bbox.height;
+        const keptBottomY = kept.bbox.y + kept.bbox.height;
 
-          // A person or motorcycle or car mostly inside a vehicle box is spurious and must be dropped
-          if (isFourWheelVehicle) {
+        const isPedestrian = candidate.class === 'person';
+        const isFourWheelVehicle = ['car', 'truck', 'bus', 'truck/bus', 'auto-rickshaw', 'three-wheeler'].includes(kept.class);
+
+        if (isPedestrian && isFourWheelVehicle) {
+          // If the person's footpoint touches the road (near or below the vehicle's bottom boundary, or outside the car horizontally),
+          // this is a REAL pedestrian walking on the pavement in front of or behind the car. PRESERVE!
+          const footOnPavement = footY >= (keptBottomY - kept.bbox.height * 0.15) || footX < kept.bbox.x || footX > (kept.bbox.x + kept.bbox.width);
+          if (footOnPavement) {
+            // Real pedestrian on road - DO NOT SUPPRESS
+            continue;
+          }
+
+          // In-cabin passenger check:
+          // Candidate's footpoint is suspended high up inside the cabin area (between 15% and 75% of vehicle height),
+          // and candidate is largely contained inside the vehicle.
+          const inCabinZone = footY >= (kept.bbox.y + kept.bbox.height * 0.15) && footY <= (kept.bbox.y + kept.bbox.height * 0.75);
+          if (inCabinZone && containment >= 0.60) {
+            // In-cabin passenger reflection or driver through windshield
             shouldKeep = false;
             break;
           }
-
-          // Any object >= 65% contained inside another object is dropped
-          if (containment >= 0.65) {
-            shouldKeep = false;
-            break;
-          }
+        } else if (containment >= 0.70) {
+          // General duplicate containment (e.g. car box inside larger car box)
+          shouldKeep = false;
+          break;
         }
       }
     }

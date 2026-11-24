@@ -44,8 +44,9 @@ curl -X POST http://localhost:3000/api/demo/reset -H "Content-Type: application/
   - Open `http://localhost:3000`.
   - Point to the top HUD **Metrics Panel** (`data-testid="metrics-panel"`):
     - **Camera Health**: `ONLINE (HEALTHY)`
-    - **FPS**: `30 FPS`
-    - **Median Latency**: `28ms`
+    - **Display Rate**: `30.0 FPS` (Smoothed presentation) | **Inference Rate**: `2 – 16 FPS` (Real-time CPU YOLO26)
+    - **Detection-to-Alert Latency**: `42 – 180 ms` (PRD Section 20 Target: $\le 2000$ ms)
+    - **Database Status**: `PostgreSQL 16 (UP)` via Docker (Port 5432)
     - **Active Feeds & Zones**: Clean zero state.
 
 ---
@@ -139,9 +140,10 @@ curl -X POST http://localhost:3000/api/demo/reset -H "Content-Type: application/
   - Switch to **AI Copilot** (`#nav-command-tab`).
   - Click Quick Action: **"How many vehicles and pedestrians were detected?"**
   - Show grounded response:
-    - Total Vehicles: 9 (Cars: 4, Auto-Rickshaws: 1, Two-Wheelers: 4).
-    - Pedestrians: 1.
-    - Verified against database ground truth.
+    - Confirmed Registered Vehicles: 9 (High-confidence unoccluded license plates).
+    - Total Physical Vehicles in FOV: 25 (14 moving, 11 curbside parked).
+    - Pedestrians: 5 distinct individuals walking along shoulder.
+    - Verified against database ground truth (`samples/golden_counts.json`).
   - Click Quick Action: **"Why did the alert fire?"**
     - Explains exact dwell threshold and polygon intrusion root cause.
   - Conclude: *"IBVAP meets 100% of SIH 2026 PRD requirements, verified by automated end-to-end integration tests."*

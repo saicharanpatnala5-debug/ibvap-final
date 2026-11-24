@@ -35,8 +35,12 @@ public class AuthController {
         if (userRepository != null) {
             try {
                 if (userRepository.count() == 0) {
-                    User admin = new User("usr-admin", "admin", "admin123", "ADMIN", "System Administrator");
-                    User operator = new User("usr-operator", "operator", "operator123", "OPERATOR", "Security Operator");
+                    String adminPass = System.getenv("ADMIN_PASSWORD") != null && !System.getenv("ADMIN_PASSWORD").isBlank()
+                            ? System.getenv("ADMIN_PASSWORD").trim() : "admin123";
+                    String operatorPass = System.getenv("OPERATOR_PASSWORD") != null && !System.getenv("OPERATOR_PASSWORD").isBlank()
+                            ? System.getenv("OPERATOR_PASSWORD").trim() : "operator123";
+                    User admin = new User("usr-admin", "admin", adminPass, "ADMIN", "System Administrator");
+                    User operator = new User("usr-operator", "operator", operatorPass, "OPERATOR", "Security Operator");
                     userRepository.save(admin);
                     userRepository.save(operator);
                 }

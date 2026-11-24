@@ -117,19 +117,33 @@ Check system requirements before starting:
 
 ---
 
-## 🚀 Quick Start (One Command to Setup, Start, and Stop)
+## 🚀 Quick Start (Production & Local Startup)
 
+### Production Deployment (Single-Command Supervisor with PostgreSQL)
 ```bash
-# 1. One-time setup: installs dependencies & pre-caches all AI/OCR models for offline capability
-npm run setup
+# 1. Start persistent PostgreSQL 16 database container
+docker compose up -d postgres
 
-# 2. Start all services (Gateway :3000, AI-Service :8000, Core-Service :8080)
+# 2. Build production bundles for frontend and gateway
+npm run build
+
+# 3. Launch all services via production supervisor
+npm start
+```
+Check health and active database:
+```bash
+curl http://localhost:3000/api/health
+# Response explicitly confirms: "database": {"engine": "PostgreSQL", "url": "jdbc:postgresql://localhost:5432/ibvap", "status": "UP"}
+```
+
+### Local Development Startup
+```bash
+# Start all microservices concurrently in development mode
 npm run dev:all
 
-# 3. Stop all services cleanly
+# Stop all microservices cleanly
 npm run stop
 ```
-Open **http://localhost:3000** in your browser. If Node.js (v20+), Python (3.11+), or Java (21 LTS) is missing, `npm run setup` prints an explicit warning with installation instructions.
 
 ---
 
