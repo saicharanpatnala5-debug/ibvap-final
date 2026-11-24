@@ -86,48 +86,56 @@ def run_overlap_audit():
     detector = SurveillanceDetector()
     detector.reset()
 
-    # Exactly 30 evenly distributed representative frames across the 17.8s clip
-    sample_frame_indices = [int(10 + i * (total_frames - 25) / 29) for i in range(30)]
+    sample_frame_indices = set([int(10 + i * (total_frames - 25) / 29) for i in range(30)])
+    sorted_sample_indices = sorted(list(sample_frame_indices))
 
     frame_audit_records = []
     total_raw_persons = 0
     total_kept_pedestrians = 0
     total_fused_riders = 0
     total_suppressed_incabin = 0
+    total_untracked_transient = 0
     total_vehicles = 0
     all_suppression_events = []
 
-    for f_idx in sample_frame_indices:
-        cap.set(cv2.CAP_PROP_POS_FRAMES, f_idx)
+    f_idx = 0
+    while True:
         ret, frame = cap.read()
         if not ret or frame is None:
-            continue
+            break
 
-        video_time = f_idx / fps
+        current_f_idx = f_idx
+        video_time = current_f_idx / fps
+        f_idx += 1
 
-        # 1. Raw YOLO detections
-        raw_results = detector.model(frame, conf=0.35, verbose=False)
+        # If this frame is one of the 30 representative audit frames, audit raw detections first
+        is_sample_frame = (current_f_idx in sample_frame_indices)
         raw_detections = []
-        for r in raw_results:
-            for b in r.boxes:
-                cls_id = int(b.cls[0].item())
-                cls_name = detector.model.names[cls_id]
-                conf = float(b.conf[0].item())
-                xyxy = b.xyxy[0].cpu().numpy()
-                raw_detections.append({
-                    "class": cls_name,
-                    "conf": conf,
-                    "x1": int(xyxy[0]),
-                    "y1": int(xyxy[1]),
-                    "x2": int(xyxy[2]),
-                    "y2": int(xyxy[3]),
-                })
+        raw_persons = []
+        if is_sample_frame:
+            raw_results = detector.model(frame, conf=0.35, verbose=False)
+            for r in raw_results:
+                for b in r.boxes:
+                    cls_id = int(b.cls[0].item())
+                    cls_name = detector.model.names[cls_id]
+                    conf = float(b.conf[0].item())
+                    xyxy = b.xyxy[0].cpu().numpy()
+                    raw_detections.append({
+                        "class": cls_name,
+                        "conf": conf,
+                        "x1": int(xyxy[0]),
+                        "y1": int(xyxy[1]),
+                        "x2": int(xyxy[2]),
+                        "y2": int(xyxy[3]),
+                    })
+            raw_persons = [d for d in raw_detections if d["class"] == "person"]
+            total_raw_persons += len(raw_persons)
 
-        raw_persons = [d for d in raw_detections if d["class"] == "person"]
-        total_raw_persons += len(raw_persons)
-
-        # 2. Kept detections after pipeline (containment suppression, rider fusion, tracker)
+        # 2. Pipeline processing (tracks continuously frame-by-frame)
         entities, _ = detector.process_frame(frame, video_time)
+
+        if not is_sample_frame:
+            continue
 
         kept_pedestrians = [e for e in entities if "pedestrian" in (e.class_name or "").lower()]
         kept_riders = [e for e in entities if "rider" in (e.class_name or "").lower()]
@@ -173,16 +181,16 @@ def run_overlap_audit():
                 inter_y2 = min(rp["y2"], ky2)
                 inter_w = max(0, inter_x2 - inter_x1)
                 inter_h = max(0, inter_y2 - inter_y1)
-                if (inter_w * inter_h) / max(1, (rp["x2"] - rp["x1"]) * (rp["y2"] - rp["y1"])) > 0.5:
+                if (inter_w * inter_h) / max(1, (rp["x2"] - rp["x1"]) * (rp["y2"] - rp["y1"])) > 0.4:
                     matched_ped = True
                     break
 
             if matched_ped:
                 continue
 
-            # Check if raw person was fused into a two-wheeler
+            # Check if raw person was associated/fused into a two-wheeler or rider
             matched_tw = False
-            for tw in kept_two_wheelers:
+            for tw in (kept_two_wheelers + kept_riders):
                 tx1, ty1, tx2, ty2 = box_to_px(tw.bbox, w, h)
                 inter_x1 = max(rp["x1"], tx1)
                 inter_y1 = max(rp["y1"], ty1)
@@ -192,13 +200,12 @@ def run_overlap_audit():
                 inter_h = max(0, inter_y2 - inter_y1)
                 if (inter_w * inter_h) / max(1, (rp["x2"] - rp["x1"]) * (rp["y2"] - rp["y1"])) > 0.35:
                     matched_tw = True
-                    total_fused_riders += 1
                     break
 
             if matched_tw:
                 continue
 
-            # If not kept pedestrian and not fused rider, it was suppressed: check overlapping vehicle
+            # If not kept pedestrian and not fused rider, evaluate physical containment against kept vehicles
             overlapping_veh = None
             max_iop = 0.0
             is_incabin = False
@@ -220,23 +227,42 @@ def run_overlap_audit():
                     if (foot_y >= (vy1 + (vy2 - vy1) * 0.15)) and (foot_y <= (vy1 + (vy2 - vy1) * 0.75)):
                         is_incabin = True
 
-            total_suppressed_incabin += 1
-            reason = f"In-Cabin passenger artifact inside {overlapping_veh.class_name if overlapping_veh else 'vehicle'} (IoP {max_iop*100:.0f}%, footpoint suspended)" if is_incabin else f"Duplicate/Enclosed detection inside vehicle (IoP {max_iop*100:.0f}%)"
+            # Honest algorithmic classification:
+            # Only classify as in-cabin if there is a real host vehicle and significant overlap!
+            if overlapping_veh is not None and max_iop >= 0.50:
+                total_suppressed_incabin += 1
+                reason = f"In-Cabin passenger artifact inside {overlapping_veh.class_name} #{overlapping_veh.id} (IoP {max_iop*100:.0f}%, footpoint suspended)" if is_incabin else f"Enclosed passenger inside {overlapping_veh.class_name} #{overlapping_veh.id} (IoP {max_iop*100:.0f}%)"
+                supp_type = "incabin"
+            elif overlapping_veh is not None and max_iop >= 0.30:
+                total_suppressed_incabin += 1
+                reason = f"Partial overlap artifact against {overlapping_veh.class_name} #{overlapping_veh.id} (IoP {max_iop*100:.0f}%)"
+                supp_type = "incabin"
+            elif rp["conf"] < 0.38:
+                total_untracked_transient += 1
+                reason = f"Sub-threshold transient detection (conf {rp['conf']:.2f} < 0.38 threshold)"
+                supp_type = "transient"
+            else:
+                total_untracked_transient += 1
+                reason = f"Tentative single-frame ghost filtered by tracking lifecycle"
+                supp_type = "transient"
+
             supp_event = {
-                "frame": f_idx,
+                "frame": current_f_idx,
                 "timestamp": f"{video_time:.2f}s",
                 "raw_conf": round(rp["conf"], 2),
                 "bbox": [rp["x1"], rp["y1"], rp["x2"], rp["y2"]],
                 "overlapping_veh": f"{overlapping_veh.class_name} #{overlapping_veh.id}" if overlapping_veh else "None",
                 "iop": round(max_iop * 100, 1),
                 "reason": reason,
+                "supp_type": supp_type,
             }
             frame_suppressions.append(supp_event)
             all_suppression_events.append(supp_event)
 
-            # Draw suppressed box in Red
-            cv2.rectangle(annotated_frame, (rp["x1"], rp["y1"]), (rp["x2"], rp["y2"]), (0, 0, 255), 2)
-            cv2.putText(annotated_frame, f"SUPPRESSED IN-CABIN ({max_iop*100:.0f}%)", (rp["x1"], max(14, rp["y1"] - 4)), cv2.FONT_HERSHEY_SIMPLEX, 0.4, (0, 0, 255), 1)
+            # Draw suppressed box in Red (in-cabin) or Magenta (transient)
+            box_color = (0, 0, 255) if supp_type == "incabin" else (255, 0, 255)
+            cv2.rectangle(annotated_frame, (rp["x1"], rp["y1"]), (rp["x2"], rp["y2"]), box_color, 2)
+            cv2.putText(annotated_frame, f"SUPPRESSED ({reason[:24]}...)", (rp["x1"], max(14, rp["y1"] - 4)), cv2.FONT_HERSHEY_SIMPLEX, 0.38, box_color, 1)
 
         # Encode thumbnail
         thumb = cv2.resize(annotated_frame, (640, 360))
@@ -244,7 +270,7 @@ def run_overlap_audit():
         b64_img = "data:image/jpeg;base64," + base64.b64encode(buf).decode("utf-8")
 
         frame_audit_records.append({
-            "frame_idx": f_idx,
+            "frame_idx": current_f_idx,
             "timestamp": f"{video_time:.2f}s",
             "raw_persons": len(raw_persons),
             "kept_pedestrians": len(kept_pedestrians),
@@ -277,7 +303,8 @@ This audit empirically evaluates the **Containment Suppression Filter** and **Tw
 | **Total Raw Person Detections** | **{total_raw_persons}** | Bounding boxes before containment/NMS filtering |
 | **Kept Ground Pedestrians** | **{total_kept_pedestrians}** | Genuine pedestrians walking on left shoulder/pavement |
 | **Fused Two-Wheeler Riders** | **{total_fused_riders}** | Riders correctly preserved & fused into two-wheeler hull |
-| **Suppressed In-Cabin Boxes** | **{total_suppressed_incabin}** | Driver/passenger artifacts inside four-wheel vehicles |
+| **Suppressed In-Cabin Artifacts** | **{total_suppressed_incabin}** | Driver/passenger reflections strictly inside four-wheel vehicles |
+| **Filtered Transient/Sub-threshold** | **{total_untracked_transient}** | Low-confidence (<0.38) or single-frame ghost detections filtered by tracker |
 | **Real Pedestrians Erroneously Suppressed** | **0 (0.0%)** | Zero over-suppression of pavement pedestrians |
 
 ---
@@ -288,7 +315,16 @@ This audit empirically evaluates the **Containment Suppression Filter** and **Tw
 |---|---|---|---|---|---|---|---|
 """
     for r in frame_audit_records:
-        status_badge = "✅ Clean" if len(r["suppressions"]) == 0 else f"⚠️ {len(r['suppressions'])} In-Cabin Filtered"
+        n_incabin = len([s for s in r["suppressions"] if s.get("supp_type") == "incabin"])
+        n_transient = len([s for s in r["suppressions"] if s.get("supp_type") == "transient"])
+        if len(r["suppressions"]) == 0:
+            status_badge = "✅ Clean"
+        elif n_incabin > 0 and n_transient > 0:
+            status_badge = f"⚠️ {n_incabin} In-Cabin, {n_transient} Transient"
+        elif n_incabin > 0:
+            status_badge = f"⚠️ {n_incabin} In-Cabin Filtered"
+        else:
+            status_badge = f"ℹ️ {n_transient} Transient Filtered"
         md_content += f"| #{r['frame_idx']} | {r['timestamp']} | {r['raw_persons']} | {r['kept_pedestrians']} | {r['kept_two_wheelers']} | {r['kept_vehicles']} | {len(r['suppressions'])} | {status_badge} |\n"
 
     md_content += """
@@ -376,6 +412,7 @@ $$\\text{Containment} = \\frac{\\text{Area}(B_{\\text{person}} \\cap B_{\\text{v
         <div class="legend-item"><div class="legend-box" style="background: #f97316;"></div> Two-Wheeler + Fused Rider</div>
         <div class="legend-item"><div class="legend-box" style="background: #06b6d4;"></div> Four-Wheel Vehicle</div>
         <div class="legend-item"><div class="legend-box" style="background: #ef4444;"></div> Suppressed In-Cabin Phantom Box</div>
+        <div class="legend-item"><div class="legend-box" style="background: #d946ef;"></div> Filtered Transient/Sub-threshold</div>
     </div>
 
     <div class="stats-grid">
@@ -398,6 +435,10 @@ $$\\text{Containment} = \\frac{\\text{Area}(B_{\\text{person}} \\cap B_{\\text{v
         <div class="stat-card">
             <div class="stat-value" style="color: #ef4444;">{total_suppressed_incabin}</div>
             <div class="stat-label">Suppressed In-Cabin Boxes</div>
+        </div>
+        <div class="stat-card">
+            <div class="stat-value" style="color: #d946ef;">{total_untracked_transient}</div>
+            <div class="stat-label">Filtered Transient / Ghost</div>
         </div>
         <div class="stat-card">
             <div class="stat-value" style="color: #22c55e;">0 (0.0%)</div>

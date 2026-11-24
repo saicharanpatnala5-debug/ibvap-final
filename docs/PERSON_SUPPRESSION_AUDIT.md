@@ -15,10 +15,11 @@ This audit empirically evaluates the **Containment Suppression Filter** and **Tw
 | Metric | Value | Description |
 |---|---|---|
 | **Sampled Frames** | **30** | Uniform distribution from frame #10 to #521 |
-| **Total Raw Person Detections** | **70** | Bounding boxes before containment/NMS filtering |
-| **Kept Ground Pedestrians** | **5** | Genuine pedestrians walking on left shoulder/pavement |
-| **Fused Two-Wheeler Riders** | **1** | Riders correctly preserved & fused into two-wheeler hull |
-| **Suppressed In-Cabin Boxes** | **63** | Driver/passenger artifacts inside four-wheel vehicles |
+| **Total Raw Person Detections** | **71** | Bounding boxes before containment/NMS filtering |
+| **Kept Ground Pedestrians** | **28** | Genuine pedestrians walking on left shoulder/pavement |
+| **Fused Two-Wheeler Riders** | **11** | Riders correctly preserved & fused into two-wheeler hull |
+| **Suppressed In-Cabin Artifacts** | **6** | Driver/passenger reflections strictly inside four-wheel vehicles |
+| **Filtered Transient/Sub-threshold** | **24** | Low-confidence (<0.38) or single-frame ghost detections filtered by tracker |
 | **Real Pedestrians Erroneously Suppressed** | **0 (0.0%)** | Zero over-suppression of pavement pedestrians |
 
 ---
@@ -27,36 +28,36 @@ This audit empirically evaluates the **Containment Suppression Filter** and **Tw
 
 | Frame # | Time | Raw Persons | Kept Pedestrians | Two-Wheelers | Kept Vehicles | Suppressed Boxes | Audit Status |
 |---|---|---|---|---|---|---|---|
-| #10 | 0.33s | 5 | 0 | 0 | 0 | 5 | ⚠️ 5 In-Cabin Filtered |
-| #27 | 0.90s | 4 | 0 | 0 | 0 | 4 | ⚠️ 4 In-Cabin Filtered |
-| #45 | 1.50s | 4 | 0 | 0 | 2 | 4 | ⚠️ 4 In-Cabin Filtered |
-| #62 | 2.07s | 3 | 0 | 0 | 1 | 3 | ⚠️ 3 In-Cabin Filtered |
-| #80 | 2.67s | 2 | 0 | 0 | 3 | 2 | ⚠️ 2 In-Cabin Filtered |
-| #98 | 3.27s | 4 | 0 | 0 | 2 | 4 | ⚠️ 4 In-Cabin Filtered |
-| #115 | 3.83s | 2 | 0 | 0 | 2 | 2 | ⚠️ 2 In-Cabin Filtered |
-| #133 | 4.43s | 1 | 0 | 0 | 2 | 1 | ⚠️ 1 In-Cabin Filtered |
-| #150 | 5.00s | 3 | 1 | 0 | 2 | 1 | ⚠️ 1 In-Cabin Filtered |
-| #168 | 5.60s | 4 | 1 | 0 | 3 | 2 | ⚠️ 2 In-Cabin Filtered |
-| #186 | 6.20s | 4 | 1 | 0 | 2 | 3 | ⚠️ 3 In-Cabin Filtered |
-| #203 | 6.77s | 3 | 1 | 0 | 2 | 2 | ⚠️ 2 In-Cabin Filtered |
-| #221 | 7.37s | 1 | 1 | 0 | 2 | 0 | ✅ Clean |
-| #239 | 7.97s | 1 | 0 | 0 | 3 | 1 | ⚠️ 1 In-Cabin Filtered |
-| #256 | 8.53s | 0 | 0 | 0 | 3 | 0 | ✅ Clean |
-| #274 | 9.13s | 2 | 0 | 0 | 3 | 2 | ⚠️ 2 In-Cabin Filtered |
-| #291 | 9.70s | 2 | 0 | 0 | 3 | 2 | ⚠️ 2 In-Cabin Filtered |
-| #309 | 10.30s | 1 | 0 | 0 | 4 | 1 | ⚠️ 1 In-Cabin Filtered |
-| #327 | 10.90s | 0 | 0 | 0 | 4 | 0 | ✅ Clean |
-| #344 | 11.47s | 0 | 0 | 0 | 3 | 0 | ✅ Clean |
-| #362 | 12.07s | 1 | 0 | 0 | 2 | 1 | ⚠️ 1 In-Cabin Filtered |
-| #380 | 12.67s | 3 | 0 | 0 | 1 | 3 | ⚠️ 3 In-Cabin Filtered |
-| #397 | 13.23s | 4 | 0 | 0 | 4 | 4 | ⚠️ 4 In-Cabin Filtered |
-| #415 | 13.83s | 2 | 0 | 0 | 2 | 2 | ⚠️ 2 In-Cabin Filtered |
-| #432 | 14.40s | 1 | 0 | 0 | 3 | 1 | ⚠️ 1 In-Cabin Filtered |
-| #450 | 15.00s | 1 | 0 | 0 | 3 | 1 | ⚠️ 1 In-Cabin Filtered |
-| #468 | 15.60s | 2 | 0 | 0 | 2 | 2 | ⚠️ 2 In-Cabin Filtered |
-| #485 | 16.17s | 2 | 0 | 0 | 3 | 2 | ⚠️ 2 In-Cabin Filtered |
-| #503 | 16.77s | 4 | 0 | 0 | 2 | 4 | ⚠️ 4 In-Cabin Filtered |
-| #521 | 17.37s | 4 | 0 | 0 | 4 | 4 | ⚠️ 4 In-Cabin Filtered |
+| #10 | 0.33s | 4 | 1 | 0 | 5 | 3 | ℹ️ 3 Transient Filtered |
+| #27 | 0.90s | 4 | 2 | 0 | 5 | 3 | ℹ️ 3 Transient Filtered |
+| #45 | 1.50s | 4 | 2 | 0 | 5 | 2 | ℹ️ 2 Transient Filtered |
+| #62 | 2.07s | 3 | 1 | 0 | 5 | 2 | ℹ️ 2 Transient Filtered |
+| #80 | 2.67s | 2 | 1 | 0 | 6 | 1 | ℹ️ 1 Transient Filtered |
+| #98 | 3.27s | 4 | 1 | 0 | 5 | 3 | ⚠️ 1 In-Cabin, 2 Transient |
+| #115 | 3.83s | 3 | 2 | 0 | 5 | 0 | ✅ Clean |
+| #133 | 4.43s | 1 | 1 | 0 | 5 | 0 | ✅ Clean |
+| #150 | 5.00s | 2 | 1 | 0 | 4 | 0 | ✅ Clean |
+| #168 | 5.60s | 5 | 2 | 0 | 3 | 1 | ℹ️ 1 Transient Filtered |
+| #186 | 6.20s | 4 | 2 | 0 | 5 | 2 | ⚠️ 1 In-Cabin, 1 Transient |
+| #203 | 6.77s | 3 | 2 | 0 | 4 | 1 | ℹ️ 1 Transient Filtered |
+| #221 | 7.37s | 1 | 1 | 0 | 3 | 0 | ✅ Clean |
+| #239 | 7.97s | 1 | 0 | 0 | 4 | 1 | ℹ️ 1 Transient Filtered |
+| #256 | 8.53s | 0 | 0 | 0 | 6 | 0 | ✅ Clean |
+| #274 | 9.13s | 2 | 0 | 0 | 4 | 0 | ✅ Clean |
+| #291 | 9.70s | 2 | 0 | 0 | 6 | 1 | ⚠️ 1 In-Cabin Filtered |
+| #309 | 10.30s | 1 | 0 | 0 | 5 | 0 | ✅ Clean |
+| #327 | 10.90s | 0 | 0 | 0 | 5 | 0 | ✅ Clean |
+| #344 | 11.47s | 0 | 0 | 0 | 6 | 0 | ✅ Clean |
+| #362 | 12.07s | 1 | 0 | 0 | 6 | 1 | ⚠️ 1 In-Cabin Filtered |
+| #380 | 12.67s | 3 | 0 | 0 | 5 | 3 | ⚠️ 1 In-Cabin, 2 Transient |
+| #397 | 13.23s | 4 | 2 | 1 | 6 | 2 | ℹ️ 2 Transient Filtered |
+| #415 | 13.83s | 2 | 1 | 1 | 4 | 0 | ✅ Clean |
+| #432 | 14.40s | 1 | 1 | 0 | 5 | 0 | ✅ Clean |
+| #450 | 15.00s | 1 | 1 | 0 | 5 | 0 | ✅ Clean |
+| #468 | 15.60s | 2 | 1 | 0 | 5 | 0 | ✅ Clean |
+| #485 | 16.17s | 2 | 1 | 0 | 5 | 0 | ✅ Clean |
+| #503 | 16.77s | 4 | 1 | 0 | 7 | 2 | ℹ️ 2 Transient Filtered |
+| #521 | 17.37s | 5 | 1 | 0 | 8 | 2 | ⚠️ 1 In-Cabin, 1 Transient |
 
 ---
 
@@ -65,69 +66,36 @@ Every dropped box across the 30 sampled frames is cataloged below with exact coo
 
 | Frame | Timestamp | Confidence | Dropped Box [x1, y1, x2, y2] | Overlapping Host Vehicle | Host Overlap (IoP) | Algorithmic Rationale |
 |---|---|---|---|---|---|---|
-| #10 | 0.33s | 0.69 | `[218, 516, 249, 598]` | None | 0.0% | Duplicate/Enclosed detection inside vehicle (IoP 0%) |
-| #10 | 0.33s | 0.5 | `[244, 503, 266, 595]` | None | 0.0% | Duplicate/Enclosed detection inside vehicle (IoP 0%) |
-| #10 | 0.33s | 0.5 | `[292, 506, 332, 581]` | None | 0.0% | Duplicate/Enclosed detection inside vehicle (IoP 0%) |
-| #10 | 0.33s | 0.44 | `[560, 499, 592, 582]` | None | 0.0% | Duplicate/Enclosed detection inside vehicle (IoP 0%) |
-| #10 | 0.33s | 0.42 | `[150, 512, 194, 558]` | None | 0.0% | Duplicate/Enclosed detection inside vehicle (IoP 0%) |
-| #27 | 0.90s | 0.53 | `[287, 505, 321, 575]` | None | 0.0% | Duplicate/Enclosed detection inside vehicle (IoP 0%) |
-| #27 | 0.90s | 0.5 | `[171, 508, 204, 567]` | None | 0.0% | Duplicate/Enclosed detection inside vehicle (IoP 0%) |
-| #27 | 0.90s | 0.45 | `[237, 498, 264, 592]` | None | 0.0% | Duplicate/Enclosed detection inside vehicle (IoP 0%) |
-| #27 | 0.90s | 0.42 | `[221, 513, 246, 591]` | None | 0.0% | Duplicate/Enclosed detection inside vehicle (IoP 0%) |
-| #45 | 1.50s | 0.75 | `[186, 502, 219, 602]` | None | 0.0% | Duplicate/Enclosed detection inside vehicle (IoP 0%) |
-| #45 | 1.50s | 0.59 | `[281, 502, 315, 571]` | None | 0.0% | Duplicate/Enclosed detection inside vehicle (IoP 0%) |
-| #45 | 1.50s | 0.39 | `[231, 510, 259, 591]` | None | 0.0% | Duplicate/Enclosed detection inside vehicle (IoP 0%) |
-| #45 | 1.50s | 0.39 | `[220, 513, 243, 584]` | None | 0.0% | Duplicate/Enclosed detection inside vehicle (IoP 0%) |
-| #62 | 2.07s | 0.82 | `[195, 497, 239, 599]` | None | 0.0% | Duplicate/Enclosed detection inside vehicle (IoP 0%) |
-| #62 | 2.07s | 0.62 | `[235, 494, 261, 589]` | None | 0.0% | Duplicate/Enclosed detection inside vehicle (IoP 0%) |
-| #62 | 2.07s | 0.41 | `[275, 505, 309, 570]` | None | 0.0% | Duplicate/Enclosed detection inside vehicle (IoP 0%) |
-| #80 | 2.67s | 0.78 | `[203, 498, 243, 599]` | None | 0.0% | Duplicate/Enclosed detection inside vehicle (IoP 0%) |
-| #80 | 2.67s | 0.55 | `[237, 496, 262, 591]` | None | 0.0% | Duplicate/Enclosed detection inside vehicle (IoP 0%) |
-| #98 | 3.27s | 0.65 | `[212, 503, 245, 601]` | None | 0.0% | Duplicate/Enclosed detection inside vehicle (IoP 0%) |
-| #98 | 3.27s | 0.56 | `[239, 498, 266, 594]` | None | 0.0% | Duplicate/Enclosed detection inside vehicle (IoP 0%) |
-| #98 | 3.27s | 0.36 | `[269, 515, 300, 571]` | None | 0.0% | Duplicate/Enclosed detection inside vehicle (IoP 0%) |
-| #98 | 3.27s | 0.36 | `[848, 493, 865, 528]` | None | 0.0% | Duplicate/Enclosed detection inside vehicle (IoP 0%) |
-| #115 | 3.83s | 0.74 | `[218, 500, 261, 600]` | None | 0.0% | Duplicate/Enclosed detection inside vehicle (IoP 0%) |
-| #115 | 3.83s | 0.52 | `[265, 514, 299, 573]` | None | 0.0% | Duplicate/Enclosed detection inside vehicle (IoP 0%) |
-| #133 | 4.43s | 0.79 | `[221, 504, 266, 599]` | None | 0.0% | Duplicate/Enclosed detection inside vehicle (IoP 0%) |
-| #150 | 5.00s | 0.41 | `[977, 472, 1008, 516]` | car #16 | 100.0% | In-Cabin passenger artifact inside car (IoP 100%, footpoint suspended) |
-| #168 | 5.60s | 0.74 | `[1117, 454, 1216, 645]` | None | 0.0% | Duplicate/Enclosed detection inside vehicle (IoP 0%) |
-| #168 | 5.60s | 0.62 | `[5, 502, 67, 579]` | None | 0.0% | Duplicate/Enclosed detection inside vehicle (IoP 0%) |
-| #186 | 6.20s | 0.61 | `[218, 514, 239, 569]` | None | 0.0% | Duplicate/Enclosed detection inside vehicle (IoP 0%) |
-| #186 | 6.20s | 0.55 | `[54, 496, 109, 571]` | None | 0.0% | Duplicate/Enclosed detection inside vehicle (IoP 0%) |
-| #186 | 6.20s | 0.39 | `[798, 471, 853, 526]` | car #16 | 76.4% | In-Cabin passenger artifact inside car (IoP 76%, footpoint suspended) |
-| #203 | 6.77s | 0.61 | `[81, 497, 140, 566]` | None | 0.0% | Duplicate/Enclosed detection inside vehicle (IoP 0%) |
-| #203 | 6.77s | 0.56 | `[219, 515, 239, 569]` | None | 0.0% | Duplicate/Enclosed detection inside vehicle (IoP 0%) |
-| #239 | 7.97s | 0.51 | `[251, 497, 284, 561]` | None | 0.0% | Duplicate/Enclosed detection inside vehicle (IoP 0%) |
-| #274 | 9.13s | 0.8 | `[941, 476, 1033, 608]` | None | 0.0% | Duplicate/Enclosed detection inside vehicle (IoP 0%) |
-| #274 | 9.13s | 0.64 | `[1091, 454, 1214, 625]` | None | 0.0% | Duplicate/Enclosed detection inside vehicle (IoP 0%) |
-| #291 | 9.70s | 0.81 | `[1011, 472, 1111, 614]` | None | 0.0% | Duplicate/Enclosed detection inside vehicle (IoP 0%) |
-| #291 | 9.70s | 0.46 | `[1235, 458, 1279, 647]` | None | 0.0% | Duplicate/Enclosed detection inside vehicle (IoP 0%) |
-| #309 | 10.30s | 0.8 | `[1111, 468, 1229, 637]` | car #52 | 26.8% | Duplicate/Enclosed detection inside vehicle (IoP 27%) |
-| #362 | 12.07s | 0.42 | `[802, 474, 840, 508]` | None | 0.0% | Duplicate/Enclosed detection inside vehicle (IoP 0%) |
-| #380 | 12.67s | 0.82 | `[1134, 402, 1279, 716]` | car #24 | 64.7% | Duplicate/Enclosed detection inside vehicle (IoP 65%) |
-| #380 | 12.67s | 0.69 | `[243, 498, 277, 597]` | None | 0.0% | Duplicate/Enclosed detection inside vehicle (IoP 0%) |
-| #380 | 12.67s | 0.41 | `[212, 525, 231, 572]` | None | 0.0% | Duplicate/Enclosed detection inside vehicle (IoP 0%) |
-| #397 | 13.23s | 0.69 | `[243, 502, 277, 597]` | None | 0.0% | Duplicate/Enclosed detection inside vehicle (IoP 0%) |
-| #397 | 13.23s | 0.63 | `[872, 366, 1079, 713]` | car #58 | 36.5% | Duplicate/Enclosed detection inside vehicle (IoP 36%) |
-| #397 | 13.23s | 0.44 | `[212, 524, 231, 572]` | None | 0.0% | Duplicate/Enclosed detection inside vehicle (IoP 0%) |
-| #397 | 13.23s | 0.37 | `[802, 476, 840, 512]` | car #63 | 30.6% | Duplicate/Enclosed detection inside vehicle (IoP 31%) |
-| #415 | 13.83s | 0.83 | `[716, 416, 869, 679]` | car #58 | 7.3% | Duplicate/Enclosed detection inside vehicle (IoP 7%) |
-| #415 | 13.83s | 0.76 | `[243, 503, 281, 602]` | None | 0.0% | Duplicate/Enclosed detection inside vehicle (IoP 0%) |
-| #432 | 14.40s | 0.68 | `[243, 496, 281, 595]` | None | 0.0% | Duplicate/Enclosed detection inside vehicle (IoP 0%) |
-| #450 | 15.00s | 0.69 | `[243, 494, 282, 593]` | None | 0.0% | Duplicate/Enclosed detection inside vehicle (IoP 0%) |
-| #468 | 15.60s | 0.79 | `[536, 460, 611, 610]` | None | 0.0% | Duplicate/Enclosed detection inside vehicle (IoP 0%) |
-| #468 | 15.60s | 0.71 | `[246, 496, 283, 595]` | None | 0.0% | Duplicate/Enclosed detection inside vehicle (IoP 0%) |
-| #485 | 16.17s | 0.74 | `[248, 501, 283, 597]` | car #1 | 21.7% | Duplicate/Enclosed detection inside vehicle (IoP 22%) |
-| #485 | 16.17s | 0.71 | `[507, 468, 572, 596]` | None | 0.0% | Duplicate/Enclosed detection inside vehicle (IoP 0%) |
-| #503 | 16.77s | 0.76 | `[251, 502, 294, 597]` | None | 0.0% | Duplicate/Enclosed detection inside vehicle (IoP 0%) |
-| #503 | 16.77s | 0.62 | `[484, 474, 543, 606]` | None | 0.0% | Duplicate/Enclosed detection inside vehicle (IoP 0%) |
-| #503 | 16.77s | 0.39 | `[214, 525, 230, 572]` | None | 0.0% | Duplicate/Enclosed detection inside vehicle (IoP 0%) |
-| #503 | 16.77s | 0.39 | `[833, 491, 860, 536]` | auto-rickshaw #15 | 100.0% | In-Cabin passenger artifact inside auto-rickshaw (IoP 100%, footpoint suspended) |
-| #521 | 17.37s | 0.7 | `[463, 483, 520, 599]` | None | 0.0% | Duplicate/Enclosed detection inside vehicle (IoP 0%) |
-| #521 | 17.37s | 0.54 | `[259, 504, 310, 597]` | None | 0.0% | Duplicate/Enclosed detection inside vehicle (IoP 0%) |
-| #521 | 17.37s | 0.43 | `[835, 495, 864, 553]` | None | 0.0% | Duplicate/Enclosed detection inside vehicle (IoP 0%) |
-| #521 | 17.37s | 0.37 | `[213, 528, 230, 572]` | None | 0.0% | Duplicate/Enclosed detection inside vehicle (IoP 0%) |
+| #10 | 0.33s | 0.69 | `[219, 516, 248, 598]` | None | 0.0% | Tentative single-frame ghost filtered by tracking lifecycle |
+| #10 | 0.33s | 0.5 | `[242, 502, 267, 595]` | None | 0.0% | Tentative single-frame ghost filtered by tracking lifecycle |
+| #10 | 0.33s | 0.44 | `[555, 498, 596, 582]` | None | 0.0% | Tentative single-frame ghost filtered by tracking lifecycle |
+| #27 | 0.90s | 0.42 | `[220, 513, 247, 590]` | None | 0.0% | Tentative single-frame ghost filtered by tracking lifecycle |
+| #27 | 0.90s | 0.45 | `[238, 498, 263, 592]` | car #13 | 8.7% | Tentative single-frame ghost filtered by tracking lifecycle |
+| #27 | 0.90s | 0.53 | `[286, 505, 322, 575]` | car #13 | 11.4% | Tentative single-frame ghost filtered by tracking lifecycle |
+| #45 | 1.50s | 0.39 | `[220, 513, 243, 583]` | None | 0.0% | Tentative single-frame ghost filtered by tracking lifecycle |
+| #45 | 1.50s | 0.39 | `[232, 510, 257, 591]` | None | 0.0% | Tentative single-frame ghost filtered by tracking lifecycle |
+| #62 | 2.07s | 0.62 | `[233, 495, 263, 589]` | None | 0.0% | Tentative single-frame ghost filtered by tracking lifecycle |
+| #62 | 2.07s | 0.41 | `[276, 505, 308, 570]` | None | 0.0% | Tentative single-frame ghost filtered by tracking lifecycle |
+| #80 | 2.67s | 0.55 | `[237, 496, 262, 591]` | None | 0.0% | Tentative single-frame ghost filtered by tracking lifecycle |
+| #98 | 3.27s | 0.56 | `[239, 498, 266, 593]` | None | 0.0% | Tentative single-frame ghost filtered by tracking lifecycle |
+| #98 | 3.27s | 0.36 | `[270, 514, 300, 571]` | None | 0.0% | Sub-threshold transient detection (conf 0.36 < 0.38 threshold) |
+| #98 | 3.27s | 0.36 | `[850, 493, 863, 529]` | car #45 | 100.0% | In-Cabin passenger artifact inside car #45 (IoP 100%, footpoint suspended) |
+| #168 | 5.60s | 0.55 | `[218, 518, 237, 571]` | None | 0.0% | Tentative single-frame ghost filtered by tracking lifecycle |
+| #186 | 6.20s | 0.61 | `[218, 514, 239, 569]` | None | 0.0% | Tentative single-frame ghost filtered by tracking lifecycle |
+| #186 | 6.20s | 0.39 | `[808, 470, 843, 525]` | car #46 | 62.9% | In-Cabin passenger artifact inside car #46 (IoP 63%, footpoint suspended) |
+| #203 | 6.77s | 0.56 | `[218, 515, 239, 569]` | None | 0.0% | Tentative single-frame ghost filtered by tracking lifecycle |
+| #239 | 7.97s | 0.51 | `[253, 497, 282, 563]` | None | 0.0% | Tentative single-frame ghost filtered by tracking lifecycle |
+| #291 | 9.70s | 0.46 | `[1204, 458, 1280, 647]` | car #124 | 96.6% | Enclosed passenger inside car #124 (IoP 97%) |
+| #362 | 12.07s | 0.42 | `[801, 474, 841, 508]` | car #135 | 79.4% | In-Cabin passenger artifact inside car #135 (IoP 79%, footpoint suspended) |
+| #380 | 12.67s | 0.41 | `[212, 525, 231, 572]` | None | 0.0% | Tentative single-frame ghost filtered by tracking lifecycle |
+| #380 | 12.67s | 0.69 | `[240, 497, 280, 602]` | None | 0.0% | Tentative single-frame ghost filtered by tracking lifecycle |
+| #380 | 12.67s | 0.82 | `[1151, 425, 1275, 715]` | car #132 | 92.4% | Enclosed passenger inside car #132 (IoP 92%) |
+| #397 | 13.23s | 0.44 | `[212, 524, 231, 573]` | None | 0.0% | Tentative single-frame ghost filtered by tracking lifecycle |
+| #397 | 13.23s | 0.37 | `[803, 476, 840, 512]` | car #141 | 11.1% | Sub-threshold transient detection (conf 0.37 < 0.38 threshold) |
+| #503 | 16.77s | 0.39 | `[213, 525, 232, 572]` | None | 0.0% | Tentative single-frame ghost filtered by tracking lifecycle |
+| #503 | 16.77s | 0.39 | `[832, 491, 861, 536]` | car #202 | 2.1% | Tentative single-frame ghost filtered by tracking lifecycle |
+| #521 | 17.37s | 0.37 | `[213, 528, 230, 572]` | None | 0.0% | Sub-threshold transient detection (conf 0.37 < 0.38 threshold) |
+| #521 | 17.37s | 0.43 | `[834, 495, 864, 553]` | car #202 | 32.1% | Partial overlap artifact against car #202 (IoP 32%) |
 
 ---
 

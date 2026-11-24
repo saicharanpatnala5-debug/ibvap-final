@@ -45,7 +45,7 @@ curl -X POST http://localhost:3000/api/demo/reset -H "Content-Type: application/
   - Point to the top HUD **Metrics Panel** (`data-testid="metrics-panel"`):
     - **Camera Health**: `ONLINE (HEALTHY)`
     - **Display Rate**: `30.0 FPS` (Smoothed presentation) | **Inference Rate**: `2 – 16 FPS` (Real-time CPU YOLO26)
-    - **Detection-to-Alert Latency**: `42 – 180 ms` (PRD Section 20 Target: $\le 2000$ ms)
+    - **Detection-to-Alert Latency**: `1.1 – 1.5s` end-to-end (includes 3-frame debounce confirmation window; PRD Section 20 Target: $\le 2000$ ms)
     - **Database Status**: `PostgreSQL 16 (UP)` via Docker (Port 5432)
     - **Active Feeds & Zones**: Clean zero state.
 
