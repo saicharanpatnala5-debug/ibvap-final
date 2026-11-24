@@ -190,4 +190,32 @@ curl -X POST http://localhost:3000/api/demo/reset -H "Content-Type: application/
 | **Gateway service unreachable** | Production supervisor automatically restarts it | Run `npm start` from root |
 | **Database disconnected** | System automatically falls back to local persistent H2 DB | Zero downtime; data continues persisting to `./data/ibvap.mv.db` |
 | **No Internet / Gemini Offline** | AI Copilot operates in 100% offline deterministic mode | No action needed; heuristic engine answers from PostgreSQL |
-| **Jury asks for clean re-test** | Trigger audited reset API | Click **Reset Platform** in Navbar -> confirm prompt |
+---
+
+## 4. Restart-Persistence Proof Protocol (PRD Sections 13–14)
+
+When the jury asks: *"Can you prove this data is actually persisted in PostgreSQL and not just residing in browser RAM or ephemeral state?"*:
+
+1. **Step 1: Execute actions in the live UI**:
+   - Create a virtual zone (`Restricted Zone Alpha`).
+   - Observe an intrusion alert.
+   - Click **Acknowledge** or **Escalate** on the alert card.
+2. **Step 2: Cold shutdown of all running services**:
+   ```bash
+   # Terminate all services simultaneously:
+   npm run stop
+   # Or kill processes in terminal
+   ```
+3. **Step 3: Restart the full stack**:
+   ```bash
+   npm run demo
+   ```
+4. **Step 4: Verify data durability**:
+   - Refresh `http://localhost:3000`.
+   - Point out that:
+     - The configured camera feeds are still present.
+     - The polygonal zone vertices are intact.
+     - The acknowledged alert state is preserved (`ACKNOWLEDGED`).
+     - Open **Search / Audit Log**: The append-only audit trail contains the exact operator timestamp, role, and action.
+   - Point to the top HUD badge: `"PostgreSQL: CONNECTED"` (Proves data persisted to disk in PostgreSQL 16 container, not in browser memory).
+

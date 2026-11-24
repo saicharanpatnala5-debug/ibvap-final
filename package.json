@@ -8,6 +8,7 @@
   ],
   "scripts": {
     "setup": "node tools/setup.js",
+    "demo": "node tools/demo-runner.js",
     "dev": "npm --workspace=gateway run dev",
     "dev:all": "node tools/dev-all.js",
     "stop": "node tools/stop-all.js",

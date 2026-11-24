@@ -218,9 +218,10 @@ class SurveillanceDetector:
                         should_keep = False
                         break
 
-                # Footpoint-aware containment suppression:
-                # A pedestrian walking on the pavement in front of or behind a car is PRESERVED.
-                # Only true in-cabin reflections/driver artifacts suspended above the bumper are filtered.
+                # Footpoint and center-aware containment suppression:
+                # - Center outside vehicle: NEVER suppress.
+                # - Footpoint touching pavement (stepping out/walking beside): NEVER suppress.
+                # - Only true in-cabin reflections/driver artifacts strictly suspended above bumper are filtered.
                 if cand_area > 0 and inter > 0:
                     containment = inter / cand_area
                     is_pedestrian = cand_cls == "person"
@@ -229,21 +230,30 @@ class SurveillanceDetector:
                     if is_pedestrian and is_four_wheel:
                         cand_b = cand["bbox"]
                         kept_b = kept["bbox"]
+
+                        # Rule 1: Never suppress a person whose box centre is outside the vehicle box
+                        cand_cx = cand_b.x + cand_b.width * 0.5
+                        cand_cy = cand_b.y + cand_b.height * 0.5
+                        center_inside_veh = (cand_cx >= kept_b.x) and (cand_cx <= kept_b.x + kept_b.width) and \
+                                            (cand_cy >= kept_b.y) and (cand_cy <= kept_b.y + kept_b.height)
+                        if not center_inside_veh:
+                            continue
+
                         foot_x = cand_b.x + cand_b.width * 0.5
                         foot_y = cand_b.y + cand_b.height
                         kept_bottom_y = kept_b.y + kept_b.height
 
-                        # If pedestrian's feet touch pavement, do not suppress
+                        # Rule 2: If pedestrian's feet touch pavement, or they are beside/leaving vehicle, do not suppress
                         foot_on_pavement = (foot_y >= (kept_bottom_y - kept_b.height * 0.15)) or (foot_x < kept_b.x) or (foot_x > kept_b.x + kept_b.width)
                         if foot_on_pavement:
                             continue
 
                         # In-cabin check: footpoint suspended inside cabin zone (15% to 75% of vehicle height)
                         in_cabin_zone = (foot_y >= (kept_b.y + kept_b.height * 0.15)) and (foot_y <= (kept_b.y + kept_b.height * 0.75))
-                        if in_cabin_zone and containment >= 0.60:
+                        if in_cabin_zone and containment >= 0.80:
                             should_keep = False
                             break
-                    elif containment >= 0.70:
+                    elif containment >= 0.85:
                         should_keep = False
                         break
 
@@ -309,6 +319,12 @@ class SurveillanceDetector:
 
             if matched_person is not None:
                 fused_person_ids.add(matched_person["id"])
+                # Associate rider explicitly as 'rider'
+                rider_entity = dict(matched_person)
+                rider_entity["class"] = "rider"
+                rider_entity["associatedVehicleId"] = bike["id"]
+                mapped_two_wheelers.append(rider_entity)
+
                 pb = matched_person["bbox"]
                 ux1 = min(bb.x, pb.x)
                 uy1 = min(bb.y, pb.y)

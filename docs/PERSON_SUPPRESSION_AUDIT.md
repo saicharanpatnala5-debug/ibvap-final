@@ -17,7 +17,7 @@ This audit empirically evaluates the **Containment Suppression Filter** and **Tw
 | **Sampled Frames** | **30** | Uniform distribution from frame #10 to #521 |
 | **Total Raw Person Detections** | **70** | Bounding boxes before containment/NMS filtering |
 | **Kept Ground Pedestrians** | **5** | Genuine pedestrians walking on left shoulder/pavement |
-| **Fused Two-Wheeler Riders** | **0** | Riders correctly preserved & fused into two-wheeler hull |
+| **Fused Two-Wheeler Riders** | **1** | Riders correctly preserved & fused into two-wheeler hull |
 | **Suppressed In-Cabin Boxes** | **63** | Driver/passenger artifacts inside four-wheel vehicles |
 | **Real Pedestrians Erroneously Suppressed** | **0 (0.0%)** | Zero over-suppression of pavement pedestrians |
 
@@ -36,16 +36,16 @@ This audit empirically evaluates the **Containment Suppression Filter** and **Tw
 | #115 | 3.83s | 2 | 0 | 0 | 2 | 2 | ⚠️ 2 In-Cabin Filtered |
 | #133 | 4.43s | 1 | 0 | 0 | 2 | 1 | ⚠️ 1 In-Cabin Filtered |
 | #150 | 5.00s | 3 | 1 | 0 | 2 | 1 | ⚠️ 1 In-Cabin Filtered |
-| #168 | 5.60s | 4 | 1 | 0 | 2 | 2 | ⚠️ 2 In-Cabin Filtered |
+| #168 | 5.60s | 4 | 1 | 0 | 3 | 2 | ⚠️ 2 In-Cabin Filtered |
 | #186 | 6.20s | 4 | 1 | 0 | 2 | 3 | ⚠️ 3 In-Cabin Filtered |
 | #203 | 6.77s | 3 | 1 | 0 | 2 | 2 | ⚠️ 2 In-Cabin Filtered |
 | #221 | 7.37s | 1 | 1 | 0 | 2 | 0 | ✅ Clean |
 | #239 | 7.97s | 1 | 0 | 0 | 3 | 1 | ⚠️ 1 In-Cabin Filtered |
 | #256 | 8.53s | 0 | 0 | 0 | 3 | 0 | ✅ Clean |
 | #274 | 9.13s | 2 | 0 | 0 | 3 | 2 | ⚠️ 2 In-Cabin Filtered |
-| #291 | 9.70s | 2 | 0 | 0 | 2 | 2 | ⚠️ 2 In-Cabin Filtered |
+| #291 | 9.70s | 2 | 0 | 0 | 3 | 2 | ⚠️ 2 In-Cabin Filtered |
 | #309 | 10.30s | 1 | 0 | 0 | 4 | 1 | ⚠️ 1 In-Cabin Filtered |
-| #327 | 10.90s | 0 | 0 | 0 | 3 | 0 | ✅ Clean |
+| #327 | 10.90s | 0 | 0 | 0 | 4 | 0 | ✅ Clean |
 | #344 | 11.47s | 0 | 0 | 0 | 3 | 0 | ✅ Clean |
 | #362 | 12.07s | 1 | 0 | 0 | 2 | 1 | ⚠️ 1 In-Cabin Filtered |
 | #380 | 12.67s | 3 | 0 | 0 | 1 | 3 | ⚠️ 3 In-Cabin Filtered |

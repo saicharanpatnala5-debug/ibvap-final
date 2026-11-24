@@ -129,11 +129,13 @@ def run_overlap_audit():
         # 2. Kept detections after pipeline (containment suppression, rider fusion, tracker)
         entities, _ = detector.process_frame(frame, video_time)
 
-        kept_pedestrians = [e for e in entities if "pedestrian" in (e.class_name or "").lower() or "person" in (e.class_name or "").lower()]
+        kept_pedestrians = [e for e in entities if "pedestrian" in (e.class_name or "").lower()]
+        kept_riders = [e for e in entities if "rider" in (e.class_name or "").lower()]
         kept_two_wheelers = [e for e in entities if "two-wheeler" in (e.class_name or "").lower() or "motorcycle" in (e.class_name or "").lower()]
         kept_vehicles = [e for e in entities if any(k in (e.class_name or "").lower() for k in ["car", "truck", "bus", "auto-rickshaw", "vehicle"])]
 
         total_kept_pedestrians += len(kept_pedestrians)
+        total_fused_riders += len(kept_riders)
         total_vehicles += len(kept_vehicles) + len(kept_two_wheelers)
 
         # Check raw persons against kept entities

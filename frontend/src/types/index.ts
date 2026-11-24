@@ -1,6 +1,7 @@
 export type ObjectClass =
   | 'person'
   | 'pedestrian'
+  | 'rider'
   | 'car'
   | 'truck'
   | 'bus'

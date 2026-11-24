@@ -81,14 +81,21 @@ public class AuthController {
                             ? System.getenv("ADMIN_PASSWORD").trim() : "admin123";
                     String operatorPass = System.getenv("OPERATOR_PASSWORD") != null && !System.getenv("OPERATOR_PASSWORD").isBlank()
                             ? System.getenv("OPERATOR_PASSWORD").trim() : "operator123";
-                    
-                    String adminSalt = UUID.randomUUID().toString().substring(0, 8);
-                    String operatorSalt = UUID.randomUUID().toString().substring(0, 8);
 
-                    User admin = new User("usr-admin", "admin", hashPassword(adminPass, adminSalt), "ADMIN", "System Administrator");
-                    User operator = new User("usr-operator", "operator", hashPassword(operatorPass, operatorSalt), "OPERATOR", "Security Operator");
+                    User admin = new User("usr-admin", "admin", hashPassword(adminPass), "ADMIN", "System Administrator");
+                    User operator = new User("usr-operator", "operator", hashPassword(operatorPass), "OPERATOR", "Security Operator");
                     userRepository.save(admin);
                     userRepository.save(operator);
+                    auditService.log("system", "INITIALIZE_USERS", "AUTH", "admin,operator", Map.of("hashing", "BCrypt-10"));
+                } else {
+                    // Check for legacy unhashed or non-BCrypt users in existing DB and upgrade them if known
+                    for (User existingUser : userRepository.findAll()) {
+                        String hash = existingUser.getPasswordHash();
+                        if (hash != null && !hash.startsWith("$2a$") && !hash.startsWith("$2b$") && !hash.startsWith("$2y$")) {
+                            auditService.log("system", "LEGACY_PASSWORD_DETECTED", "AUTH", existingUser.getUsername(),
+                                    Map.of("action", "scheduled_migration_on_next_login"));
+                        }
+                    }
                 }
             } catch (Exception ignored) {}
         }
@@ -114,6 +121,15 @@ public class AuthController {
                         auditService.log(username, "LOGIN_FAILED", "AUTH", username, Map.of("reason", "invalid_password"));
                         return ResponseEntity.status(HttpStatus.UNAUTHORIZED).body(Map.of("error", "Invalid credentials"));
                     }
+
+                    // Automatic migration: If stored hash was legacy sha256 or plain, migrate to BCrypt immediately
+                    String stored = user.getPasswordHash();
+                    if (stored != null && !stored.startsWith("$2a$") && !stored.startsWith("$2b$") && !stored.startsWith("$2y$")) {
+                        user.setPasswordHash(hashPassword(password));
+                        userRepository.save(user);
+                        auditService.log(username, "MIGRATE_PASSWORD_BCRYPT", "AUTH", user.getId(), Map.of("engine", "BCrypt-10"));
+                    }
+
                     role = user.getRole();
                     fullName = user.getFullName();
                     userId = user.getId();
