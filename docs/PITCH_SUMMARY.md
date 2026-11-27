@@ -1,7 +1,7 @@
 # IBVAP: 1-Page Tactical Pitch Summary (SIH 2026 Submission)
 
 **Platform**: Intelligent Border Video Analytics Platform (IBVAP)  
-**Submission Release**: `v1.2-final`  
+**Submission Release**: `v1.3-demo`  
 **Team**: Border Surveillance & Tactical Vision System
 
 ---
